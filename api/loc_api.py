@@ -20,7 +20,12 @@ def search_loc(title, creator=None, max_results=3) -> List[SearchResult]:
     }
     search_url = urllib.parse.urljoin(LOC_API_BASE_URL, "search/")
     logger.info("Searching Library of Congress for: %s", title)
-    data = make_request(search_url, params=params)
+    headers = {"Accept": "application/json"}
+    data = make_request(search_url, params=params, headers=headers)
+    if not data or not (data.get("results") or (data.get("content") and data["content"].get("results"))):
+        # Fallback to Books collection endpoint
+        books_url = urllib.parse.urljoin(LOC_API_BASE_URL, "books/")
+        data = make_request(books_url, params=params, headers=headers)
     results: List[SearchResult] = []
     if data and data.get("results"):
         for item in data["results"]:
@@ -67,7 +72,8 @@ def download_loc_work(item_data: Union[SearchResult, dict], output_folder):
         return False
     item_json_url = f"{item_url}?fo=json" if not item_url.endswith("?fo=json") else item_url
     logger.info("Fetching LOC item JSON: %s", item_json_url)
-    item_full_json = make_request(item_json_url)
+    headers = {"Accept": "application/json"}
+    item_full_json = make_request(item_json_url, headers=headers)
     if item_full_json:
         save_json(item_full_json, output_folder, f"loc_{item_id}_item_details")
         iiif_manifest_url = iiif_manifest_hint

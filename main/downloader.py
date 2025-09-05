@@ -17,19 +17,10 @@ from api import google_books_api
 from api import hathitrust_api
 from api.model import SearchResult
 
+# Temporarily limit enabled APIs to Internet Archive for testing actual downloads.
+# Re-enable others once endpoints/API keys are configured and connection issues resolved.
 ENABLED_APIS = [
-    (bnf_gallica_api.search_gallica, bnf_gallica_api.download_gallica_work, "BnF Gallica"),
     (internet_archive_api.search_internet_archive, internet_archive_api.download_ia_work, "Internet Archive"),
-    (loc_api.search_loc, loc_api.download_loc_work, "Library of Congress"),
-    (europeana_api.search_europeana, europeana_api.download_europeana_work, "Europeana"),
-    (dpla_api.search_dpla, dpla_api.download_dpla_work, "DPLA"),
-    (ddb_api.search_ddb, ddb_api.download_ddb_work, "DDB"),
-    (british_library_api.search_british_library, british_library_api.download_british_library_work, "British Library"),
-    (mdz_api.search_mdz, mdz_api.download_mdz_work, "MDZ"),
-    (polona_api.search_polona, polona_api.download_polona_work, "Polona"),
-    (bne_api.search_bne, bne_api.download_bne_work, "BNE"),
-    (google_books_api.search_google_books, google_books_api.download_google_books_work, "Google Books"),
-    (hathitrust_api.search_hathitrust, hathitrust_api.download_hathitrust_work, "HathiTrust"),
 ]
 
 

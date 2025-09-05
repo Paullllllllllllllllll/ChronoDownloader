@@ -10,11 +10,14 @@ from .model import SearchResult, convert_to_searchresult
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://www.googleapis.com/books/v1/volumes"
-API_KEY = os.getenv("GOOGLE_BOOKS_API_KEY")
+
+def _api_key() -> str | None:
+    return os.getenv("GOOGLE_BOOKS_API_KEY")
 
 
 def search_google_books(title, creator=None, max_results=3) -> List[SearchResult]:
-    if not API_KEY:
+    key = _api_key()
+    if not key:
         logger.warning("Google Books API key not configured. Skipping search.")
         return []
     query = title
@@ -23,7 +26,7 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
     params = {
         "q": query,
         "maxResults": str(max_results),
-        "key": API_KEY,
+        "key": key,
     }
     logger.info("Searching Google Books for: %s", title)
     data = make_request(API_BASE_URL, params=params)
@@ -51,7 +54,8 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
         logger.warning("No Google Books volume id provided.")
         return False
 
-    params = {"key": API_KEY} if API_KEY else None
+    key = _api_key()
+    params = {"key": key} if key else None
     volume_data = make_request(f"{API_BASE_URL}/{volume_id}", params=params)
 
     if volume_data:

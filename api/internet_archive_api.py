@@ -61,9 +61,21 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder):
         if metadata.get("misc") and metadata["misc"].get("ia_iiif_url"):
             iiif_manifest_url = metadata["misc"]["ia_iiif_url"]
         if not iiif_manifest_url:
-            iiif_manifest_url = f"https://iiif.archivelab.org/iiif/{identifier}/manifest.json"
-        logger.info("Attempting to fetch IA IIIF manifest: %s", iiif_manifest_url)
-        iiif_manifest_data = make_request(iiif_manifest_url)
+            # Try common IIIF endpoints in order
+            candidates = [
+                f"https://iiif.archivelab.org/iiif/{identifier}/manifest.json",
+                f"https://iiif.archive.org/iiif/{identifier}/manifest.json",
+                f"http://iiif.archivelab.org/iiif/{identifier}/manifest.json",
+            ]
+        else:
+            candidates = [iiif_manifest_url]
+        iiif_manifest_data = None
+        for url in candidates:
+            logger.info("Attempting to fetch IA IIIF manifest: %s", url)
+            iiif_manifest_data = make_request(url)
+            if iiif_manifest_data:
+                iiif_manifest_url = url
+                break
         if iiif_manifest_data:
             save_json(iiif_manifest_data, output_folder, f"ia_{identifier}_iiif_manifest")
         # Cover image present in metadata.misc.image

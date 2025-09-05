@@ -11,13 +11,16 @@ logger = logging.getLogger(__name__)
 
 
 API_BASE_URL = "https://api.deutsche-digitale-bibliothek.de/"
-API_KEY = os.getenv("DDB_API_KEY")
+
+def _api_key() -> str | None:
+    return os.getenv("DDB_API_KEY")
 
 
 def search_ddb(title, creator=None, max_results=3) -> List[SearchResult]:
     """Search the DDB API for a title and optional creator."""
 
-    if not API_KEY:
+    key = _api_key()
+    if not key:
         logger.warning("DDB API key not configured. Skipping DDB search.")
         return []
 
@@ -27,7 +30,7 @@ def search_ddb(title, creator=None, max_results=3) -> List[SearchResult]:
     query = " ".join(query_parts)
 
     params = {
-        "oauth_consumer_key": API_KEY,
+        "oauth_consumer_key": key,
         "query": query,
         "rows": max_results,
     }
@@ -60,7 +63,8 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder):
         logger.warning("No DDB item id found in item data.")
         return False
 
-    params = {"oauth_consumer_key": API_KEY} if API_KEY else None
+    key = _api_key()
+    params = {"oauth_consumer_key": key} if key else None
     item_meta = make_request(f"{API_BASE_URL}items/{item_id}", params=params)
 
     if item_meta:

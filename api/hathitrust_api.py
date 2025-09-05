@@ -14,17 +14,25 @@ logger = logging.getLogger(__name__)
 
 BIB_API_URL = "https://catalog.hathitrust.org/api/volumes/brief/json/"
 DATA_API_URL = "https://babel.hathitrust.org/cgi/htd/volume/pages"
-API_KEY = os.getenv("HATHI_API_KEY")
+
+def _api_key() -> str | None:
+    return os.getenv("HATHI_API_KEY")
 
 
 def search_hathitrust(title, creator=None, max_results=3) -> List[SearchResult]:
-    """Perform a simple title search using the catalog website and parse results."""
+    """Attempt a simple title search by parsing the public catalog website.
+
+    Note: HathiTrust does not provide a public keyword search API; only ID-based APIs
+    are officially supported. This function may be blocked by anti-bot measures and
+    will return an empty list if access is denied.
+    """
 
     query = title.replace(" ", "+")
     url = f"https://catalog.hathitrust.org/Search/Home?lookfor={query}&searchtype=title&ft=ft"
 
     logger.info("Searching HathiTrust for: %s", title)
-    html = make_request(url)
+    headers = {"Accept": "text/html"}
+    html = make_request(url, headers=headers)
 
     results: List[SearchResult] = []
     if isinstance(html, str):
@@ -59,13 +67,14 @@ def download_hathitrust_work(item_data: Union[SearchResult, dict], output_folder
         save_json(metadata, output_folder, f"hathi_{record_id}_metadata")
 
     # If the user configured an API key, attempt to fetch the first page image
-    if API_KEY:
+    key = _api_key()
+    if key:
         params = {
             "id": record_id,
             "seq": 1,
             "v": "1",
             "format": "json",
-            "apikey": API_KEY,
+            "apikey": key,
         }
         page_data = make_request(DATA_API_URL, params=params)
         if page_data and page_data.get("url"):

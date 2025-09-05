@@ -3,7 +3,7 @@ import re
 import json
 import logging
 import requests
-import cgi
+from urllib.parse import unquote
 from pathlib import Path
 from typing import Optional, Union
 from requests.adapters import HTTPAdapter
@@ -29,7 +29,12 @@ def _build_session() -> requests.Session:
     # Default headers
     session.headers.update(
         {
-            "User-Agent": "ChronoDownloader/1.0 (+https://example.org)",
+            # Use a modern browser-like UA to avoid occasional 403s from some providers
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
             "Accept": "*/*",
         }
     )
@@ -79,16 +84,22 @@ def _filename_from_content_disposition(cd: Optional[str]) -> Optional[str]:
     if not cd:
         return None
     try:
-        disposition, params = cgi.parse_header(cd)
-        # RFC 5987 encoded filename*
+        # Parse simple Content-Disposition header parameters without cgi module (removed in Py3.13)
+        # Example: attachment; filename="example.pdf"; filename*=UTF-8''example.pdf
+        parts = [p.strip() for p in cd.split(";")]
+        params: dict[str, str] = {}
+        for p in parts[1:]:
+            if "=" in p:
+                k, v = p.split("=", 1)
+                k = k.strip().lower()
+                v = v.strip().strip('"')
+                params[k] = v
         fn = params.get("filename*") or params.get("filename")
         if fn:
-            # filename* may be like: UTF-8''example.pdf
+            # filename* may be like: UTF-8''example.pdf (RFC 5987)
             if "''" in fn:
                 try:
                     charset, _, enc = fn.partition("''")
-                    from urllib.parse import unquote
-
                     return unquote(enc)
                 except Exception:
                     return fn

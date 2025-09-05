@@ -11,19 +11,22 @@ logger = logging.getLogger(__name__)
 
 
 API_BASE_URL = "https://api.dp.la/v2/"
-API_KEY = os.getenv("DPLA_API_KEY")
+
+def _api_key() -> str | None:
+    return os.getenv("DPLA_API_KEY")
 
 
 def search_dpla(title, creator=None, max_results=3) -> List[SearchResult]:
     """Search the DPLA API for a title and optional creator."""
 
-    if not API_KEY:
+    key = _api_key()
+    if not key:
         logger.warning("DPLA API key not configured. Skipping search.")
         return []
 
     params = {
         "q": title,
-        "api_key": API_KEY,
+        "api_key": key,
         "page_size": max_results,
     }
     if creator:
@@ -57,7 +60,8 @@ def download_dpla_work(item_data: Union[SearchResult, dict], output_folder):
         logger.warning("No DPLA item id found in item data.")
         return False
 
-    params = {"api_key": API_KEY} if API_KEY else None
+    key = _api_key()
+    params = {"api_key": key} if key else None
     item_details = make_request(f"{API_BASE_URL}items/{item_id}", params=params)
     if item_details:
         save_json(item_details, output_folder, f"dpla_{item_id}_metadata")

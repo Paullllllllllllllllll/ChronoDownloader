@@ -9,7 +9,9 @@ from .model import SearchResult, convert_to_searchresult
 logger = logging.getLogger(__name__)
 
 
-SEARCH_API_URL = "https://api.digitale-sammlungen.de/solr/mdzsearch/select"
+# MDZ switched Solr endpoints; try the current generic select first, then fallback to the old core path
+SEARCH_PRIMARY_URL = "https://api.digitale-sammlungen.de/solr/select"
+SEARCH_FALLBACK_URL = "https://api.digitale-sammlungen.de/solr/mdzsearch/select"
 IIIF_MANIFEST_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v2/{object_id}/manifest"
 
 
@@ -27,15 +29,19 @@ def search_mdz(title, creator=None, max_results=3) -> List[SearchResult]:
     }
 
     logger.info("Searching MDZ for: %s", title)
-    data = make_request(SEARCH_API_URL, params=params)
+    data = make_request(SEARCH_PRIMARY_URL, params=params)
+    if not data or not data.get("response"):
+        # Try legacy core URL
+        data = make_request(SEARCH_FALLBACK_URL, params=params)
 
     results: List[SearchResult] = []
     if data and data.get("response") and data["response"].get("docs"):
         for doc in data["response"]["docs"]:
             raw = {
-                "title": doc.get("title", "N/A"),
-                "creator": ", ".join(doc.get("creator", [])),
-                "id": doc.get("id"),
+                "title": doc.get("title") or doc.get("title_t", "N/A"),
+                "creator": ", ".join(doc.get("creator", [])) if isinstance(doc.get("creator"), list) else (doc.get("creator") or "N/A"),
+                # MDZ docs may use different fields for identifiers
+                "id": doc.get("id") or doc.get("pi") or doc.get("recordId"),
             }
             results.append(convert_to_searchresult("MDZ", raw))
 

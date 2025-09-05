@@ -8,10 +8,14 @@ from .model import SearchResult, convert_to_searchresult
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://api.europeana.eu/record/v2/search.json"
-API_KEY = os.getenv("EUROPEANA_API_KEY")
+
+def _api_key() -> str | None:
+    # Read at call time so keys loaded from .env or environment later are picked up
+    return os.getenv("EUROPEANA_API_KEY")
 
 def search_europeana(title, creator=None, max_results=3) -> List[SearchResult]:
-    if not API_KEY:
+    key = _api_key()
+    if not key:
         logger.warning("Europeana API key not configured. Skipping search.")
         return []
     query_parts = [f'title:"{title}"']
@@ -20,7 +24,7 @@ def search_europeana(title, creator=None, max_results=3) -> List[SearchResult]:
     query_parts.append('AND proxy_dc_type:"TEXT"')
     query = " ".join(query_parts)
     params = {
-        "wskey": API_KEY,
+        "wskey": key,
         "query": query,
         "rows": str(max_results),
     }
