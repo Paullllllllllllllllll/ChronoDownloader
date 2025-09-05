@@ -1,6 +1,7 @@
 import os
 import argparse
 import logging
+import json
 import pandas as pd
 from api import utils
 from api import bnf_gallica_api
@@ -17,10 +18,53 @@ from api import google_books_api
 from api import hathitrust_api
 from api.model import SearchResult
 
-# Temporarily limit enabled APIs to Internet Archive for testing actual downloads.
-# Re-enable others once endpoints/API keys are configured and connection issues resolved.
+PROVIDERS = {
+    "bnf_gallica": (bnf_gallica_api.search_gallica, bnf_gallica_api.download_gallica_work, "BnF Gallica"),
+    "internet_archive": (internet_archive_api.search_internet_archive, internet_archive_api.download_ia_work, "Internet Archive"),
+    "loc": (loc_api.search_loc, loc_api.download_loc_work, "Library of Congress"),
+    "europeana": (europeana_api.search_europeana, europeana_api.download_europeana_work, "Europeana"),
+    "dpla": (dpla_api.search_dpla, dpla_api.download_dpla_work, "DPLA"),
+    "ddb": (ddb_api.search_ddb, ddb_api.download_ddb_work, "DDB"),
+    "british_library": (british_library_api.search_british_library, british_library_api.download_british_library_work, "British Library"),
+    "mdz": (mdz_api.search_mdz, mdz_api.download_mdz_work, "MDZ"),
+    "polona": (polona_api.search_polona, polona_api.download_polona_work, "Polona"),
+    "bne": (bne_api.search_bne, bne_api.download_bne_work, "BNE"),
+    "google_books": (google_books_api.search_google_books, google_books_api.download_google_books_work, "Google Books"),
+    "hathitrust": (hathitrust_api.search_hathitrust, hathitrust_api.download_hathitrust_work, "HathiTrust"),
+    # "wellcome": (...)  # placeholder for a future connector
+}
+
+
+def load_enabled_apis(config_path: str):
+    """Load enabled providers from a JSON config file.
+
+    Config format:
+    {
+      "providers": { "internet_archive": true, "europeana": false, ... }
+    }
+    """
+    logger = logging.getLogger(__name__)
+    if not os.path.exists(config_path):
+        logger.info("Config file %s not found; using default providers: Internet Archive only", config_path)
+        return [PROVIDERS["internet_archive"]]
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception as e:
+        logger.error("Failed to read config file %s: %s; using default providers (Internet Archive only)", config_path, e)
+        return [PROVIDERS["internet_archive"]]
+    enabled = []
+    for key, flag in (cfg.get("providers") or {}).items():
+        if flag and key in PROVIDERS:
+            enabled.append(PROVIDERS[key])
+    if not enabled:
+        logger.warning("No providers enabled in config; nothing to do. Enable providers in %s under 'providers'.", config_path)
+    return enabled
+
+
+# Default to Internet Archive only; this will be overridden by --config if present
 ENABLED_APIS = [
-    (internet_archive_api.search_internet_archive, internet_archive_api.download_ia_work, "Internet Archive"),
+    PROVIDERS["internet_archive"],
 ]
 
 
@@ -87,6 +131,11 @@ def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level",
     )
+    parser.add_argument(
+        "--config",
+        default="config.json",
+        help="Path to JSON config file to enable/disable providers.",
+    )
     args = parser.parse_args()
 
     # Configure base logging
@@ -96,6 +145,12 @@ def main():
     )
 
     logger = logging.getLogger(__name__)
+
+    # Load providers from config (if exists), otherwise defaults remain (IA only)
+    global ENABLED_APIS
+    ENABLED_APIS = load_enabled_apis(args.config)
+    if not ENABLED_APIS:
+        logger.warning("No providers are enabled. Update %s to enable providers.", args.config)
 
     if not os.path.exists(args.csv_file):
         logger.error("CSV file not found at %s", args.csv_file)

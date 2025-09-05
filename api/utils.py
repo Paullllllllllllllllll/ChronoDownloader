@@ -212,3 +212,38 @@ def make_request(
     except requests.exceptions.RequestException as e:
         logger.error("Request failed for %s: %s", url, e)
     return None
+
+
+# --- Configuration helpers ---
+_CONFIG_CACHE: Optional[dict] = None
+
+
+def get_config(force_reload: bool = False) -> dict:
+    """Load project configuration JSON.
+
+    Looks for the path in CHRONO_CONFIG_PATH env var; falls back to 'config.json' in CWD.
+    Caches the result unless force_reload is True.
+    """
+    global _CONFIG_CACHE
+    if _CONFIG_CACHE is not None and not force_reload:
+        return _CONFIG_CACHE
+    path = os.environ.get("CHRONO_CONFIG_PATH", "config.json")
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                _CONFIG_CACHE = json.load(f) or {}
+        else:
+            _CONFIG_CACHE = {}
+    except Exception as e:
+        logger.error("Failed to load config from %s: %s", path, e)
+        _CONFIG_CACHE = {}
+    return _CONFIG_CACHE
+
+
+def get_provider_setting(provider_key: str, setting: str, default=None):
+    cfg = get_config()
+    return (
+        cfg.get("provider_settings", {})
+        .get(provider_key, {})
+        .get(setting, default)
+    )
