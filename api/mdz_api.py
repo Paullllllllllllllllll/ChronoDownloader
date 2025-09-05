@@ -1,13 +1,19 @@
 """Connector for the Münchener DigitalisierungsZentrum (MDZ) API."""
 
+import logging
+from typing import List, Union
+
 from .utils import save_json, make_request
+from .model import SearchResult, convert_to_searchresult
+
+logger = logging.getLogger(__name__)
 
 
 SEARCH_API_URL = "https://api.digitale-sammlungen.de/solr/mdzsearch/select"
 IIIF_MANIFEST_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v2/{object_id}/manifest"
 
 
-def search_mdz(title, creator=None, max_results=3):
+def search_mdz(title, creator=None, max_results=3) -> List[SearchResult]:
     """Search MDZ using its Solr search interface."""
 
     query = f'title:"{title}"'
@@ -20,34 +26,35 @@ def search_mdz(title, creator=None, max_results=3):
         "wt": "json",
     }
 
-    print(f"Searching MDZ for: {title}")
+    logger.info("Searching MDZ for: %s", title)
     data = make_request(SEARCH_API_URL, params=params)
 
-    results = []
+    results: List[SearchResult] = []
     if data and data.get("response") and data["response"].get("docs"):
         for doc in data["response"]["docs"]:
-            results.append(
-                {
-                    "title": doc.get("title", "N/A"),
-                    "creator": ", ".join(doc.get("creator", [])),
-                    "id": doc.get("id"),
-                    "source": "MDZ",
-                }
-            )
+            raw = {
+                "title": doc.get("title", "N/A"),
+                "creator": ", ".join(doc.get("creator", [])),
+                "id": doc.get("id"),
+            }
+            results.append(convert_to_searchresult("MDZ", raw))
 
     return results
 
 
-def download_mdz_work(item_data, output_folder):
+def download_mdz_work(item_data: Union[SearchResult, dict], output_folder):
     """Download the IIIF manifest for a MDZ item."""
 
-    object_id = item_data.get("id")
+    if isinstance(item_data, SearchResult):
+        object_id = item_data.source_id or item_data.raw.get("id")
+    else:
+        object_id = item_data.get("id")
     if not object_id:
-        print("No MDZ object id found in item data.")
+        logger.warning("No MDZ object id found in item data.")
         return False
 
     manifest_url = IIIF_MANIFEST_URL.format(object_id=object_id)
-    print(f"Fetching MDZ IIIF manifest: {manifest_url}")
+    logger.info("Fetching MDZ IIIF manifest: %s", manifest_url)
     manifest = make_request(manifest_url)
 
     if manifest:

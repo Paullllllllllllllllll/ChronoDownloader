@@ -1,20 +1,28 @@
 """Connector for the British Library SRU and IIIF APIs."""
 
+import logging
 import re
 import xml.etree.ElementTree as ET
+from typing import List, Union
 
 from .utils import save_json, make_request
+from .model import SearchResult, convert_to_searchresult
+from .query_helpers import escape_sru_literal
+
+logger = logging.getLogger(__name__)
 
 SRU_BASE_URL = "https://sru.bl.uk/SRU"
 IIIF_MANIFEST_BASE = "https://api.bl.uk/metadata/iiif/ark:/81055/{identifier}/manifest.json"
 
 
-def search_british_library(title, creator=None, max_results=3):
+def search_british_library(title, creator=None, max_results=3) -> List[SearchResult]:
     """Search the British Library using SRU."""
 
-    query_parts = [f'title all "{title}"']
+    q_title = escape_sru_literal(title)
+    query_parts = [f'title all "{q_title}"']
     if creator:
-        query_parts.append(f'and creator all "{creator}"')
+        q_creator = escape_sru_literal(creator)
+        query_parts.append(f'and creator all "{q_creator}"')
     query = " ".join(query_parts)
 
     params = {
@@ -25,10 +33,10 @@ def search_british_library(title, creator=None, max_results=3):
         "recordSchema": "dc",
     }
 
-    print(f"Searching British Library for: {title}")
+    logger.info("Searching British Library for: %s", title)
     response_text = make_request(SRU_BASE_URL, params=params)
 
-    results = []
+    results: List[SearchResult] = []
     if isinstance(response_text, str):
         try:
             namespaces = {
@@ -49,30 +57,32 @@ def search_british_library(title, creator=None, max_results=3):
                     if match:
                         identifier = match.group(1)
 
-                results.append(
-                    {
-                        "title": title_el.text if title_el is not None else "N/A",
-                        "creator": creator_el.text if creator_el is not None else "N/A",
-                        "identifier": identifier,
-                        "source": "British Library",
-                    }
-                )
+                raw = {
+                    "title": title_el.text if title_el is not None else "N/A",
+                    "creator": creator_el.text if creator_el is not None else "N/A",
+                    "identifier": identifier,
+                }
+                results.append(convert_to_searchresult("British Library", raw))
         except ET.ParseError as e:
-            print(f"Error parsing BL SRU XML: {e}")
+            logger.error("Error parsing BL SRU XML: %s", e)
 
     return results
 
 
-def download_british_library_work(item_data, output_folder):
+def download_british_library_work(item_data: Union[SearchResult, dict], output_folder):
     """Download the IIIF manifest for a British Library item."""
 
-    identifier = item_data.get("identifier")
+    identifier = None
+    if isinstance(item_data, SearchResult):
+        identifier = item_data.source_id or item_data.raw.get("identifier")
+    else:
+        identifier = item_data.get("identifier")
     if not identifier:
-        print("No BL identifier provided for download.")
+        logger.warning("No BL identifier provided for download.")
         return False
 
     manifest_url = IIIF_MANIFEST_BASE.format(identifier=identifier)
-    print(f"Fetching BL IIIF manifest: {manifest_url}")
+    logger.info("Fetching BL IIIF manifest: %s", manifest_url)
     manifest_data = make_request(manifest_url)
 
     if manifest_data:

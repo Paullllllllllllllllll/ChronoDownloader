@@ -1,73 +1,203 @@
 import os
 import re
 import json
+import logging
 import requests
-import time
+import cgi
+from pathlib import Path
+from typing import Optional, Union
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
+
+_SESSION: Optional[requests.Session] = None
 
 
-def sanitize_filename(name):
-    """Sanitize string for safe filenames."""
+def _build_session() -> requests.Session:
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=0.8,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET", "HEAD"),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    # Default headers
+    session.headers.update(
+        {
+            "User-Agent": "ChronoDownloader/1.0 (+https://example.org)",
+            "Accept": "*/*",
+        }
+    )
+    return session
+
+
+def get_session() -> requests.Session:
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = _build_session()
+    return _SESSION
+
+
+def _split_name_and_suffixes(name: str) -> tuple[str, str]:
+    # Preserve multi-suffix like .tar.gz
+    base = Path(name).name
+    suffixes = Path(base).suffixes
+    ext = "".join(suffixes)
+    if ext:
+        base_no_ext = base[: -len(ext)]
+    else:
+        base_no_ext = base
+    return base_no_ext, ext
+
+
+def sanitize_filename(name: str, max_base_len: int = 100) -> str:
+    """Sanitize string for safe filenames while preserving extension.
+
+    - Keeps the original extension(s) intact (e.g., .pdf, .tar.gz).
+    - Limits the base name length only.
+    """
     if not name:
         return "_untitled_"
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name)
-    name = re.sub(r"[\s._-]+", "_", name)
-    return name[:100]
+    base, ext = _split_name_and_suffixes(name)
+    # Remove illegal characters from base
+    base = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", base)
+    # Collapse whitespace and separators into single underscore
+    base = re.sub(r"[\s._-]+", "_", base).strip("._-")
+    if not base:
+        base = "_untitled_"
+    # Truncate base only
+    base = base[:max_base_len]
+    return f"{base}{ext}"
 
 
-def download_file(url, folder_path, filename):
-    os.makedirs(folder_path, exist_ok=True)
-    filepath = os.path.join(folder_path, sanitize_filename(filename))
+def _filename_from_content_disposition(cd: Optional[str]) -> Optional[str]:
+    if not cd:
+        return None
     try:
-        response = requests.get(url, stream=True, timeout=30)
-        response.raise_for_status()
-        with open(filepath, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        print(f"Successfully downloaded {filename} to {folder_path}")
-        return filepath
+        disposition, params = cgi.parse_header(cd)
+        # RFC 5987 encoded filename*
+        fn = params.get("filename*") or params.get("filename")
+        if fn:
+            # filename* may be like: UTF-8''example.pdf
+            if "''" in fn:
+                try:
+                    charset, _, enc = fn.partition("''")
+                    from urllib.parse import unquote
+
+                    return unquote(enc)
+                except Exception:
+                    return fn
+            return fn
+    except Exception:
+        return None
+    return None
+
+
+def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
+    os.makedirs(folder_path, exist_ok=True)
+    session = get_session()
+    try:
+        with session.get(url, stream=True, timeout=30) as response:
+            response.raise_for_status()
+            cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
+            chosen_name = cd_name if cd_name else filename
+            safe_name = sanitize_filename(chosen_name)
+
+            # If no extension on safe_name, try to infer from URL or Content-Type
+            def _infer_ext() -> str:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(url)
+                suffix = Path(parsed.path).suffix
+                if suffix:
+                    return suffix
+                ct = response.headers.get("Content-Type", "").lower()
+                ct_map = {
+                    "application/pdf": ".pdf",
+                    "application/epub+zip": ".epub",
+                    "image/jpeg": ".jpg",
+                    "image/jpg": ".jpg",
+                    "image/png": ".png",
+                    "image/jp2": ".jp2",
+                    "text/plain": ".txt",
+                    "text/html": ".html",
+                    "application/json": ".json",
+                }
+                for k, v in ct_map.items():
+                    if k in ct:
+                        return v
+                return ""
+
+            if not Path(safe_name).suffix:
+                inferred = _infer_ext()
+                if inferred:
+                    safe_name = f"{safe_name}{inferred}"
+            filepath = os.path.join(folder_path, safe_name)
+            with open(filepath, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:  # filter out keep-alive chunks
+                        f.write(chunk)
+            logger.info("Downloaded %s -> %s", url, filepath)
+            return filepath
     except requests.exceptions.RequestException as e:
-        print(f"Error downloading {url}: {e}")
+        logger.error("Error downloading %s: %s", url, e)
         return None
-    except IOError as e:
-        print(f"Error saving file {filepath}: {e}")
+    except OSError as e:
+        logger.error("Error saving file to %s: %s", folder_path, e)
         return None
 
 
-def save_json(data, folder_path, filename):
+def save_json(data, folder_path, filename) -> Optional[str]:
     os.makedirs(folder_path, exist_ok=True)
     filepath = os.path.join(folder_path, sanitize_filename(filename) + ".json")
     try:
         with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        print(f"Successfully saved {filename}.json to {folder_path}")
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        logger.info("Saved JSON: %s", filepath)
         return filepath
-    except IOError as e:
-        print(f"Error saving JSON file {filepath}: {e}")
-        return None
-    except TypeError as e:
-        print(f"Error serializing data to JSON for {filename}: {e}")
+    except (OSError, TypeError) as e:
+        logger.error("Error saving JSON %s: %s", filepath, e)
         return None
 
 
-def make_request(url, params=None, headers=None, timeout=15):
-    time.sleep(0.5)
+def make_request(
+    url: str,
+    params: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    timeout: int = 15,
+) -> Optional[Union[dict, str, bytes]]:
+    """HTTP GET with retries using a shared Session.
+
+    Returns:
+      - dict for JSON responses
+      - str for text/xml/html
+      - bytes for other/binary content
+    """
+    session = get_session()
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=timeout)
-        response.raise_for_status()
-        if "application/json" in response.headers.get("Content-Type", ""):
-            return response.json()
-        elif "xml" in response.headers.get("Content-Type", ""):
-            return response.text
-        else:
-            print(f"Unexpected content type: {response.headers.get('Content-Type')}")
-            return response.content
-    except requests.exceptions.Timeout:
-        print(f"Request timed out: {url}")
+        resp = session.get(url, params=params, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        content_type = resp.headers.get("Content-Type", "").lower()
+        if "json" in content_type:
+            try:
+                return resp.json()
+            except json.JSONDecodeError as e:
+                logger.error("JSON decode error for %s: %s", url, e)
+                return None
+        if any(t in content_type for t in ("text/", "xml", "html")):
+            return resp.text
+        return resp.content
     except requests.exceptions.HTTPError as e:
-        print(f"HTTP error for {url}: {e.response.status_code} {e.response.reason}")
+        status = getattr(e.response, "status_code", "?")
+        reason = getattr(e.response, "reason", "")
+        logger.error("HTTP error %s %s for %s", status, reason, url)
+    except requests.exceptions.Timeout:
+        logger.error("Request timed out: %s", url)
     except requests.exceptions.RequestException as e:
-        print(f"Request failed for {url}: {e}")
-    except json.JSONDecodeError:
-        print(f"Failed to decode JSON from {url}")
-        print(f"Response content: {response.text[:200]}...")
+        logger.error("Request failed for %s: %s", url, e)
     return None
