@@ -8,6 +8,7 @@ import random
 import threading
 from urllib.parse import unquote, urlparse
 from email.utils import parsedate_to_datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union, Dict, List, Any
 from requests.adapters import HTTPAdapter
@@ -64,9 +65,15 @@ def _provider_for_url(url: str) -> Optional[str]:
         host = urlparse(url).netloc.lower()
     except Exception:
         return None
+    # Strip port if present
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    # Match exact domain or subdomain of known host parts, but not arbitrary suffixes
+    def _host_matches(h: str, part: str) -> bool:
+        return h == part or h.endswith("." + part)
     for provider, host_parts in _PROVIDER_HOST_MAP.items():
         for part in host_parts:
-            if part in host:
+            if _host_matches(host, part):
                 return provider
     return None
 
@@ -398,7 +405,7 @@ def _build_session() -> requests.Session:
         read=2,
         backoff_factor=0.8,
         status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=("GET", "HEAD"),
+        allowed_methods=frozenset(["GET", "HEAD"]),
         raise_on_status=False,
     )
     adapter = HTTPAdapter(max_retries=retry)
@@ -516,8 +523,8 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                             sleep_s = float(retry_after)
                         except ValueError:
                             try:
-                                dt = parsedate_to_datetime(retry_after)
-                                sleep_s = max(0.0, (dt - dt.now(dt.tzinfo)).total_seconds())
+                                retry_dt = parsedate_to_datetime(retry_after)
+                                sleep_s = max(0.0, (retry_dt - datetime.now(retry_dt.tzinfo)).total_seconds())
                             except Exception:
                                 sleep_s = None
                     if sleep_s is None:
@@ -603,13 +610,13 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                             truncated = True
                             break
                         f.write(chunk)
-                logger.info("Downloaded %s -> %s", url, filepath)
                 if truncated:
                     try:
                         os.remove(filepath)
                     except Exception:
                         pass
                     return None
+                logger.info("Downloaded %s -> %s", url, filepath)
                 # Count file after successful write
                 _BUDGET.add_file(provider, work_id)
                 return filepath
@@ -675,8 +682,8 @@ def make_request(
                         sleep_s = float(retry_after)
                     except ValueError:
                         try:
-                            dt = parsedate_to_datetime(retry_after)
-                            sleep_s = max(0.0, (dt - dt.now(dt.tzinfo)).total_seconds())
+                            retry_dt = parsedate_to_datetime(retry_after)
+                            sleep_s = max(0.0, (retry_dt - datetime.now(retry_dt.tzinfo)).total_seconds())
                         except Exception:
                             sleep_s = None
                 if sleep_s is None:
@@ -770,8 +777,12 @@ def get_config(force_reload: bool = False) -> dict:
 
 def get_provider_setting(provider_key: str, setting: str, default=None):
     cfg = get_config()
-    return (
-        cfg.get("provider_settings", {})
-        .get(provider_key, {})
-        .get(setting, default)
-    )
+    ps = cfg.get("provider_settings", {})
+    # Map known aliases to config keys
+    aliases = {
+        "bnf_gallica": "gallica",
+    }
+    key = provider_key
+    if key not in ps:
+        key = aliases.get(provider_key, provider_key)
+    return ps.get(key, {}).get(setting, default)

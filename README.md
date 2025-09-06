@@ -243,3 +243,17 @@ The downloader currently supports connectors for:
 - Enhance search capabilities by using more fields from the CSV.
 - IIIF parsing and per-canvas downloads are centralized in `api/iiif.py` to reduce duplication across providers.
 - Adjust fuzzy matching or selection rules via `api/matching.py` and `config.json`.
+
+## Changelog
+
+Recent maintenance and bug fixes:
+
+- Network core (`api/utils.py`):
+  - Fixed provider host matching to match exact domains or subdomains and avoid false positives (e.g., `notarchive.org` no longer matches `archive.org`).
+  - Corrected `Retry-After` HTTP-date parsing to use `datetime.now(tz)` for accurate backoff durations.
+  - Moved the success log for downloads to occur only after confirming the file was not truncated by budget limits.
+  - Made urllib3 `Retry.allowed_methods` a `frozenset` for broader compatibility.
+- Gallica connector (`api/bnf_gallica_api.py`): Removed manual `time.sleep()` pacing; rate limiting is now handled centrally per-provider.
+- BNE connector (`api/bne_api.py`): Hardened IIIF manifest resolution by trying both `/manifest` and `/manifest.json` patterns.
+- Requirements: Pinned versions in `requirements.txt` for stability (requests/urllib3/pandas/beautifulsoup4).
+- Repo hygiene: Added a top-level `.gitignore` and included `sample_works.csv` referenced in this README.

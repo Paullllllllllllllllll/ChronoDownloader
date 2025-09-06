@@ -18,7 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 SEARCH_API_URL = "https://datos.bne.es/sparql"
-IIIF_MANIFEST_URL = "https://iiif.bne.es/{item_id}/manifest"
+# BNE IIIF manifests have been seen with both "/manifest" and "/manifest.json" endings across time.
+# Try both patterns for robustness.
+IIIF_MANIFEST_PATTERNS = [
+    "https://iiif.bne.es/{item_id}/manifest",
+    "https://iiif.bne.es/{item_id}/manifest.json",
+]
 
 
 def search_bne(title, creator=None, max_results=3) -> List[SearchResult]:
@@ -83,9 +88,15 @@ def download_bne_work(item_data: Union[SearchResult, dict], output_folder) -> bo
     else:
         item_identifier = item_id
 
-    manifest_url = IIIF_MANIFEST_URL.format(item_id=item_identifier)
-    logger.info("Fetching BNE IIIF manifest: %s", manifest_url)
-    manifest = make_request(manifest_url)
+    manifest = None
+    manifest_url = None
+    for pattern in IIIF_MANIFEST_PATTERNS:
+        candidate = pattern.format(item_id=item_identifier)
+        logger.info("Fetching BNE IIIF manifest: %s", candidate)
+        manifest = make_request(candidate)
+        if manifest:
+            manifest_url = candidate
+            break
 
     if not manifest:
         return False

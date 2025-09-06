@@ -1,7 +1,6 @@
 import logging
 import re
 import xml.etree.ElementTree as ET
-import time
 from typing import List, Union
 
 from .utils import (
@@ -129,7 +128,6 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder) -
     total = len(image_service_bases)
     to_download = image_service_bases[:max_pages] if max_pages and max_pages > 0 else image_service_bases
     logger.info("Gallica: downloading %d/%d page images for %s", len(to_download), total, ark_id)
-    delay_ms = get_provider_setting("gallica", "delay_ms", 0) or 0
     success_any = False
     for idx, svc in enumerate(to_download, start=1):
         try:
@@ -140,8 +138,5 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder) -
                 logger.warning("Failed to download Gallica image from service %s", svc)
         except Exception:
             logger.exception("Error downloading Gallica image for %s from %s", ark_id, svc)
-        # Provider-friendly pacing to avoid 429 rate limits
-        if delay_ms and idx < len(to_download):
-            time.sleep(float(delay_ms) / 1000.0)
 
     return success_any
