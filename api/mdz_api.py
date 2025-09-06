@@ -9,11 +9,11 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    download_file,
     get_provider_setting,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
+from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
 from bs4 import BeautifulSoup
 
@@ -121,7 +121,7 @@ def search_mdz(title, creator=None, max_results=3) -> List[SearchResult]:
     return results
 
 
-def download_mdz_work(item_data: Union[SearchResult, dict], output_folder):
+def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
     """Download the IIIF manifest and page images for an MDZ item.
 
     - Fetches the IIIF Presentation manifest (v2 or v3).
@@ -161,78 +161,8 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder):
     except Exception:
         logger.exception("MDZ: error while downloading manifest renderings for %s", object_id)
 
-    # Helper to build a direct image URL from an Image API base
-    def _build_image_url(image_service_base: str) -> str:
-        base = image_service_base.rstrip('/')
-        # Choose pattern by API version in path
-        if "/image/v3/" in base:
-            # IIIF Image API v3 typical path
-            return f"{base}/full/max/0/default.jpg"
-        # Default to v2 pattern
-        return f"{base}/full/full/0/default.jpg"
-
     # Extract per-canvas Image API service base URLs
-    image_service_bases: List[str] = []
-
-    # IIIF v2
-    try:
-        sequences = manifest.get("sequences") or []
-        if sequences:
-            canvases = sequences[0].get("canvases", [])
-            for canvas in canvases:
-                try:
-                    images = canvas.get("images", [])
-                    if not images:
-                        continue
-                    res = images[0].get("resource", {})
-                    service = res.get("service", {})
-                    svc_id = service.get("@id") or service.get("id")
-                    if not svc_id:
-                        # Fallback: derive from direct image URL if present
-                        img_id = res.get("@id") or res.get("id")
-                        if img_id and "/full/" in img_id:
-                            svc_id = img_id.split("/full/")[0]
-                    if svc_id:
-                        image_service_bases.append(svc_id)
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
-    # IIIF v3
-    if not image_service_bases and manifest.get("items"):
-        try:
-            for canvas in manifest.get("items", []):
-                try:
-                    anno_pages = canvas.get("items", [])
-                    if not anno_pages:
-                        continue
-                    annos = anno_pages[0].get("items", [])
-                    if not annos:
-                        continue
-                    body = annos[0].get("body", {})
-                    # Body may be a list in some manifests; take first image body
-                    if isinstance(body, list) and body:
-                        body = body[0]
-                    service = body.get("service") or body.get("services")
-                    svc_obj = None
-                    if isinstance(service, list) and service:
-                        svc_obj = service[0]
-                    elif isinstance(service, dict):
-                        svc_obj = service
-                    svc_id = None
-                    if svc_obj:
-                        svc_id = svc_obj.get("@id") or svc_obj.get("id")
-                    if not svc_id:
-                        body_id = body.get("id")
-                        if body_id and "/full/" in body_id:
-                            svc_id = body_id.split("/full/")[0]
-                    if svc_id:
-                        image_service_bases.append(svc_id)
-                except Exception:
-                    continue
-        except Exception:
-            pass
+    image_service_bases: List[str] = extract_image_service_bases(manifest)
 
     if not image_service_bases:
         logger.info("No IIIF image services found in MDZ manifest for %s", object_id)
@@ -246,10 +176,11 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder):
     success_any = False
     for idx, svc in enumerate(to_download, start=1):
         try:
-            img_url = _build_image_url(svc)
             filename = f"mdz_{object_id}_p{idx:05d}.jpg"
-            download_file(img_url, output_folder, filename)
-            success_any = True
+            if download_one_from_service(svc, output_folder, filename):
+                success_any = True
+            else:
+                logger.warning("Failed to download MDZ image for %s from %s", object_id, svc)
         except Exception:
             logger.exception("Failed to download MDZ image for %s from %s", object_id, svc)
 

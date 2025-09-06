@@ -6,12 +6,12 @@ from typing import List, Union
 
 from .utils import (
     save_json,
-    download_file,
     make_request,
     get_provider_setting,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
+from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
 from .query_helpers import escape_sru_literal
 
@@ -83,7 +83,7 @@ def _gallica_max_pages() -> int | None:
     return 0
 
 
-def download_gallica_work(item_data: Union[SearchResult, dict], output_folder):
+def download_gallica_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
     """Download Gallica IIIF manifest and full-size page images.
 
     - Fetches IIIF manifest (usually v2; handle v3 structures too).
@@ -117,86 +117,13 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder):
         logger.exception("Gallica: error while downloading manifest renderings for %s", ark_id)
 
     # Extract image service bases from IIIF v2 or v3
-    image_service_bases: List[str] = []
-
-    # v2
-    try:
-        sequences = manifest.get("sequences") or []
-        if sequences:
-            canvases = sequences[0].get("canvases", [])
-            for canvas in canvases:
-                try:
-                    images = canvas.get("images", [])
-                    if not images:
-                        continue
-                    res = images[0].get("resource", {})
-                    service = res.get("service", {})
-                    svc_id = service.get("@id") or service.get("id")
-                    if not svc_id:
-                        img_id = res.get("@id") or res.get("id")
-                        if img_id and "/full/" in img_id:
-                            svc_id = img_id.split("/full/")[0]
-                    if svc_id:
-                        image_service_bases.append(svc_id)
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
-    # v3
-    if not image_service_bases and manifest.get("items"):
-        try:
-            for canvas in manifest.get("items", []):
-                try:
-                    anno_pages = canvas.get("items", [])
-                    if not anno_pages:
-                        continue
-                    annos = anno_pages[0].get("items", [])
-                    if not annos:
-                        continue
-                    body = annos[0].get("body", {})
-                    if isinstance(body, list) and body:
-                        body = body[0]
-                    service = body.get("service") or body.get("services")
-                    svc_obj = None
-                    if isinstance(service, list) and service:
-                        svc_obj = service[0]
-                    elif isinstance(service, dict):
-                        svc_obj = service
-                    svc_id = None
-                    if svc_obj:
-                        svc_id = svc_obj.get("@id") or svc_obj.get("id")
-                    if not svc_id:
-                        body_id = body.get("id")
-                        if body_id and "/full/" in body_id:
-                            svc_id = body_id.split("/full/")[0]
-                    if svc_id:
-                        image_service_bases.append(svc_id)
-                except Exception:
-                    continue
-        except Exception:
-            pass
+    image_service_bases: List[str] = extract_image_service_bases(manifest)
 
     if not image_service_bases:
         logger.info("No IIIF image services found in Gallica manifest for %s", ark_id)
         return True
 
-    def _candidate_urls(base: str) -> List[str]:
-        b = base.rstrip('/')
-        # Try a few variants to tolerate v2/v3 and quality strings
-        return [
-            f"{b}/full/full/0/default.jpg",
-            f"{b}/full/full/0/native.jpg",
-            f"{b}/full/max/0/default.jpg",
-            f"{b}/full/max/0/native.jpg",
-        ]
-
-    def _download_with_fallbacks(base: str, filename: str) -> bool:
-        for url in _candidate_urls(base):
-            path = download_file(url, output_folder, filename)
-            if path:
-                return True
-        return False
+    # Use shared helper to try full-size image candidates per canvas
 
     max_pages = _gallica_max_pages()
     total = len(image_service_bases)
@@ -207,7 +134,7 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder):
     for idx, svc in enumerate(to_download, start=1):
         try:
             fname = f"gallica_{ark_id}_p{idx:05d}.jpg"
-            if _download_with_fallbacks(svc, fname):
+            if download_one_from_service(svc, output_folder, fname):
                 success_any = True
             else:
                 logger.warning("Failed to download Gallica image from service %s", svc)

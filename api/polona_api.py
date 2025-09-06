@@ -7,11 +7,11 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    download_file,
     get_provider_setting,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
+from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
 from bs4 import BeautifulSoup
 
@@ -72,7 +72,7 @@ def search_polona(title, creator=None, max_results=3) -> List[SearchResult]:
     return results
 
 
-def download_polona_work(item_data: Union[SearchResult, dict], output_folder):
+def download_polona_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
     """Download IIIF manifest and page images for a Polona item.
 
     Polona exposes a stable IIIF manifest per item; we parse v2/v3 and download full-size images.
@@ -105,84 +105,13 @@ def download_polona_work(item_data: Union[SearchResult, dict], output_folder):
         logger.exception("Polona: error while downloading manifest renderings for %s", item_id)
 
     # Extract IIIF Image API service bases
-    service_bases: List[str] = []
-
-    # v2
-    try:
-        sequences = manifest.get("sequences") or []
-        if sequences:
-            canvases = sequences[0].get("canvases", [])
-            for canvas in canvases:
-                try:
-                    images = canvas.get("images", [])
-                    if not images:
-                        continue
-                    res = images[0].get("resource", {})
-                    service = res.get("service", {})
-                    svc_id = service.get("@id") or service.get("id")
-                    if not svc_id:
-                        img_id = res.get("@id") or res.get("id")
-                        if img_id and "/full/" in img_id:
-                            svc_id = img_id.split("/full/")[0]
-                    if svc_id:
-                        service_bases.append(svc_id)
-                except Exception:
-                    continue
-    except Exception:
-        pass
-
-    # v3
-    if not service_bases and manifest.get("items"):
-        try:
-            for canvas in manifest.get("items", []):
-                try:
-                    anno_pages = canvas.get("items", [])
-                    if not anno_pages:
-                        continue
-                    annos = anno_pages[0].get("items", [])
-                    if not annos:
-                        continue
-                    body = annos[0].get("body", {})
-                    if isinstance(body, list) and body:
-                        body = body[0]
-                    service = body.get("service") or body.get("services")
-                    svc_obj = None
-                    if isinstance(service, list) and service:
-                        svc_obj = service[0]
-                    elif isinstance(service, dict):
-                        svc_obj = service
-                    svc_id = None
-                    if svc_obj:
-                        svc_id = svc_obj.get("@id") or svc_obj.get("id")
-                    if not svc_id:
-                        body_id = body.get("id")
-                        if body_id and "/full/" in body_id:
-                            svc_id = body_id.split("/full/")[0]
-                    if svc_id:
-                        service_bases.append(svc_id)
-                except Exception:
-                    continue
-        except Exception:
-            pass
+    service_bases: List[str] = extract_image_service_bases(manifest)
 
     if not service_bases:
         logger.info("No IIIF image services found in Polona manifest for %s", item_id)
         return True
 
-    # Build candidate URLs for full images (v2/v3 tolerant)
-    def _candidates(base: str) -> List[str]:
-        b = base.rstrip('/')
-        return [
-            f"{b}/full/full/0/default.jpg",
-            f"{b}/full/max/0/default.jpg",
-            f"{b}/full/full/0/native.jpg",
-        ]
-
-    def _download_one(base: str, filename: str) -> bool:
-        for u in _candidates(base):
-            if download_file(u, output_folder, filename):
-                return True
-        return False
+    # Use shared helper to attempt per-canvas downloads
 
     max_pages = _polona_max_pages()
     total = len(service_bases)
@@ -192,7 +121,7 @@ def download_polona_work(item_data: Union[SearchResult, dict], output_folder):
     for idx, svc in enumerate(to_download, start=1):
         try:
             fname = f"polona_{item_id}_p{idx:05d}.jpg"
-            if _download_one(svc, fname):
+            if download_one_from_service(svc, output_folder, fname):
                 ok_any = True
             else:
                 logger.warning("Failed to download Polona image from %s", svc)

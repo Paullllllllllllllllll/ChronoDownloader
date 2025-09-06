@@ -14,7 +14,9 @@ This project provides a Python-based tool to search for and download digitized h
 
 - `api/`: Contains modules for interacting with specific digital library APIs.
   - `__init__.py`
-  - `utils.py`: Utility functions (e.g., sanitizing filenames, downloading files).
+  - `utils.py`: Core HTTP, retries/backoff, pacing, download budgeting, file helpers.
+  - `iiif.py`: Shared helpers to parse IIIF manifests and download representative images (DRY across providers).
+  - `providers.py`: Central registry that maps provider keys to their search/download functions.
   - `[library_name]_api.py`: Individual modules for each API (e.g., `bnf_gallica_api.py`, `internet_archive_api.py`, etc.).
 - `main/`: Contains the main downloader script.
   - `__init__.py`
@@ -179,8 +181,6 @@ Notes:
 
 ### Selection, Fuzzy Matching, and Provider Hierarchy
 
-### Selection, Fuzzy Matching, and Provider Hierarchy
-
 The downloader now performs a pre-download selection across all enabled providers to avoid downloading duplicates from multiple sources. Configure selection behavior in `config.json`:
 
 ```
@@ -241,5 +241,5 @@ The downloader currently supports connectors for:
 ## Extending the Tool
 - Implement more APIs in `api/`.
 - Enhance search capabilities by using more fields from the CSV.
-- Improve download logic (IIIF parsing, etc.).
+- IIIF parsing and per-canvas downloads are centralized in `api/iiif.py` to reduce duplication across providers.
 - Adjust fuzzy matching or selection rules via `api/matching.py` and `config.json`.

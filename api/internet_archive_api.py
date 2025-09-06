@@ -48,7 +48,7 @@ def search_internet_archive(title, creator=None, max_results=3) -> List[SearchRe
     return results
 
 
-def download_ia_work(item_data: Union[SearchResult, dict], output_folder):
+def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
     """Download metadata and IIIF manifest for an Internet Archive item."""
     identifier = None
     if isinstance(item_data, SearchResult):

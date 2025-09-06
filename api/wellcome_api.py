@@ -14,7 +14,8 @@ import logging
 import os
 from typing import List, Union
 
-from .utils import make_request, download_file, save_json, get_provider_setting
+from .utils import make_request, save_json, get_provider_setting
+from .iiif import download_one_from_service
 from .model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
@@ -117,18 +118,7 @@ def download_wellcome_work(item_data: Union[SearchResult, dict], output_folder) 
         return False
 
     # Download images. Use IIIF Image v2-style URL; Wellcome Image API accepts 'full/full/0/default.jpg'.
-    def _candidates(base: str) -> List[str]:
-        b = base.rstrip('/')
-        return [
-            f"{b}/full/full/0/default.jpg",
-            f"{b}/full/max/0/default.jpg",
-        ]
-
-    def _download_one(base: str, filename: str) -> bool:
-        for u in _candidates(base):
-            if download_file(u, output_folder, filename):
-                return True
-        return False
+    # Use shared helper for per-service download attempts
 
     max_images = _max_images()
     to_download = services[:max_images] if max_images and max_images > 0 else services
@@ -140,7 +130,7 @@ def download_wellcome_work(item_data: Union[SearchResult, dict], output_folder) 
     for idx, svc in enumerate(to_download, start=1):
         try:
             fname = f"wellcome_{(work_id or 'work')}_img{idx:04d}.jpg"
-            if _download_one(svc, fname):
+            if download_one_from_service(svc, output_folder, fname):
                 ok_any = True
             else:
                 logger.warning("Failed to download image from %s", svc)
