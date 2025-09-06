@@ -10,6 +10,7 @@ class SearchResult:
     Canonical search result returned by connector search_* functions.
 
     - provider: canonical provider name (e.g., "Internet Archive", "BnF Gallica")
+    - provider_key: machine-friendly provider key (e.g., "internet_archive", "bnf_gallica"). Optional.
     - title: work title
     - creators: list of author/creator strings
     - date: date string or year if available
@@ -28,6 +29,7 @@ class SearchResult:
     iiif_manifest: Optional[str] = None
     item_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    provider_key: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self, include_raw: bool = False) -> Dict[str, Any]:

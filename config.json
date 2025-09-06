@@ -42,7 +42,7 @@
       "network": {
         "delay_ms": 300,
         "jitter_ms": 150,
-        "max_attempts": 25,
+        "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
         "timeout_s": 30
@@ -53,7 +53,7 @@
       "network": {
         "delay_ms": 400,
         "jitter_ms": 200,
-        "max_attempts": 25,
+        "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
         "timeout_s": 30
@@ -64,7 +64,7 @@
       "network": {
         "delay_ms": 500,
         "jitter_ms": 250,
-        "max_attempts": 25,
+        "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
         "timeout_s": 30
@@ -78,7 +78,7 @@
       "network": {
         "delay_ms": 400,
         "jitter_ms": 200,
-        "max_attempts": 25,
+        "max_attempts": 10,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
         "timeout_s": 30
@@ -114,11 +114,34 @@
       "network": {
         "delay_ms": 1700,
         "jitter_ms": 200,
-        "max_attempts": 25,
+        "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
         "timeout_s": 30
       }
     }
+  }
+  ,
+  "selection": {
+    "strategy": "collect_and_select",
+    "provider_hierarchy": [
+      "mdz",
+      "bnf_gallica",
+      "loc",
+      "british_library",
+      "internet_archive",
+      "europeana"
+    ],
+    "min_title_score": 85,
+    "creator_weight": 0.2,
+    "year_tolerance": 2,
+    "max_candidates_per_provider": 5,
+    "download_strategy": "selected_only",
+    "keep_non_selected_metadata": true
+  },
+  "naming": {
+    "include_creator_in_work_dir": true,
+    "include_year_in_work_dir": true,
+    "title_slug_max_len": 80
   }
 }

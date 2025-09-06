@@ -40,7 +40,17 @@ def search_loc(title, creator=None, max_results=3) -> List[SearchResult]:
             item_id = item.get("id")
             if item_id:
                 item_id = item_id.strip('/').split('/')[-1]
-            iiif_manifest = item.get("iiif_manifest_url", item.get("resources", [{}])[0].get("iiif_manifest"))
+            # Safely extract IIIF manifest
+            iiif_manifest = item.get("iiif_manifest_url")
+            if not iiif_manifest:
+                resources = item.get("resources") or []
+                if isinstance(resources, list):
+                    for res in resources:
+                        if isinstance(res, dict) and res.get("iiif_manifest"):
+                            iiif_manifest = res.get("iiif_manifest")
+                            break
+                elif isinstance(resources, dict):
+                    iiif_manifest = resources.get("iiif_manifest") or iiif_manifest
             raw = {
                 "title": item.get("title", "N/A"),
                 "creator": item.get("contributor_names", ["N/A"])[0] if item.get("contributor_names") else "N/A",
@@ -55,7 +65,17 @@ def search_loc(title, creator=None, max_results=3) -> List[SearchResult]:
             item_id = item.get("id")
             if item_id:
                 item_id = item_id.strip('/').split('/')[-1]
-            iiif_manifest = item.get("iiif_manifest_url", item.get("resources", [{}])[0].get("iiif_manifest"))
+            # Safely extract IIIF manifest
+            iiif_manifest = item.get("iiif_manifest_url")
+            if not iiif_manifest:
+                resources = item.get("resources") or []
+                if isinstance(resources, list):
+                    for res in resources:
+                        if isinstance(res, dict) and res.get("iiif_manifest"):
+                            iiif_manifest = res.get("iiif_manifest")
+                            break
+                elif isinstance(resources, dict):
+                    iiif_manifest = resources.get("iiif_manifest") or iiif_manifest
             raw = {
                 "title": item.get("title", "N/A"),
                 "creator": item.get("contributor_names", ["N/A"])[0] if item.get("contributor_names") else "N/A",

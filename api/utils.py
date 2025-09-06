@@ -118,8 +118,12 @@ def _get_rate_limiter(provider_key: Optional[str]) -> Optional[RateLimiter]:
 
 def _build_session() -> requests.Session:
     session = requests.Session()
+    # Avoid urllib3 retries on connection errors (DNS/SSL) so our outer logic can decide quickly.
+    # Keep a small retry budget for read timeouts and HTTP status where it helps.
     retry = Retry(
         total=3,
+        connect=0,  # no retries on connection errors (e.g., DNS/SSL)
+        read=2,
         backoff_factor=0.8,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=("GET", "HEAD"),
@@ -253,6 +257,10 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                     logger.warning("%s for %s; sleeping %.1fs (attempt %d/%d)", response.status_code, url, sleep_s, attempt, max_attempts)
                     time.sleep(sleep_s)
                     continue
+                # Non-retryable client errors
+                if response.status_code in (400, 401, 403, 404, 410, 422):
+                    logger.error("Non-retryable HTTP %s for %s; aborting download", response.status_code, url)
+                    return None
                 response.raise_for_status()
                 cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
                 chosen_name = cd_name if cd_name else filename
@@ -369,6 +377,10 @@ def make_request(
                 logger.warning("%s for %s; sleeping %.1fs (attempt %d/%d)", resp.status_code, url, sleep_s, attempt, max_attempts)
                 time.sleep(sleep_s)
                 continue
+            # Non-retryable client errors
+            if resp.status_code in (400, 401, 403, 404, 410, 422):
+                logger.error("Non-retryable HTTP %s for %s; not retrying", resp.status_code, url)
+                return None
             resp.raise_for_status()
             content_type = resp.headers.get("Content-Type", "").lower()
             if "json" in content_type:
@@ -389,6 +401,24 @@ def make_request(
             logger.error("Request timed out: %s", url)
             return None
         except requests.exceptions.RequestException as e:
+            # Treat DNS/Name resolution errors as non-retryable to avoid very long waits
+            msg = str(e).lower()
+            if (
+                "nameresolutionerror" in msg
+                or "failed to resolve" in msg
+                or "getaddrinfo failed" in msg
+                or "temporary failure in name resolution" in msg
+            ):
+                logger.error("Name resolution error for %s: %s; not retrying", url, e)
+                return None
+            # Treat SSL certificate verification errors as non-retryable as well
+            if isinstance(e, requests.exceptions.SSLError) or (
+                "certificate verify failed" in msg
+                or "sslcertverificationerror" in msg
+                or "ssl: certificate_verify_failed" in msg
+            ):
+                logger.error("SSL certificate verification error for %s: %s; not retrying", url, e)
+                return None
             if attempt < max_attempts:
                 sleep_s = base_backoff * (backoff_mult ** (attempt - 1))
                 logger.warning("Request error for %s: %s; sleeping %.1fs (attempt %d/%d)", url, e, sleep_s, attempt, max_attempts)

@@ -2,7 +2,12 @@ import os
 import argparse
 import logging
 import json
+import hashlib
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
 import pandas as pd
+
 from api import utils
 from api import bnf_gallica_api
 from api import internet_archive_api
@@ -17,9 +22,14 @@ from api import bne_api
 from api import google_books_api
 from api import hathitrust_api
 from api import wellcome_api
-from api.model import SearchResult
+from api.model import SearchResult, convert_to_searchresult
+from api.matching import (
+    combined_match_score,
+    parse_year,
+    normalize_text,
+)
 
-PROVIDERS = {
+PROVIDERS: Dict[str, Tuple[Any, Any, str]] = {
     "bnf_gallica": (bnf_gallica_api.search_gallica, bnf_gallica_api.download_gallica_work, "BnF Gallica"),
     "internet_archive": (internet_archive_api.search_internet_archive, internet_archive_api.download_ia_work, "Internet Archive"),
     "loc": (loc_api.search_loc, loc_api.download_loc_work, "Library of Congress"),
@@ -36,8 +46,10 @@ PROVIDERS = {
 }
 
 
-def load_enabled_apis(config_path: str):
+def load_enabled_apis(config_path: str) -> List[Tuple[str, Any, Any, str]]:
     """Load enabled providers from a JSON config file.
+
+    Returns a list of tuples: (provider_key, search_func, download_func, provider_friendly_name)
 
     Config format:
     {
@@ -47,78 +59,360 @@ def load_enabled_apis(config_path: str):
     logger = logging.getLogger(__name__)
     if not os.path.exists(config_path):
         logger.info("Config file %s not found; using default providers: Internet Archive only", config_path)
-        return [PROVIDERS["internet_archive"]]
+        s, d, n = PROVIDERS["internet_archive"]
+        return [("internet_archive", s, d, n)]
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception as e:
-        logger.error("Failed to read config file %s: %s; using default providers (Internet Archive only)", config_path, e)
-        return [PROVIDERS["internet_archive"]]
-    enabled = []
+        logger.error(
+            "Failed to read config file %s: %s; using default providers (Internet Archive only)",
+            config_path,
+            e,
+        )
+        s, d, n = PROVIDERS["internet_archive"]
+        return [("internet_archive", s, d, n)]
+    enabled: List[Tuple[str, Any, Any, str]] = []
     for key, flag in (cfg.get("providers") or {}).items():
         if flag and key in PROVIDERS:
-            enabled.append(PROVIDERS[key])
+            s, d, n = PROVIDERS[key]
+            enabled.append((key, s, d, n))
     if not enabled:
-        logger.warning("No providers enabled in config; nothing to do. Enable providers in %s under 'providers'.", config_path)
+        logging.getLogger(__name__).warning(
+            "No providers enabled in config; nothing to do. Enable providers in %s under 'providers'.",
+            config_path,
+        )
     return enabled
 
 
 # Default to Internet Archive only; this will be overridden by --config if present
-ENABLED_APIS = [
-    PROVIDERS["internet_archive"],
+ENABLED_APIS: List[Tuple[str, Any, Any, str]] = [
+    ("internet_archive",) + PROVIDERS["internet_archive"],
 ]
 
 
-def process_work(title, creator=None, base_output_dir="downloaded_works", dry_run: bool = False):
+def _get_selection_config() -> Dict[str, Any]:
+    cfg = utils.get_config()
+    sel = dict(cfg.get("selection", {}) or {})
+    # Defaults
+    sel.setdefault("strategy", "collect_and_select")  # or "sequential_first_hit"
+    sel.setdefault("provider_hierarchy", [])
+    sel.setdefault("min_title_score", 85)
+    sel.setdefault("creator_weight", 0.2)
+    sel.setdefault("year_tolerance", 2)
+    sel.setdefault("max_candidates_per_provider", 5)
+    sel.setdefault("download_strategy", "selected_only")  # selected_only | selected_plus_metadata | all
+    sel.setdefault("keep_non_selected_metadata", True)
+    return sel
+
+
+def _title_slug(title: str, max_len: int = 80) -> str:
+    base = "_".join([t for t in normalize_text(title).split() if t])
+    if not base:
+        base = "untitled"
+    base = base[:max_len]
+    # sanitize for filesystem
+    return utils.sanitize_filename(base)
+
+
+def _compute_work_id(title: str, creator: Optional[str]) -> str:
+    norm = f"{normalize_text(title)}|{normalize_text(creator) if creator else ''}"
+    h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:10]
+    return h
+
+
+def _provider_order(enabled: List[Tuple[str, Any, Any, str]], hierarchy: List[str]) -> List[Tuple[str, Any, Any, str]]:
+    if not hierarchy:
+        return enabled
+    key_to_tuple = {e[0]: e for e in enabled}
+    ordered = [key_to_tuple[k] for k in hierarchy if k in key_to_tuple]
+    # append any enabled not explicitly listed
+    for item in enabled:
+        if item[0] not in hierarchy:
+            ordered.append(item)
+    return ordered
+
+
+def _get_naming_config() -> Dict[str, Any]:
+    cfg = utils.get_config()
+    nm = dict(cfg.get("naming", {}) or {})
+    nm.setdefault("include_creator_in_work_dir", True)
+    nm.setdefault("include_year_in_work_dir", True)
+    nm.setdefault("title_slug_max_len", 80)
+    return nm
+
+
+def process_work(title, creator: Optional[str] = None, base_output_dir: str = "downloaded_works", dry_run: bool = False):
     logger = logging.getLogger(__name__)
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
-    sanitized_title = utils.sanitize_filename(title)
-    work_output_folder = os.path.join(base_output_dir, sanitized_title)
-    if not os.path.exists(work_output_folder):
-        os.makedirs(work_output_folder, exist_ok=True)
-        logger.info("Created directory: %s", work_output_folder)
-    found_items_overall = []
-    for search_func, download_func, api_name in ENABLED_APIS:
-        logger.info("--- Searching on %s for '%s' ---", api_name, title)
+
+    sel_cfg = _get_selection_config()
+    provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
+
+    # Build a quick map of provider_key -> (search_func, download_func, provider_name)
+    provider_map: Dict[str, Tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
+
+    # Helper to call search functions with varying signatures robustly
+    def _call_search(search_func, title: str, creator: Optional[str], max_results: int):
         try:
-            if creator:
+            return search_func(title, creator=creator, max_results=max_results)
+        except TypeError:
+            try:
+                return search_func(title, max_results=max_results)
+            except TypeError:
                 try:
-                    search_results = search_func(title, creator=creator)
+                    if creator is not None:
+                        return search_func(title, creator=creator)
                 except TypeError:
-                    search_results = search_func(title)
-            else:
-                search_results = search_func(title)
-            if search_results:
-                logger.info("Found %d item(s) on %s", len(search_results), api_name)
-                for i, item in enumerate(search_results):
-                    if isinstance(item, SearchResult):
-                        item_title = item.title or "Unknown Title"
-                        item_id = item.source_id or item.raw.get('identifier') or item.raw.get('ark_id') or f"item_{i}"
-                        provider = item.provider or api_name
-                    else:
-                        item_title = item.get('title', 'Unknown Title')
-                        item_id = item.get('id', item.get('identifier', item.get('ark_id', f"item_{i}")))
-                        provider = api_name
-                    logger.info("  - %s (ID: %s)", item_title, item_id)
-                    item_folder_name = utils.sanitize_filename(f"{provider}_{item_id}_{item_title}")
-                    item_output_folder = os.path.join(work_output_folder, item_folder_name)
-                    os.makedirs(item_output_folder, exist_ok=True)
-                    if dry_run:
-                        logger.info("Dry-run: skipping download for %s:%s", provider, item_id)
-                    else:
-                        if download_func(item, item_output_folder):
-                            logger.info("Successfully processed item from %s in %s", api_name, item_output_folder)
-                        else:
-                            logger.warning("Problem processing item from %s in %s", api_name, item_output_folder)
-                    found_items_overall.append(item)
-            else:
-                logger.info("No items found for '%s' on %s.", title, api_name)
+                    return search_func(title)
         except Exception:
-            logger.exception("Error during search/download with %s for '%s'", api_name, title)
-    if not found_items_overall:
-        logger.info("No items found for '%s' across all enabled APIs.", title)
+            # Let the outer try/except handle logging
+            raise
+
+    # Gather candidates depending on strategy
+    all_candidates: List[SearchResult] = []
+    selected: Optional[SearchResult] = None
+    selected_provider_tuple: Optional[Tuple[str, Any, Any, str]] = None
+
+    def _score_item(sr: SearchResult) -> Dict[str, Any]:
+        score = combined_match_score(
+            query_title=title,
+            item_title=sr.title,
+            query_creator=creator,
+            creators=sr.creators,
+            creator_weight=float(sel_cfg.get("creator_weight", 0.2)),
+            method="token_set",
+        )
+        # Simple quality signals
+        boost = 0.0
+        if sr.iiif_manifest:
+            boost += 3.0
+        if sr.item_url:
+            boost += 0.5
+        total = score + boost
+        return {"score": score, "boost": boost, "total": total}
+
+    def _max_results_for_provider(pkey: str) -> int:
+        val = utils.get_provider_setting(pkey, "max_results", None)
+        try:
+            return int(val) if val is not None else int(sel_cfg.get("max_candidates_per_provider", 5))
+        except Exception:
+            return int(sel_cfg.get("max_candidates_per_provider", 5))
+
+    min_title_score = float(sel_cfg.get("min_title_score", 85))
+
+    def _prepare_sr(provider_key: str, provider_name: str, item: Any) -> SearchResult:
+        if isinstance(item, SearchResult):
+            sr = item
+        else:
+            # Convert legacy dicts to SearchResult for uniform handling
+            sr = convert_to_searchresult(provider_name, item if isinstance(item, dict) else {})
+        sr.provider_key = provider_key
+        if not sr.provider:
+            sr.provider = provider_name
+        return sr
+
+    def _consider(sr: SearchResult):
+        # Compute and attach scores for later JSON export
+        sc = _score_item(sr)
+        sr.raw.setdefault("__matching__", {}).update(sc)
+        all_candidates.append(sr)
+
+    strategy = (sel_cfg.get("strategy") or "collect_and_select").lower()
+    if strategy == "sequential_first_hit":
+        for pkey, search_func, download_func, pname in provider_list:
+            logger.info("--- Searching on %s for '%s' ---", pname, title)
+            try:
+                max_results = _max_results_for_provider(pkey)
+                results = _call_search(search_func, title, creator, max_results)
+                if not results:
+                    logger.info("No items found for '%s' on %s.", title, pname)
+                    continue
+                logger.info("Found %d item(s) on %s", len(results), pname)
+                # evaluate and pick best acceptable result from this provider
+                temp: List[Tuple[float, SearchResult]] = []
+                for it in results:
+                    sr = _prepare_sr(pkey, pname, it)
+                    _consider(sr)
+                    sc = sr.raw.get("__matching__", {})
+                    if sc.get("score", 0) >= min_title_score:
+                        temp.append((sc.get("total", 0.0), sr))
+                if temp:
+                    temp.sort(key=lambda x: x[0], reverse=True)
+                    selected = temp[0][1]
+                    selected_provider_tuple = (pkey, search_func, download_func, pname)
+                    break
+            except Exception:
+                logger.exception("Error during search with %s for '%s'", pname, title)
     else:
-        logger.info("Finished processing '%s'. Check '%s' for results.", title, work_output_folder)
+        # collect_and_select: search all providers, then choose best according to hierarchy and scores
+        for pkey, search_func, download_func, pname in provider_list:
+            logger.info("--- Searching on %s for '%s' ---", pname, title)
+            try:
+                max_results = _max_results_for_provider(pkey)
+                if creator:
+                    try:
+                        results = search_func(title, creator=creator, max_results=max_results)
+                    except TypeError:
+                        results = search_func(title, max_results=max_results)
+                else:
+                    results = search_func(title, max_results=max_results)
+                if not results:
+                    logger.info("No items found for '%s' on %s.", title, pname)
+                    continue
+                logger.info("Found %d item(s) on %s", len(results), pname)
+                for it in results:
+                    sr = _prepare_sr(pkey, pname, it)
+                    _consider(sr)
+            except Exception:
+                logger.exception("Error during search with %s for '%s'", pname, title)
+
+        # After collection, filter and rank
+        # Rank by provider priority then by total matching score
+        prov_priority = {pkey: idx for idx, (pkey, *_rest) in enumerate(provider_list)}
+        ranked: List[Tuple[int, float, SearchResult]] = []
+        for sr in all_candidates:
+            sc = sr.raw.get("__matching__", {})
+            if sc.get("score", 0) < min_title_score:
+                continue
+            pprio = prov_priority.get(sr.provider_key or "", 9999)
+            ranked.append((pprio, float(sc.get("total", 0.0)), sr))
+        ranked.sort(key=lambda x: (x[0], -x[1]))
+        if ranked:
+            selected = ranked[0][2]
+            # find its provider tuple
+            for tup in provider_list:
+                if tup[0] == (selected.provider_key or ""):
+                    selected_provider_tuple = tup
+                    break
+
+    if not all_candidates:
+        logger.info("No items found for '%s' across all enabled APIs.", title)
+        return
+
+    # Build work directory and write metadata
+    naming_cfg = _get_naming_config()
+    work_id = _compute_work_id(title, creator)
+    title_slug = _title_slug(title, max_len=int(naming_cfg.get("title_slug_max_len", 80)))
+    parts = [work_id, title_slug]
+    if naming_cfg.get("include_creator_in_work_dir", True) and creator:
+        parts.append(_title_slug(creator, max_len=40))
+    if naming_cfg.get("include_year_in_work_dir", True) and selected and selected.date:
+        y = parse_year(selected.date)
+        if y:
+            parts.append(str(y))
+    work_dir_name = "_".join([p for p in parts if p])
+    work_dir = os.path.join(base_output_dir, work_dir_name)
+    os.makedirs(work_dir, exist_ok=True)
+
+    selected_dir = None
+    selected_provider_name = None
+    selected_source_id = None
+    if selected and selected_provider_tuple:
+        selected_provider_name = selected.provider or selected_provider_tuple[3]
+        selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
+        selected_dir = os.path.join(work_dir, "selected", selected.provider_key or "unknown")
+        os.makedirs(selected_dir, exist_ok=True)
+
+    # Persist work.json summarizing decision
+    work_json_path = os.path.join(work_dir, "work.json")
+    work_meta: Dict[str, Any] = {
+        "input": {"title": title, "creator": creator},
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "selection": sel_cfg,
+        "candidates": [
+            {
+                "provider": sr.provider,
+                "provider_key": sr.provider_key,
+                "title": sr.title,
+                "creators": sr.creators,
+                "date": sr.date,
+                "source_id": sr.source_id,
+                "item_url": sr.item_url,
+                "iiif_manifest": sr.iiif_manifest,
+                "scores": sr.raw.get("__matching__", {}),
+            }
+            for sr in all_candidates
+        ],
+        "selected": (
+            {
+                "provider": selected.provider if selected else None,
+                "provider_key": selected.provider_key if selected else None,
+                "source_id": selected_source_id,
+                "title": selected.title if selected else None,
+            }
+            if selected
+            else None
+        ),
+    }
+    try:
+        with open(work_json_path, "w", encoding="utf-8") as f:
+            json.dump(work_meta, f, indent=2, ensure_ascii=False)
+    except Exception:
+        logger.exception("Failed to write work.json to %s", work_json_path)
+
+    # Optionally persist non-selected metadata (SearchResult dict) for auditing
+    if sel_cfg.get("keep_non_selected_metadata", True):
+        for sr in all_candidates:
+            try:
+                prov_dir = os.path.join(work_dir, "sources", sr.provider_key or "unknown", sr.source_id or "unknown")
+                os.makedirs(prov_dir, exist_ok=True)
+                meta_path = os.path.join(prov_dir, "search_result.json")
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(sr.to_dict(include_raw=True), f, indent=2, ensure_ascii=False)
+            except Exception:
+                logger.exception("Failed to persist candidate metadata for %s:%s", sr.provider_key, sr.source_id)
+
+    # Download according to strategy
+    download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
+    if not dry_run and selected and selected_provider_tuple and selected_dir:
+        pkey, _search_func, download_func, pname = selected_provider_tuple
+        try:
+            logger.info("Downloading selected item from %s into %s", pname, selected_dir)
+            ok = download_func(selected, selected_dir)
+            if not ok:
+                logger.warning("Download function reported failure for %s:%s", pkey, selected.source_id)
+        except Exception:
+            logger.exception("Error during download for %s:%s", pkey, selected.source_id)
+        # If 'all', also download other candidates into sources/ subfolders
+        if download_strategy == "all":
+            for sr in all_candidates:
+                try:
+                    if selected and sr.provider_key == selected.provider_key and sr.source_id == selected.source_id:
+                        continue
+                    prov_key = sr.provider_key or "unknown"
+                    dest_dir = os.path.join(work_dir, "sources", prov_key, sr.source_id or "unknown")
+                    os.makedirs(dest_dir, exist_ok=True)
+                    if prov_key in provider_map:
+                        _s, dfunc, pname2 = provider_map[prov_key]
+                        logger.info("Downloading additional candidate from %s into %s", pname2, dest_dir)
+                        dfunc(sr, dest_dir)
+                except Exception:
+                    logger.exception("Failed to download additional candidate %s:%s", sr.provider_key, sr.source_id)
+    elif dry_run:
+        logger.info("Dry-run: skipping download for selected item.")
+
+    # Update index.csv summary
+    try:
+        index_path = os.path.join(base_output_dir, "index.csv")
+        row = {
+            "work_id": work_id,
+            "work_dir": work_dir,
+            "title": title,
+            "creator": creator,
+            "selected_provider": selected.provider if selected else None,
+            "selected_provider_key": selected.provider_key if selected else None,
+            "selected_source_id": selected_source_id,
+            "selected_dir": selected_dir,
+            "work_json": work_json_path,
+        }
+        df = pd.DataFrame([row])
+        header = not os.path.exists(index_path)
+        df.to_csv(index_path, mode="a", header=header, index=False)
+    except Exception:
+        logger.exception("Failed to update index.csv")
+
+    logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
 
 
 def main():
@@ -146,6 +440,12 @@ def main():
     )
 
     logger = logging.getLogger(__name__)
+
+    # Ensure utils.get_config() reads the same config path
+    try:
+        os.environ["CHRONO_CONFIG_PATH"] = args.config
+    except Exception:
+        pass
 
     # Load providers from config (if exists), otherwise defaults remain (IA only)
     global ENABLED_APIS
