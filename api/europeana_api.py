@@ -2,16 +2,50 @@ import logging
 import os
 from typing import List, Union
 
-from .utils import save_json, make_request
+from .utils import save_json, make_request, download_file, get_provider_setting
 from .model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://api.europeana.eu/record/v2/search.json"
+EUROPEANA_MANIFEST_HOST = "https://iiif.europeana.eu"
 
 def _api_key() -> str | None:
     # Read at call time so keys loaded from .env or environment later are picked up
     return os.getenv("EUROPEANA_API_KEY")
+
+
+def _europeana_max_pages() -> int | None:
+    """Read max pages from config provider_settings.europeana.max_pages (0/None = all)."""
+    val = get_provider_setting("europeana", "max_pages", None)
+    if isinstance(val, int):
+        return val
+    return 0
+
+
+def _build_manifest_url_from_id(euro_id: str, api_key: str | None, prefer_v3: bool = True) -> str | None:
+    """Construct the Europeana IIIF Manifest API URL from a Europeana record id.
+
+    Europeana search results typically have ids like "/9200379/BibliographicResource_3000117247947".
+    The manifest URL format is:
+      https://iiif.europeana.eu/presentation/{collectionId}/{recordId}/manifest?wskey=KEY[&format=3]
+    """
+    if not euro_id:
+        return None
+    parts = [p for p in euro_id.strip().split('/') if p]
+    # Expect [collectionId, recordId]
+    if len(parts) >= 2:
+        collection_id, record_id = parts[-2], parts[-1]
+        url = f"{EUROPEANA_MANIFEST_HOST}/presentation/{collection_id}/{record_id}/manifest"
+        params = []
+        if api_key:
+            params.append(f"wskey={api_key}")
+        if prefer_v3:
+            params.append("format=3")
+        if params:
+            url = url + "?" + "&".join(params)
+        return url
+    return None
 
 def search_europeana(title, creator=None, max_results=3) -> List[SearchResult]:
     key = _api_key()
@@ -21,38 +55,51 @@ def search_europeana(title, creator=None, max_results=3) -> List[SearchResult]:
     query_parts = [f'title:"{title}"']
     if creator:
         query_parts.append(f'AND who:"{creator}"')
-    query_parts.append('AND proxy_dc_type:"TEXT"')
     query = " ".join(query_parts)
     params = {
         "wskey": key,
         "query": query,
-        "rows": str(max_results),
+        "rows": str(max_results * 3),  # pull extras to increase chance of IIIF availability
+        "profile": "rich",
+        "media": "true",
     }
     logger.info("Searching Europeana for: %s", title)
     data = make_request(API_BASE_URL, params=params)
     results: List[SearchResult] = []
     if data and data.get("success") and data.get("items"):
         for item in data["items"]:
-            item_title = item.get("title", ["N/A"])
+            item_title = item.get("title", ["N/A"]) 
             if isinstance(item_title, list):
                 item_title = item_title[0]
             item_creator = "N/A"
             if item.get("dcCreator"):
                 item_creator = item["dcCreator"][0]
             iiif_manifest = None
-            if item.get("edmAggregatedCHO") and item["edmAggregatedCHO"].get("hasView"):
-                views = item["edmAggregatedCHO"]["hasView"]
-                if not isinstance(views, list):
-                    views = [views]
-                for view in views:
-                    if isinstance(view, str) and "iiif" in view and "manifest" in view:
-                        iiif_manifest = view
-                        break
-                    elif isinstance(view, dict) and view.get("@id") and "iiif" in view["@id"] and "manifest" in view["@id"]:
-                        iiif_manifest = view["@id"]
-                        break
-            if not iiif_manifest and "iiif" in item.get("object", "") and "manifest" in item.get("object", ""):
-                iiif_manifest = item.get("object")
+            # Prefer direct manifest URL if given by provider
+            # Check edmIsShownBy / hasView / object
+            try:
+                if item.get("edmAggregatedCHO") and item["edmAggregatedCHO"].get("hasView"):
+                    views = item["edmAggregatedCHO"]["hasView"]
+                    if not isinstance(views, list):
+                        views = [views]
+                    for view in views:
+                        if isinstance(view, str) and "manifest" in view:
+                            iiif_manifest = view
+                            break
+                        elif isinstance(view, dict) and view.get("@id") and "manifest" in view["@id"]:
+                            iiif_manifest = view["@id"]
+                            break
+            except Exception:
+                pass
+            if not iiif_manifest:
+                obj = item.get("object")
+                if isinstance(obj, str) and "manifest" in obj:
+                    iiif_manifest = obj
+            # If still none, construct Europeana Manifest API URL from id
+            if not iiif_manifest and item.get("id"):
+                built = _build_manifest_url_from_id(item.get("id"), key, prefer_v3=True)
+                if built:
+                    iiif_manifest = built
             raw = {
                 "title": item_title,
                 "creator": item_creator,
@@ -62,14 +109,16 @@ def search_europeana(title, creator=None, max_results=3) -> List[SearchResult]:
                 "iiif_manifest": iiif_manifest,
             }
             results.append(convert_to_searchresult("Europeana", raw))
+            if len(results) >= max_results:
+                break
     elif data and not data.get("success"):
         logger.error("Europeana API error: %s", data.get("error"))
     return results
 
 def download_europeana_work(item_data: Union[SearchResult, dict], output_folder):
+    # Save search metadata
     if isinstance(item_data, SearchResult):
-        item_id = item_data.source_id or item_data.title or "unknown_item"
-        # save the raw provider result if available
+        item_id = item_data.source_id or item_data.raw.get("id") or item_data.title or "unknown_item"
         if item_data.raw:
             save_json(item_data.raw, output_folder, f"europeana_{item_id}_search_meta")
         iiif_manifest_url = item_data.iiif_manifest or item_data.raw.get("iiif_manifest")
@@ -77,21 +126,113 @@ def download_europeana_work(item_data: Union[SearchResult, dict], output_folder)
         item_id = item_data.get("id", item_data.get("title", "unknown_item"))
         save_json(item_data, output_folder, f"europeana_{item_id}_search_meta")
         iiif_manifest_url = item_data.get("iiif_manifest")
-    if iiif_manifest_url:
-        logger.info("Fetching Europeana IIIF manifest: %s", iiif_manifest_url)
-        manifest_data = make_request(iiif_manifest_url)
-        if manifest_data:
-            save_json(manifest_data, output_folder, f"europeana_{item_id}_iiif_manifest")
-        else:
-            logger.warning("Failed to fetch IIIF manifest from %s", iiif_manifest_url)
-    else:
-        logger.info("No direct IIIF manifest URL found in Europeana search result for %s.", item_id)
-    shown_by = None
-    if isinstance(item_data, SearchResult):
-        shown_by = item_data.raw.get("edmIsShownBy")
-    else:
-        shown_by = item_data.get("edmIsShownBy")
-    if shown_by:
-        v = shown_by[0] if isinstance(shown_by, list) else shown_by
-        logger.debug("Item image (provider link): %s", v)
-    return True
+
+    # If missing, construct Europeana Manifest API URL
+    if not iiif_manifest_url:
+        key = _api_key()
+        built = _build_manifest_url_from_id(item_id, key, prefer_v3=True)
+        iiif_manifest_url = built
+
+    if not iiif_manifest_url:
+        logger.info("No IIIF manifest URL found or constructed for Europeana item: %s", item_id)
+        return False
+
+    logger.info("Fetching Europeana IIIF manifest: %s", iiif_manifest_url)
+    manifest_data = make_request(iiif_manifest_url)
+    if not manifest_data:
+        logger.warning("Failed to fetch IIIF manifest from %s", iiif_manifest_url)
+        return False
+
+    save_json(manifest_data, output_folder, f"europeana_{item_id}_iiif_manifest")
+
+    # Extract IIIF Image API service bases and download images (v2/v3)
+    service_bases: List[str] = []
+    try:
+        sequences = manifest_data.get("sequences") or []
+        if sequences:
+            canvases = sequences[0].get("canvases", [])
+            for canvas in canvases:
+                try:
+                    images = canvas.get("images", [])
+                    if not images:
+                        continue
+                    res = images[0].get("resource", {})
+                    service = res.get("service", {})
+                    svc_id = service.get("@id") or service.get("id")
+                    if not svc_id:
+                        img_id = res.get("@id") or res.get("id")
+                        if img_id and "/full/" in img_id:
+                            svc_id = img_id.split("/full/")[0]
+                    if svc_id:
+                        service_bases.append(svc_id)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    if not service_bases and manifest_data.get("items"):
+        try:
+            for canvas in manifest_data.get("items", []):
+                try:
+                    anno_pages = canvas.get("items", [])
+                    if not anno_pages:
+                        continue
+                    annos = anno_pages[0].get("items", [])
+                    if not annos:
+                        continue
+                    body = annos[0].get("body", {})
+                    if isinstance(body, list) and body:
+                        body = body[0]
+                    service = body.get("service") or body.get("services")
+                    svc_obj = None
+                    if isinstance(service, list) and service:
+                        svc_obj = service[0]
+                    elif isinstance(service, dict):
+                        svc_obj = service
+                    svc_id = None
+                    if svc_obj:
+                        svc_id = svc_obj.get("@id") or svc_obj.get("id")
+                    if not svc_id:
+                        body_id = body.get("id")
+                        if body_id and "/full/" in body_id:
+                            svc_id = body_id.split("/full/")[0]
+                    if svc_id:
+                        service_bases.append(svc_id)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    if not service_bases:
+        logger.info("No IIIF image services found in Europeana manifest for %s", item_id)
+        return True
+
+    def _candidates(base: str) -> List[str]:
+        b = base.rstrip('/')
+        return [
+            f"{b}/full/full/0/default.jpg",
+            f"{b}/full/max/0/default.jpg",
+            f"{b}/full/full/0/native.jpg",
+        ]
+
+    def _download_one(base: str, filename: str) -> bool:
+        for u in _candidates(base):
+            if download_file(u, output_folder, filename):
+                return True
+        return False
+
+    max_pages = _europeana_max_pages()
+    total = len(service_bases)
+    to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
+    logger.info("Europeana: downloading %d/%d page images for %s", len(to_download), total, item_id)
+    ok_any = False
+    for idx, svc in enumerate(to_download, start=1):
+        try:
+            fname = f"europeana_{item_id}_p{idx:05d}.jpg"
+            if _download_one(svc, fname):
+                ok_any = True
+            else:
+                logger.warning("Failed to download Europeana image from %s", svc)
+        except Exception:
+            logger.exception("Error downloading Europeana image for %s from %s", item_id, svc)
+    return ok_any

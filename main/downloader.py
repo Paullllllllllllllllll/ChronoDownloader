@@ -16,6 +16,7 @@ from api import polona_api
 from api import bne_api
 from api import google_books_api
 from api import hathitrust_api
+from api import wellcome_api
 from api.model import SearchResult
 
 PROVIDERS = {
@@ -31,7 +32,7 @@ PROVIDERS = {
     "bne": (bne_api.search_bne, bne_api.download_bne_work, "BNE"),
     "google_books": (google_books_api.search_google_books, google_books_api.download_google_books_work, "Google Books"),
     "hathitrust": (hathitrust_api.search_hathitrust, hathitrust_api.download_hathitrust_work, "HathiTrust"),
-    # "wellcome": (...)  # placeholder for a future connector
+    "wellcome": (wellcome_api.search_wellcome, wellcome_api.download_wellcome_work, "Wellcome Collection"),
 }
 
 

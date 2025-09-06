@@ -1,0 +1,50 @@
+{
+  "providers": {
+    "internet_archive": false,
+    "bnf_gallica": true,
+    "loc": true,
+    "europeana": true,
+    "dpla": false,
+    "ddb": true,
+    "british_library": true,
+    "mdz": true,
+    "polona": false,
+    "bne": true,
+    "google_books": true,
+    "hathitrust": false,
+    "wellcome": true
+  },
+  "provider_settings": {
+    "mdz": {
+      "max_pages": 15
+    },
+    "gallica": {
+      "max_pages": 15,
+      "delay_ms": 1200
+    },
+    "loc": {
+      "max_pages": 15
+    },
+    "ddb": {
+      "max_pages": 15
+    },
+    "british_library": {
+      "max_pages": 15
+    },
+    "polona": {
+      "max_pages": 15
+    },
+    "europeana": {
+      "max_pages": 15
+    },
+    "google_books": {
+      "free_only": true,
+      "prefer": "pdf",
+      "allow_drm": false,
+      "max_files": 3
+    },
+    "wellcome": {
+      "max_images": 15
+    }
+  }
+}
