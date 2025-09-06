@@ -16,35 +16,109 @@
   },
   "provider_settings": {
     "mdz": {
-      "max_pages": 15
+      "max_pages": 15,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
     },
     "gallica": {
       "max_pages": 15,
-      "delay_ms": 1200
+      "network": {
+        "delay_ms": 1500,
+        "jitter_ms": 400,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.6,
+        "timeout_s": 30
+      }
     },
     "loc": {
-      "max_pages": 15
+      "max_pages": 15,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
     },
     "ddb": {
-      "max_pages": 15
+      "max_pages": 15,
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 200,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
     },
     "british_library": {
-      "max_pages": 15
+      "max_pages": 15,
+      "network": {
+        "delay_ms": 500,
+        "jitter_ms": 250,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
     },
     "polona": {
       "max_pages": 15
     },
     "europeana": {
-      "max_pages": 15
+      "max_pages": 15,
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 200,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
     },
     "google_books": {
       "free_only": true,
       "prefer": "pdf",
       "allow_drm": false,
-      "max_files": 3
+      "max_files": 3,
+      "network": {
+        "delay_ms": 200,
+        "jitter_ms": 100,
+        "max_attempts": 25,
+        "base_backoff_s": 1.2,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
     },
     "wellcome": {
-      "max_images": 15
+      "max_images": 15,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
+    },
+    "bne": {
+      "max_pages": 15,
+      "network": {
+        "delay_ms": 1700,
+        "jitter_ms": 200,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
     }
   }
 }
