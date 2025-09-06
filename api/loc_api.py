@@ -1,7 +1,14 @@
 import logging
 import urllib.parse
 from typing import List, Union
-from .utils import save_json, download_file, make_request, get_provider_setting
+from .utils import (
+    save_json,
+    download_file,
+    make_request,
+    get_provider_setting,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
@@ -120,6 +127,15 @@ def download_loc_work(item_data: Union[SearchResult, dict], output_folder):
             iiif_manifest_data = make_request(iiif_manifest_url)
             if iiif_manifest_data:
                 save_json(iiif_manifest_data, output_folder, f"loc_{item_id}_iiif_manifest")
+
+                # Prefer manifest-level renderings (PDF/EPUB) when available
+                try:
+                    renders = download_iiif_renderings(iiif_manifest_data, output_folder, filename_prefix=f"loc_{item_id}_")
+                    if renders > 0 and prefer_pdf_over_images():
+                        logger.info("LOC: downloaded %d rendering(s); skipping image downloads per config.", renders)
+                        return True
+                except Exception:
+                    logger.exception("LOC: error while downloading manifest renderings for %s", item_id)
 
                 # Extract IIIF Image service bases (v2/v3)
                 service_bases: List[str] = []

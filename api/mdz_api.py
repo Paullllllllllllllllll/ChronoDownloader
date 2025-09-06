@@ -6,7 +6,14 @@ import re
 import urllib.parse
 from typing import List, Union
 
-from .utils import save_json, make_request, download_file, get_provider_setting
+from .utils import (
+    save_json,
+    make_request,
+    download_file,
+    get_provider_setting,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 from bs4 import BeautifulSoup
 
@@ -144,6 +151,15 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder):
 
     # Always save the manifest for reproducibility
     save_json(manifest, output_folder, f"mdz_{object_id}_manifest")
+
+    # Try to download manifest-level PDF/EPUB renderings first
+    try:
+        renderings_downloaded = download_iiif_renderings(manifest, output_folder, filename_prefix=f"mdz_{object_id}_")
+        if renderings_downloaded > 0 and prefer_pdf_over_images():
+            logger.info("MDZ: downloaded %d manifest rendering(s); skipping image downloads per config.", renderings_downloaded)
+            return True
+    except Exception:
+        logger.exception("MDZ: error while downloading manifest renderings for %s", object_id)
 
     # Helper to build a direct image URL from an Image API base
     def _build_image_url(image_service_base: str) -> str:

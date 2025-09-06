@@ -5,7 +5,14 @@ import re
 import xml.etree.ElementTree as ET
 from typing import List, Union
 
-from .utils import save_json, make_request, download_file, get_provider_setting
+from .utils import (
+    save_json,
+    make_request,
+    download_file,
+    get_provider_setting,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 from .query_helpers import escape_sru_literal
 
@@ -98,6 +105,15 @@ def download_british_library_work(item_data: Union[SearchResult, dict], output_f
 
     # Save manifest for reproducibility
     save_json(manifest, output_folder, f"bl_{identifier}_manifest")
+
+    # Prefer manifest-level PDF/EPUB renderings if available
+    try:
+        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"bl_{identifier}_")
+        if renders > 0 and prefer_pdf_over_images():
+            logger.info("British Library: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            return True
+    except Exception:
+        logger.exception("BL: error while downloading manifest renderings for %s", identifier)
 
     # Extract IIIF Image API service bases from v2 or v3
     service_bases: List[str] = []

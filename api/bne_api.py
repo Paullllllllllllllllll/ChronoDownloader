@@ -3,7 +3,14 @@
 import logging
 from typing import List, Union
 
-from .utils import save_json, make_request, download_file, get_provider_setting
+from .utils import (
+    save_json,
+    make_request,
+    download_file,
+    get_provider_setting,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 from .query_helpers import escape_sparql_string
 
@@ -85,6 +92,15 @@ def download_bne_work(item_data: Union[SearchResult, dict], output_folder):
 
     # Save manifest
     save_json(manifest, output_folder, f"bne_{item_identifier}_manifest")
+
+    # Prefer manifest-level PDF/EPUB renderings when available
+    try:
+        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"bne_{item_identifier}_")
+        if renders > 0 and prefer_pdf_over_images():
+            logger.info("BNE: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            return True
+    except Exception:
+        logger.exception("BNE: error while downloading manifest renderings for %s", item_identifier)
 
     # Extract IIIF Image API service bases from v2 or v3
     service_bases: List[str] = []

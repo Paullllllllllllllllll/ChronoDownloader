@@ -5,10 +5,11 @@ import logging
 import requests
 import time
 import random
+import threading
 from urllib.parse import unquote, urlparse
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Dict, List, Any
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -70,6 +71,276 @@ def _provider_for_url(url: str) -> Optional[str]:
     return None
 
 
+# ---------------- Centralized download budgeting & context -----------------
+
+class _DownloadBudget:
+    """Tracks and enforces download limits across the whole run.
+
+    Limits are configured under config.json -> download_limits:
+    {
+      "max_total_files": 0,            # 0 or missing = unlimited
+      "max_total_bytes": 0,
+      "per_work": { "max_files": 0, "max_bytes": 0 },
+      "per_provider": { "mdz": {"max_files": 0, "max_bytes": 0}, ... },
+      "on_exceed": "skip"             # "skip" | "stop"
+    }
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.total_files = 0
+        self.total_bytes = 0
+        self.per_work: Dict[str, Dict[str, int]] = {}
+        self.per_provider: Dict[str, Dict[str, int]] = {}
+        self._exhausted = False
+
+    # ---- helpers ----
+    @staticmethod
+    def _limit_value(v: Any) -> Optional[int]:
+        try:
+            iv = int(v)
+            return iv if iv > 0 else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _limits() -> Dict[str, Any]:
+        cfg = get_config()
+        return dict(cfg.get("download_limits", {}) or {})
+
+    def _policy(self) -> str:
+        dl = self._limits()
+        pol = str(dl.get("on_exceed", "skip") or "skip").lower()
+        return "stop" if pol == "stop" else "skip"
+
+    def exhausted(self) -> bool:
+        with self._lock:
+            return self._exhausted
+
+    def _inc(self, bucket: Dict[str, Dict[str, int]], key: str, field: str, delta: int) -> int:
+        m = bucket.setdefault(key, {"files": 0, "bytes": 0})
+        m[field] = int(m.get(field, 0)) + int(delta)
+        return m[field]
+
+    def _get(self, bucket: Dict[str, Dict[str, int]], key: str, field: str) -> int:
+        return int(bucket.get(key, {}).get(field, 0))
+
+    # ---- checks ----
+    def allow_new_file(self, provider: Optional[str], work_id: Optional[str]) -> bool:
+        dl = self._limits()
+        max_total_files = self._limit_value(dl.get("max_total_files"))
+        if max_total_files is not None and (self.total_files + 1) > max_total_files:
+            if self._policy() == "stop":
+                with self._lock:
+                    self._exhausted = True
+            return False
+        if provider:
+            per = dict(dl.get("per_provider", {}) or {})
+            pl = self._limit_value((per.get(provider) or {}).get("max_files"))
+            if pl is not None and (self._get(self.per_provider, provider, "files") + 1) > pl:
+                if self._policy() == "stop":
+                    with self._lock:
+                        self._exhausted = True
+                return False
+        if work_id:
+            pw = dict(dl.get("per_work", {}) or {})
+            wl = self._limit_value(pw.get("max_files"))
+            if wl is not None and (self._get(self.per_work, work_id, "files") + 1) > wl:
+                if self._policy() == "stop":
+                    with self._lock:
+                        self._exhausted = True
+                return False
+        return True
+
+    def allow_bytes(self, provider: Optional[str], work_id: Optional[str], add_bytes: Optional[int]) -> bool:
+        if not add_bytes or add_bytes <= 0:
+            return True
+        dl = self._limits()
+        mtb = self._limit_value(dl.get("max_total_bytes"))
+        if mtb is not None and (self.total_bytes + add_bytes) > mtb:
+            if self._policy() == "stop":
+                with self._lock:
+                    self._exhausted = True
+            return False
+        if provider:
+            per = dict(dl.get("per_provider", {}) or {})
+            pl = self._limit_value((per.get(provider) or {}).get("max_bytes"))
+            if pl is not None and (self._get(self.per_provider, provider, "bytes") + add_bytes) > pl:
+                if self._policy() == "stop":
+                    with self._lock:
+                        self._exhausted = True
+                return False
+        if work_id:
+            pw = dict(dl.get("per_work", {}) or {})
+            wl = self._limit_value(pw.get("max_bytes"))
+            if wl is not None and (self._get(self.per_work, work_id, "bytes") + add_bytes) > wl:
+                if self._policy() == "stop":
+                    with self._lock:
+                        self._exhausted = True
+                return False
+        return True
+
+    # ---- mutators ----
+    def add_bytes(self, provider: Optional[str], work_id: Optional[str], n: int) -> bool:
+        """Add bytes to counters; return True if still within limits, False if exceeded.
+
+        If exceeded and policy is 'stop', mark exhausted.
+        """
+        if n <= 0:
+            return True
+        with self._lock:
+            self.total_bytes += n
+            if provider:
+                self._inc(self.per_provider, provider, "bytes", n)
+            if work_id:
+                self._inc(self.per_work, work_id, "bytes", n)
+            ok = self.allow_bytes(provider, work_id, 0)
+            if not ok and self._policy() == "stop":
+                self._exhausted = True
+            return ok
+
+    def add_file(self, provider: Optional[str], work_id: Optional[str]) -> bool:
+        with self._lock:
+            self.total_files += 1
+            if provider:
+                self._inc(self.per_provider, provider, "files", 1)
+            if work_id:
+                self._inc(self.per_work, work_id, "files", 1)
+            ok = self.allow_new_file(provider, work_id)
+            if not ok and self._policy() == "stop":
+                self._exhausted = True
+            return ok
+
+
+_BUDGET = _DownloadBudget()
+
+# Thread-local current work context so providers don't need to pass work_id around
+_TLS = threading.local()
+setattr(_TLS, "work_id", None)
+
+
+def set_current_work(work_id: Optional[str]) -> None:
+    setattr(_TLS, "work_id", work_id)
+
+
+def clear_current_work() -> None:
+    setattr(_TLS, "work_id", None)
+
+
+def _current_work_id() -> Optional[str]:
+    try:
+        return getattr(_TLS, "work_id", None)
+    except Exception:
+        return None
+
+
+def budget_exhausted() -> bool:
+    return _BUDGET.exhausted()
+
+
+def _prefer_pdf_over_images() -> bool:
+    cfg = get_config()
+    dl = cfg.get("download", {}) or {}
+    val = dl.get("prefer_pdf_over_images")
+    return True if val is None else bool(val)
+
+
+def _overwrite_existing() -> bool:
+    cfg = get_config()
+    dl = cfg.get("download", {}) or {}
+    return bool(dl.get("overwrite_existing", False))
+
+
+# Public wrappers for config-driven preferences
+def prefer_pdf_over_images() -> bool:
+    return _prefer_pdf_over_images()
+
+
+def overwrite_existing() -> bool:
+    return _overwrite_existing()
+
+
+def download_iiif_renderings(manifest: Dict[str, Any], folder_path: str, filename_prefix: str = "") -> int:
+    """Download files referenced in IIIF manifest-level 'rendering' entries.
+
+    Many IIIF manifests include a top-level 'rendering' array with alternate formats
+    such as application/pdf or application/epub+zip. This helper downloads a small
+    number of such files according to config:
+
+    config.download:
+      - download_manifest_renderings: true|false (default true)
+      - rendering_mime_whitelist: ["application/pdf", "application/epub+zip"]
+      - max_renderings_per_manifest: 1
+    """
+    cfg = get_config()
+    dcfg = cfg.get("download", {}) or {}
+    if dcfg.get("download_manifest_renderings", True) is False:
+        return 0
+    whitelist: List[str] = [
+        str(m).lower() for m in (dcfg.get("rendering_mime_whitelist") or ["application/pdf", "application/epub+zip"]) if m
+    ]
+    try:
+        limit = int(dcfg.get("max_renderings_per_manifest", 1) or 1)
+    except Exception:
+        limit = 1
+
+    def _collect_renderings(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        r = obj.get("rendering")
+        if isinstance(r, list):
+            for it in r:
+                if isinstance(it, dict):
+                    items.append(it)
+        elif isinstance(r, dict):
+            items.append(r)
+        return items
+
+    candidates: List[Dict[str, Any]] = []
+    candidates += _collect_renderings(manifest)
+    # Also consider provider-level metadata block in v3: manifest.get('rendering') already covers
+    # Per-canvas renderings are not considered here (per-page PDFs), to keep volume small.
+
+    # Deduplicate by URL
+    seen: set[str] = set()
+    selected: List[Dict[str, Any]] = []
+    for it in candidates:
+        url = it.get("@id") or it.get("id")
+        fmt = (it.get("format") or it.get("type") or "").lower()
+        if not url or not isinstance(url, str):
+            continue
+        if whitelist and all(w not in fmt for w in whitelist):
+            # If server omits format, allow PDFs by URL suffix
+            if not any(url.lower().endswith(ext) for ext in (".pdf", ".epub")):
+                continue
+        if url in seen:
+            continue
+        seen.add(url)
+        selected.append({"url": url, "format": fmt, "label": it.get("label")})
+        if len(selected) >= limit:
+            break
+
+    count = 0
+    for idx, r in enumerate(selected, start=1):
+        url = r["url"]
+        label = r.get("label")
+        # Build a friendly filename stem
+        stem = None
+        if isinstance(label, dict):
+            # IIIF v3 label may be a language map
+            for v in label.values():
+                if isinstance(v, list) and v:
+                    stem = v[0]
+                    break
+        elif isinstance(label, str):
+            stem = label
+        if not stem:
+            stem = f"rendering_{idx:02d}"
+        fname = f"{filename_prefix}{stem}"
+        if download_file(url, folder_path, fname):
+            count += 1
+    return count
+
+
 def get_network_config(provider_key: Optional[str]) -> dict:
     """Return network policy for a provider, with sensible defaults.
 
@@ -99,6 +370,7 @@ def get_network_config(provider_key: Optional[str]) -> dict:
     net.setdefault("max_attempts", 5)
     net.setdefault("base_backoff_s", 1.5)
     net.setdefault("backoff_multiplier", 1.5)
+    net.setdefault("verify_ssl", True)
     # timeout_s may be None to use function default
     return net
 
@@ -225,13 +497,15 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
     backoff_mult = float(net.get("backoff_multiplier", 1.5) or 1.5)
     timeout_s = net.get("timeout_s")
     timeout = float(timeout_s) if timeout_s is not None else 30.0
+    verify = bool(net.get("verify_ssl", True))
     rl = _get_rate_limiter(provider)
+    work_id = _current_work_id()
     try:
         for attempt in range(1, max_attempts + 1):
             # Centralized pacing
             if rl:
                 rl.wait()
-            with session.get(url, stream=True, timeout=timeout) as response:
+            with session.get(url, stream=True, timeout=timeout, verify=verify) as response:
                 # Handle rate-limiting explicitly to respect Retry-After
                 if response.status_code == 429:
                     retry_after = response.headers.get("Retry-After")
@@ -296,11 +570,48 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                     if inferred:
                         safe_name = f"{safe_name}{inferred}"
                 filepath = os.path.join(folder_path, safe_name)
+
+                # Respect overwrite setting
+                if not _overwrite_existing() and os.path.exists(filepath):
+                    logger.info("File already exists, skipping: %s", filepath)
+                    return filepath
+
+                # Budget pre-checks
+                if not _BUDGET.allow_new_file(provider, work_id):
+                    logger.warning("Download budget (files) exceeded; skipping %s", url)
+                    if _BUDGET.exhausted():
+                        return None
+                    return None
+
+                # If server advertises Content-Length, ensure it fits before downloading
+                cl_header = response.headers.get("Content-Length")
+                try:
+                    content_len = int(cl_header) if cl_header is not None else 0
+                except Exception:
+                    content_len = 0
+                if content_len and not _BUDGET.allow_bytes(provider, work_id, content_len):
+                    logger.warning("Download budget (bytes) would be exceeded by %s (%d bytes); skipping.", url, content_len)
+                    return None
                 with open(filepath, "wb") as f:
+                    truncated = False
                     for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:  # filter out keep-alive chunks
-                            f.write(chunk)
+                        if not chunk:
+                            continue
+                        # Enforce byte budget dynamically for unknown sizes
+                        if not _BUDGET.add_bytes(provider, work_id, len(chunk)):
+                            logger.error("Download budget exceeded while writing %s; truncating and removing file.", filepath)
+                            truncated = True
+                            break
+                        f.write(chunk)
                 logger.info("Downloaded %s -> %s", url, filepath)
+                if truncated:
+                    try:
+                        os.remove(filepath)
+                    except Exception:
+                        pass
+                    return None
+                # Count file after successful write
+                _BUDGET.add_file(provider, work_id)
                 return filepath
         # If we exit the loop without returning, all attempts failed due to 429
         logger.error("Giving up after %d attempts due to rate limiting for %s", max_attempts, url)
@@ -348,12 +659,13 @@ def make_request(
     net_timeout = net.get("timeout_s")
     effective_timeout = float(net_timeout) if net_timeout is not None else float(timeout)
     rl = _get_rate_limiter(provider)
+    verify = bool(net.get("verify_ssl", True))
 
     for attempt in range(1, max_attempts + 1):
         try:
             if rl:
                 rl.wait()
-            resp = session.get(url, params=params, headers=headers, timeout=effective_timeout)
+            resp = session.get(url, params=params, headers=headers, timeout=effective_timeout, verify=verify)
             # Explicit 429 handling with Retry-After
             if resp.status_code == 429:
                 retry_after = resp.headers.get("Retry-After")

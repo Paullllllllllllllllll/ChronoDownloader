@@ -2,7 +2,13 @@ import logging
 import urllib.parse
 from typing import List, Union
 
-from .utils import save_json, download_file, make_request
+from .utils import (
+    save_json,
+    download_file,
+    make_request,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
@@ -78,6 +84,13 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder):
                 break
         if iiif_manifest_data:
             save_json(iiif_manifest_data, output_folder, f"ia_{identifier}_iiif_manifest")
+            # Try to download manifest-level renderings (PDF/EPUB) if present
+            try:
+                renders = download_iiif_renderings(iiif_manifest_data, output_folder, filename_prefix=f"ia_{identifier}_")
+                if renders > 0 and prefer_pdf_over_images():
+                    logger.info("Internet Archive: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            except Exception:
+                logger.exception("IA: error while downloading manifest renderings for %s", identifier)
         # Cover image present in metadata.misc.image
         if metadata.get("misc") and metadata["misc"].get("image"):
             cover_image_url = metadata["misc"]["image"]
@@ -88,6 +101,22 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder):
             files = metadata.get("files")
             # IA often returns a list of file dicts with 'name' and 'format'
             if isinstance(files, list):
+                # Prefer downloading a PDF if available
+                pdf_downloaded = False
+                for f in files:
+                    name = f.get("name") or f.get("file")
+                    fmt = (f.get("format") or "").lower()
+                    if not name:
+                        continue
+                    if name.lower().endswith(".pdf") or "pdf" in fmt:
+                        pdf_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(name)}"
+                        out = download_file(pdf_url, output_folder, f"ia_{identifier}_content")
+                        if out:
+                            pdf_downloaded = True
+                            # Don't download multiple PDFs; keep it small
+                            break
+                if pdf_downloaded and prefer_pdf_over_images():
+                    return True
                 for f in files:
                     name = f.get("name") or f.get("file")
                     fmt = f.get("format")

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import urllib.parse
 from typing import List, Union
 
 from .utils import save_json, make_request, download_file, get_provider_setting
@@ -40,33 +41,87 @@ def _gb_max_files() -> int:
 
 def search_google_books(title, creator=None, max_results=3) -> List[SearchResult]:
     key = _api_key()
-    if not key:
-        logger.warning("Google Books API key not configured. Skipping search.")
-        return []
-    # Prefer intitle/inauthor structured search
-    query = f'intitle:"{title}"'
+    free_only = _gb_free_only()
+    prefer_fmt = _gb_prefer_format()
+
+    def _params(q: str, use_filter: str | None) -> dict:
+        p = {
+            "q": q,
+            "maxResults": str(max_results),
+            "printType": "books",
+            "orderBy": "relevance",
+            "projection": "full",
+        }
+        if key:
+            p["key"] = key
+        if use_filter:
+            p["filter"] = use_filter
+        return p
+
+    def _try(q: str, use_filter: str | None):
+        return make_request(API_BASE_URL, params=_params(q, use_filter))
+
+    # Build a few query variants
+    import re as _re
+    # 1) strict intitle/inauthor with quotes
+    q1 = f'intitle:"{title}"'
     if creator:
-        query += f'+inauthor:"{creator}"'
-    params = {
-        "q": query,
-        "maxResults": str(max_results),
-        "key": key,
-        "printType": "books",
-        "orderBy": "relevance",
-        "projection": "full",
-    }
-    if _gb_free_only():
-        params["filter"] = "free-ebooks"
+        q1 += f'+inauthor:"{creator}"'
+    # 2) unquoted fields (helps with punctuation-heavy titles)
+    q2 = f'intitle:{title}'
+    if creator:
+        q2 += f'+inauthor:{creator}'
+    # 3) plain text title+creator
+    q3 = f"{title} {creator}" if creator else f"{title}"
+    # 4) heavily sanitized plain title only
+    q4 = _re.sub(r"[^\w\s]", " ", title).strip()
+
+    queries = [q1, q2, q3, q4]
+    filters = []
+    if free_only:
+        # Try strictly free first, then any ebook, then no filter
+        filters = ["free-ebooks", "ebooks", None]
+    else:
+        filters = ["ebooks", None]
+
     logger.info("Searching Google Books for: %s", title)
-    data = make_request(API_BASE_URL, params=params)
+    data = None
+    for q in queries:
+        for flt in filters:
+            data = _try(q, flt)
+            if data and data.get("items"):
+                break
+        if data and data.get("items"):
+            break
+
     results: List[SearchResult] = []
     if data and data.get("items"):
         for item in data["items"]:
             volume_info = item.get("volumeInfo", {})
+            vol_id = item.get("id")
+            access_info = item.get("accessInfo", {}) if isinstance(item.get("accessInfo", {}), dict) else {}
+            # Determine if there is a direct downloadable link (pdf/epub)
+            def _dl(ai: dict) -> str | None:
+                if not isinstance(ai, dict):
+                    return None
+                # Prefer configured format, but accept either
+                if isinstance(ai.get(prefer_fmt, {}), dict) and ai.get(prefer_fmt, {}).get("downloadLink"):
+                    return ai[prefer_fmt]["downloadLink"]
+                for alt in ("pdf", "epub"):
+                    if isinstance(ai.get(alt, {}), dict) and ai.get(alt, {}).get("downloadLink"):
+                        return ai[alt]["downloadLink"]
+                return None
+            download_link = _dl(access_info)
+            # If configured to free_only, require a real downloadable link
+            if free_only and not download_link:
+                continue
             raw = {
                 "title": volume_info.get("title", "N/A"),
                 "creator": ", ".join(volume_info.get("authors", [])),
-                "id": item.get("id"),
+                "id": vol_id,
+                "item_url": f"https://books.google.com/books?id={vol_id}" if vol_id else None,
+                "accessInfo": access_info,
+                "has_download": bool(download_link),
             }
             results.append(convert_to_searchresult("Google Books", raw))
     return results
@@ -108,21 +163,61 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
                         links.append(fi["acsTokenLink"])
             return links
 
-        download_links = _collect_links()[:max_files]
+        download_links = _collect_links()
 
-        for idx, url in enumerate(download_links):
+        # If no explicit download links, try a few heuristic fallbacks for truly free/public domain items
+        if not download_links:
+            try:
+                vi = volume_data.get("volumeInfo", {})
+                ai = access_info if isinstance(access_info, dict) else {}
+                public_domain = bool(ai.get("publicDomain")) or (vi.get("contentVersion") == "full-public-domain")
+                viewability = (ai.get("viewability") or vi.get("viewability") or "").lower()
+                # Consider trying fallbacks when volume is likely fully viewable and/or public domain
+                if public_domain or "all_pages" in viewability or "full" in viewability:
+                    # Build candidate URLs. Some volumes serve PDFs at these endpoints when allowed.
+                    base_candidates = [
+                        f"https://books.google.com/books/download?id={volume_id}&output=pdf",
+                        f"https://books.google.com/books?id={volume_id}&printsec=frontcover&output=pdf",
+                        f"https://books.googleusercontent.com/books/content?id={volume_id}&download=1&output=pdf",
+                    ]
+                    # Also try with source and API key if present
+                    key = _api_key()
+                    enriched: List[str] = []
+                    for u in base_candidates:
+                        qs_sep = "&" if "?" in u else "?"
+                        enriched.append(f"{u}{qs_sep}source=gbs_api")
+                        if key:
+                            enriched.append(f"{u}{qs_sep}source=gbs_api&key={urllib.parse.quote(key)}")
+                    download_links = base_candidates + enriched
+            except Exception:
+                logger.exception("Google Books: error preparing heuristic PDF URLs for %s", volume_id)
+
+        # Deduplicate and enforce max_files
+        seen = set()
+        uniq_links: List[str] = []
+        for u in download_links:
+            if u and u not in seen:
+                seen.add(u)
+                uniq_links.append(u)
+
+        main_ok = False
+        for idx, url in enumerate(uniq_links[:max_files]):
             # Let Content-Disposition determine the exact filename; provide a sensible fallback
             fallback = f"google_{volume_id}_file_{idx + 1}"
-            download_file(url, output_folder, fallback)
+            path = download_file(url, output_folder, fallback)
+            if path:
+                main_ok = True
 
-        # Save cover image if available
-        image_links = volume_data.get("volumeInfo", {}).get("imageLinks", {})
-        # Try higher-quality images first
-        for key_name in ["extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"]:
-            if image_links.get(key_name):
-                filename = f"google_{volume_id}_{key_name}.jpg"
-                download_file(image_links[key_name], output_folder, filename)
-
-        return True
+        # Save cover images only if at least one main file was downloaded
+        if main_ok:
+            image_links = volume_data.get("volumeInfo", {}).get("imageLinks", {})
+            # Try higher-quality images first
+            for key_name in ["extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"]:
+                if image_links.get(key_name):
+                    filename = f"google_{volume_id}_{key_name}.jpg"
+                    download_file(image_links[key_name], output_folder, filename)
+            return True
+        else:
+            return False
 
     return False

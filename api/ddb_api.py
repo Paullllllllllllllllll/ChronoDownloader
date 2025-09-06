@@ -4,7 +4,14 @@ import logging
 import os
 from typing import List, Union
 
-from .utils import save_json, make_request, download_file, get_provider_setting
+from .utils import (
+    save_json,
+    make_request,
+    download_file,
+    get_provider_setting,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
@@ -102,6 +109,15 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder):
 
     # Save manifest
     save_json(manifest, output_folder, f"ddb_{item_id}_iiif_manifest")
+
+    # Prefer manifest-level renderings (PDF/EPUB) when available
+    try:
+        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"ddb_{item_id}_")
+        if renders > 0 and prefer_pdf_over_images():
+            logger.info("DDB: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            return True
+    except Exception:
+        logger.exception("DDB: error while downloading manifest renderings for %s", item_id)
 
     # Extract IIIF image service bases from v2 or v3
     image_service_bases: List[str] = []

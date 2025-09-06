@@ -4,7 +4,14 @@ import logging
 import urllib.parse
 from typing import List, Union
 
-from .utils import save_json, make_request, download_file, get_provider_setting
+from .utils import (
+    save_json,
+    make_request,
+    download_file,
+    get_provider_setting,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 from bs4 import BeautifulSoup
 
@@ -87,6 +94,15 @@ def download_polona_work(item_data: Union[SearchResult, dict], output_folder):
 
     # Save manifest
     save_json(manifest, output_folder, f"polona_{item_id}_manifest")
+
+    # Prefer manifest-level PDF/EPUB renderings when available
+    try:
+        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"polona_{item_id}_")
+        if renders > 0 and prefer_pdf_over_images():
+            logger.info("Polona: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            return True
+    except Exception:
+        logger.exception("Polona: error while downloading manifest renderings for %s", item_id)
 
     # Extract IIIF Image API service bases
     service_bases: List[str] = []

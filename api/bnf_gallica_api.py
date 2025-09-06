@@ -4,7 +4,14 @@ import xml.etree.ElementTree as ET
 import time
 from typing import List, Union
 
-from .utils import save_json, download_file, make_request, get_provider_setting
+from .utils import (
+    save_json,
+    download_file,
+    make_request,
+    get_provider_setting,
+    download_iiif_renderings,
+    prefer_pdf_over_images,
+)
 from .model import SearchResult, convert_to_searchresult
 from .query_helpers import escape_sru_literal
 
@@ -99,6 +106,15 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder):
 
     # Save manifest for reproducibility
     save_json(manifest, output_folder, f"gallica_{ark_id}_manifest")
+
+    # Prefer manifest-level PDF/EPUB renderings when available
+    try:
+        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"gallica_{ark_id}_")
+        if renders > 0 and prefer_pdf_over_images():
+            logger.info("Gallica: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            return True
+    except Exception:
+        logger.exception("Gallica: error while downloading manifest renderings for %s", ark_id)
 
     # Extract image service bases from IIIF v2 or v3
     image_service_bases: List[str] = []

@@ -1,3 +1,11 @@
+- The core HTTP stack (`api/utils.py`) centralizes retries, pacing, and download budgeting. Use `download_file()` for all network file downloads and `make_request()` for API calls.
+- When working with IIIF, save manifests and consider calling `utils.download_iiif_renderings(manifest, out_dir, prefix)` to automatically pick up PDFs/EPUBs exposed via manifest-level `rendering` entries.
+
+## Scalability and Reliability
+
+- The session layer uses `requests.Session` with limited urllib3 retries and explicit handling of 429/5xx with exponential backoff. Per-provider pacing is configured in `provider_settings.*.network`.
+- A global download budget guards against runaway jobs (see "Download limits and preferences"). The main loop will stop early when the budget is exhausted.
+- For very large jobs, consider splitting input CSVs and running multiple processes. Per-provider limits and budget checks will throttle IO; keep an eye on provider terms of use.
 # Historical Sources Downloader
 
 This project provides a Python-based tool to search for and download digitized historical sources (books, manuscripts, etc.) from various European and American digital libraries and platforms.
@@ -137,6 +145,39 @@ Each provider can define `max_pages`/`max_images` and network/backoff policies. 
 
 Optional environment overrides used by some connectors:
 - `MDZ_MAX_PAGES`, `DDB_MAX_PAGES`, `DPLA_MAX_PAGES`, `WELLCOME_MAX_IMAGES`.
+
+### Download limits and preferences (centralized)
+
+The downloader enforces optional global/per-work/per-provider download budgets and can prefer bundled PDFs/EPUBs from IIIF manifests over page images. Configure in `config.json`:
+
+```json
+{
+  "download": {
+    "prefer_pdf_over_images": true,
+    "download_manifest_renderings": true,
+    "max_renderings_per_manifest": 1,
+    "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
+    "overwrite_existing": false
+  },
+  "download_limits": {
+    "max_total_files": 0,
+    "max_total_bytes": 0,
+    "per_work": { "max_files": 0, "max_bytes": 0 },
+    "per_provider": {
+      "mdz": { "max_files": 0, "max_bytes": 0 },
+      "gallica": { "max_files": 0, "max_bytes": 0 }
+    },
+    "on_exceed": "skip"  // or "stop" to abort processing immediately
+  }
+}
+```
+
+Notes:
+- Per-provider keys use host groups detected from download URLs: `gallica`, `british_library`, `mdz`, `europeana`, `wellcome`, `loc`, `ddb`, `polona`, `bne`, `dpla`, `internet_archive`, `google_books`.
+- If a manifest includes top-level `rendering` entries (PDF/EPUB), they are downloaded first. When `prefer_pdf_over_images` is true, page-image downloads are skipped if at least one rendering was saved.
+- Budgets are enforced centrally in `api/utils.py::download_file()` with pre-checks and dynamic byte counting; policy `on_exceed` can be `skip` or `stop`.
+
+### Selection, Fuzzy Matching, and Provider Hierarchy
 
 ### Selection, Fuzzy Matching, and Provider Hierarchy
 

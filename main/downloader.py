@@ -288,6 +288,10 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
 
     if not all_candidates:
         logger.info("No items found for '%s' across all enabled APIs.", title)
+        try:
+            utils.clear_current_work()
+        except Exception:
+            pass
         return
 
     # Build work directory and write metadata
@@ -304,6 +308,9 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
     work_dir_name = "_".join([p for p in parts if p])
     work_dir = os.path.join(base_output_dir, work_dir_name)
     os.makedirs(work_dir, exist_ok=True)
+
+    # Set per-work context for centralized download budgeting
+    utils.set_current_work(work_id)
 
     selected_dir = None
     selected_provider_name = None
@@ -412,6 +419,12 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
     except Exception:
         logger.exception("Failed to update index.csv")
 
+    finally:
+        # Clear per-work context
+        try:
+            utils.clear_current_work()
+        except Exception:
+            pass
     logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
 
 
@@ -473,6 +486,13 @@ def main():
             continue
         process_work(str(title), None if pd.isna(creator) else str(creator), args.output_dir, dry_run=args.dry_run)
         logger.info("%s", "-" * 50)
+        # Stop early if the global download budget has been exhausted
+        try:
+            if utils.budget_exhausted():
+                logger.warning("Download budget exhausted; stopping further processing.")
+                break
+        except Exception:
+            pass
     logger.info("All works processed.")
 
 
