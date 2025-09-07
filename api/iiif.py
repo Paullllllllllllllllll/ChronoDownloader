@@ -145,6 +145,13 @@ def image_url_candidates(service_base: str, info: Dict[str, Any] | None = None) 
                             max_w = w
                     except Exception:
                         continue
+            # Prefer explicit maxWidth/maxHeight when provided
+            try:
+                mw = int(info.get("maxWidth") or 0)
+                if mw and mw > max_w:
+                    max_w = mw
+            except Exception:
+                pass
             if max_w > 0:
                 # Width-only size request (server chooses height): {w},
                 candidates[:0] = [
@@ -157,6 +164,15 @@ def image_url_candidates(service_base: str, info: Dict[str, Any] | None = None) 
                     f"{b}/full/2000,/0/default.jpg",
                     f"{b}/full/1000,/0/default.jpg",
                 ])
+            # If server advertises PNG support, add .png alternatives up front
+            fmts = info.get("formats") or []
+            if isinstance(fmts, list) and any(str(x).lower() == "png" for x in fmts):
+                pngs: List[str] = []
+                for u in candidates:
+                    if u.endswith(".jpg"):
+                        pngs.append(u[:-4] + ".png")
+                # Prepend PNGs to try lossless first when available
+                candidates = pngs + candidates
     except Exception:
         pass
     # Deduplicate while preserving order

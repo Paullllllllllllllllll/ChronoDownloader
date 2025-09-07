@@ -87,6 +87,18 @@
         "timeout_s": 30
       }
     },
+    "dpla": {
+      "max_pages": 10000,
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 200,
+        "max_attempts": 10,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30,
+        "headers": { "Accept": "application/json" }
+      }
+    },
     "google_books": {
       "free_only": true,
       "prefer": "pdf",
