@@ -1,18 +1,18 @@
 {
   "providers": {
-    "internet_archive": false,
-    "bnf_gallica": false,
-    "loc": false,
-    "europeana": false,
-    "dpla": false,
-    "ddb": false,
-    "british_library": false,
-    "mdz": false,
-    "polona": false,
-    "bne": false,
+    "internet_archive": true,
+    "bnf_gallica": true,
+    "loc": true,
+    "europeana": true,
+    "dpla": true,
+    "ddb": true,
+    "british_library": true,
+    "mdz": true,
+    "polona": true,
+    "bne": true,
     "google_books": true,
-    "hathitrust": false,
-    "wellcome": false
+    "hathitrust": true,
+    "wellcome": true
   },
   "provider_settings": {
     "mdz": {
@@ -122,7 +122,7 @@
     }
   },
   "download": {
-    "prefer_pdf_over_images": true,
+    "prefer_pdf_over_images": false,
     "download_manifest_renderings": true,
     "max_renderings_per_manifest": 1,
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
@@ -145,7 +145,7 @@
     "year_tolerance": 2,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",
-    "keep_non_selected_metadata": true
+    "keep_non_selected_metadata": false
   },
   "naming": {
     "include_creator_in_work_dir": true,

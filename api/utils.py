@@ -876,7 +876,7 @@ def make_request(
                 continue
             # Non-retryable client errors
             if resp.status_code in (400, 401, 403, 404, 410, 422):
-                logger.error("Non-retryable HTTP %s for %s; not retrying", resp.status_code, url)
+                logger.warning("Non-retryable HTTP %s for %s; not retrying", resp.status_code, url)
                 return None
             resp.raise_for_status()
             content_type = resp.headers.get("Content-Type", "").lower()
@@ -906,7 +906,7 @@ def make_request(
                 or "getaddrinfo failed" in msg
                 or "temporary failure in name resolution" in msg
             ):
-                logger.error("Name resolution error for %s: %s; not retrying", url, e)
+                logger.warning("Name resolution error for %s: %s; not retrying", url, e)
                 return None
             # Treat SSL certificate verification errors as non-retryable as well
             if isinstance(e, requests.exceptions.SSLError) or (
@@ -914,7 +914,7 @@ def make_request(
                 or "sslcertverificationerror" in msg
                 or "ssl: certificate_verify_failed" in msg
             ):
-                logger.error("SSL certificate verification error for %s: %s; not retrying", url, e)
+                logger.warning("SSL certificate verification error for %s: %s; not retrying", url, e)
                 return None
             if attempt < max_attempts:
                 sleep_s = base_backoff * (backoff_mult ** (attempt - 1))

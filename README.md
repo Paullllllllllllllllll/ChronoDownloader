@@ -47,6 +47,12 @@ This project provides a Python-based tool to search for and download digitized h
    - Digital Public Library of America (DPLA): DPLA_API_KEY (required)
    - Google Books: GOOGLE_BOOKS_API_KEY (required)
    - HathiTrust: HATHI_API_KEY (optional)
+
+   Preflight API key checks:
+   - At startup, the CLI enforces environment-only configuration for required providers.
+   - If a required environment variable is missing for any enabled provider, an ERROR is logged and that provider is skipped for the run.
+   - Required provider env vars: `EUROPEANA_API_KEY`, `DDB_API_KEY`, `DPLA_API_KEY`, `GOOGLE_BOOKS_API_KEY`.
+   - Optional: `HATHI_API_KEY` enables page-image API for HathiTrust but is not required for searching/saving metadata.
    - Others (BnF Gallica, British Library, MDZ, Library of Congress, Polona, BNE, Internet Archive, Wellcome Collection): no key required
 
 ## Usage
@@ -242,11 +248,10 @@ Notes:
 - Images are always numbered with a 3-digit counter (`_image_001`, `_image_002`, ...).
 - Non-image objects (PDF/EPUB/etc.) get a number only when multiple files of the same type exist for the same provider (e.g., `_2`).
 
-Two summary files are maintained under `downloaded_works/`:
+One summary file is maintained under `downloaded_works/`:
 - `index.csv` — appended per row
-- `index.xlsx` — Excel workbook with the same content
 
-Both include columns: `work_id`, `entry_id`, `work_dir`, `title`, `creator`, `selected_provider`, `selected_provider_key`, `selected_source_id`, `selected_dir`, `work_json`.
+It includes columns: `work_id`, `entry_id`, `work_dir`, `title`, `creator`, `selected_provider`, `selected_provider_key`, `selected_source_id`, `selected_dir`, `work_json`.
 
 ## Implemented APIs
 The downloader currently supports connectors for:
@@ -284,9 +289,9 @@ Recent maintenance and bug fixes:
 - Main downloader (`main/downloader.py`):
   - Parent folder is now named `<entry_id>_<title_slug>[_creator][_YYYY]` for easier browsing.
   - `work.json` now includes `entry_id` in the `input` block.
-  - The run writes both `index.csv` and `index.xlsx` including an `entry_id` column.
+  - The run writes `index.csv` (CSV only) including an `entry_id` column.
 - Samples: `sample_works.csv` now includes an `entry_id` column and additional sample rows.
-- Requirements: Added `openpyxl` for Excel writing.
+- Requirements: Removed `openpyxl`; indexing is now CSV-only.
 - Gallica connector (`api/bnf_gallica_api.py`): Removed manual `time.sleep()` pacing; rate limiting is now handled centrally per-provider.
 - BNE connector (`api/bne_api.py`): Hardened IIIF manifest resolution by trying both `/manifest` and `/manifest.json` patterns.
 - Requirements: Pinned versions in `requirements.txt` for stability (requests/urllib3/pandas/beautifulsoup4).

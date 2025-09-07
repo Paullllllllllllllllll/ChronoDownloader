@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 API_BASE_URL = "https://www.googleapis.com/books/v1/volumes"
 
 def _api_key() -> str | None:
+    # Environment-only API key
     return os.getenv("GOOGLE_BOOKS_API_KEY")
 
 
@@ -51,11 +52,20 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
             "printType": "books",
             "orderBy": "relevance",
             "projection": "full",
+            # Set a default country to normalize viewability; adjust if needed via config later
+            "country": "US",
         }
         if key:
             p["key"] = key
         if use_filter:
             p["filter"] = use_filter
+        # The Books API supports 'download=epub' to restrict to downloadable EPUBs;
+        # only add this hint when EPUB is preferred to avoid excluding PDF-only free books.
+        try:
+            if _gb_prefer_format() == "epub":
+                p.setdefault("download", "epub")
+        except Exception:
+            pass
         return p
 
     def _try(q: str, use_filter: str | None):
@@ -112,8 +122,14 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
                         return ai[alt]["downloadLink"]
                 return None
             download_link = _dl(access_info)
-            # If configured to free_only, require a real downloadable link
-            if free_only and not download_link:
+            # If configured to free_only, accept items that are clearly free/public domain
+            # even when the API does not expose a direct downloadLink.
+            public_domain = bool(access_info.get("publicDomain"))
+            viewability = str(access_info.get("viewability") or volume_info.get("viewability") or "").lower()
+            is_full_view = any(k in viewability for k in ("all_pages", "all_pages_public_domain", "full_public_domain", "full"))
+            has_any_ebook = bool((access_info.get("epub") or {}).get("isAvailable") or (access_info.get("pdf") or {}).get("isAvailable"))
+            if free_only and not (download_link or public_domain or is_full_view or has_any_ebook):
+                # Skip items that are not obviously free when free_only is requested
                 continue
             raw = {
                 "title": volume_info.get("title", "N/A"),
@@ -121,6 +137,8 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
                 "id": vol_id,
                 "item_url": f"https://books.google.com/books?id={vol_id}" if vol_id else None,
                 "accessInfo": access_info,
+                "viewability": viewability,
+                "publicDomain": public_domain,
                 "has_download": bool(download_link),
             }
             results.append(convert_to_searchresult("Google Books", raw))
@@ -152,7 +170,7 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
 
         def _collect_links() -> List[str]:
             links: List[str] = []
-            # Preferred format first
+            # Preferred format first; try both pdf and epub variants
             fmt_order = [prefer, "pdf" if prefer != "pdf" else "epub"]
             for fmt in fmt_order:
                 fi = access_info.get(fmt, {})
@@ -174,11 +192,13 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
                 viewability = (ai.get("viewability") or vi.get("viewability") or "").lower()
                 # Consider trying fallbacks when volume is likely fully viewable and/or public domain
                 if public_domain or "all_pages" in viewability or "full" in viewability:
-                    # Build candidate URLs. Some volumes serve PDFs at these endpoints when allowed.
+                    # Build candidate URLs. Some volumes serve PDFs/EPUBs at these endpoints when allowed.
                     base_candidates = [
                         f"https://books.google.com/books/download?id={volume_id}&output=pdf",
                         f"https://books.google.com/books?id={volume_id}&printsec=frontcover&output=pdf",
                         f"https://books.googleusercontent.com/books/content?id={volume_id}&download=1&output=pdf",
+                        f"https://books.google.com/books/download?id={volume_id}&output=epub",
+                        f"https://books.googleusercontent.com/books/content?id={volume_id}&download=1&output=epub",
                     ]
                     # Also try with source and API key if present
                     key = _api_key()

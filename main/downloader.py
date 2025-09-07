@@ -65,6 +65,43 @@ ENABLED_APIS: List[Tuple[str, Any, Any, str]] = [
 ]
 
 
+def _required_provider_envvars() -> Dict[str, str]:
+    """Return mapping of provider_key -> required environment variable name for API keys.
+
+    Only providers listed here will be treated as requiring keys; others work without keys.
+    """
+    return {
+        "europeana": "EUROPEANA_API_KEY",
+        "dpla": "DPLA_API_KEY",
+        "ddb": "DDB_API_KEY",
+        "google_books": "GOOGLE_BOOKS_API_KEY",
+        # HathiTrust key is optional and not required for search (HATHI_API_KEY)
+    }
+
+
+def _filter_enabled_providers_for_keys(enabled: List[Tuple[str, Any, Any, str]]) -> List[Tuple[str, Any, Any, str]]:
+    """Check required API keys for enabled providers.
+
+    - Logs a clear ERROR for each enabled provider missing a required env var.
+    - Skips (filters out) those providers from this run to avoid noisy runtime failures.
+    """
+    req = _required_provider_envvars()
+    kept: List[Tuple[str, Any, Any, str]] = []
+    missing: List[Tuple[str, str, str]] = []  # (provider_key, provider_name, envvar)
+    for pkey, s, d, pname in enabled:
+        envvar = req.get(pkey)
+        if envvar and not os.getenv(envvar):
+            missing.append((pkey, pname, envvar))
+            continue
+        kept.append((pkey, s, d, pname))
+    if missing:
+        logger = logging.getLogger(__name__)
+        for pkey, pname, envvar in missing:
+            logger.error("Provider '%s' requires environment variable %s; it is not set. Skipping this provider for this run.", pname, envvar)
+        logger.error("Missing required API keys for %d provider(s). See messages above.", len(missing))
+    return kept
+
+
 def _get_selection_config() -> Dict[str, Any]:
     cfg = utils.get_config()
     sel = dict(cfg.get("selection", {}) or {})
@@ -400,7 +437,7 @@ def process_work(
     elif dry_run:
         logger.info("Dry-run: skipping download for selected item.")
 
-    # Update index.csv summary and index.xlsx (Excel)
+    # Update index.csv summary
     try:
         index_path = os.path.join(base_output_dir, "index.csv")
         row = {
@@ -418,27 +455,6 @@ def process_work(
         df = pd.DataFrame([row])
         header = not os.path.exists(index_path)
         df.to_csv(index_path, mode="a", header=header, index=False)
-
-        # Also maintain an Excel index for downstream processing
-        excel_path = os.path.join(base_output_dir, "index.xlsx")
-        try:
-            if os.path.exists(excel_path):
-                # Read existing and append
-                try:
-                    existing = pd.read_excel(excel_path)
-                except Exception:
-                    existing = None
-                if existing is not None and not existing.empty:
-                    out_df = pd.concat([existing, df], ignore_index=True)
-                else:
-                    out_df = df
-            else:
-                out_df = df
-            # Write the combined DataFrame back
-            with pd.ExcelWriter(excel_path, engine="openpyxl", mode="w") as writer:
-                out_df.to_excel(writer, sheet_name="index", index=False)
-        except Exception:
-            logger.exception("Failed to update index.xlsx")
     except Exception:
         logger.exception("Failed to update index.csv")
 
@@ -482,6 +498,12 @@ def main():
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
     )
+    # Reduce noisy retry logs from urllib3
+    try:
+        logging.getLogger("urllib3").setLevel(logging.ERROR)
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
+    except Exception:
+        pass
 
     logger = logging.getLogger(__name__)
 
@@ -494,6 +516,8 @@ def main():
     # Load providers from config (if exists), otherwise defaults remain (IA only)
     global ENABLED_APIS
     ENABLED_APIS = load_enabled_apis(args.config)
+    # Enforce env-only API keys for providers that require them
+    ENABLED_APIS = _filter_enabled_providers_for_keys(ENABLED_APIS)
     if not ENABLED_APIS:
         logger.warning("No providers are enabled. Update %s to enable providers.", args.config)
 
