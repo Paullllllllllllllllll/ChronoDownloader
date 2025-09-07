@@ -14,12 +14,13 @@ from .utils import (
 )
 from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
-from .query_helpers import escape_sru_literal
+from .query_helpers import escape_sru_literal, escape_sparql_string
 
 logger = logging.getLogger(__name__)
 
 SRU_BASE_URL = "https://sru.bl.uk/SRU"
 IIIF_MANIFEST_BASE = "https://api.bl.uk/metadata/iiif/ark:/81055/{identifier}/manifest.json"
+BNB_SPARQL_URL = "https://bnb.data.bl.uk/sparql"
 
 
 def _bl_max_pages() -> int | None:
@@ -30,8 +31,80 @@ def _bl_max_pages() -> int | None:
     return 0
 
 
+def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> List[SearchResult]:
+    """Fallback search using BNB SPARQL endpoint to discover BL identifiers.
+
+    We look for works whose title contains the query, optionally filtered by creator
+    label. We extract any owl:sameAs/rdfs:seeAlso/dct:identifier values that include
+    a BL ARK (ark:/81055/...).
+    """
+    t = escape_sparql_string(title)
+    c = escape_sparql_string(creator) if creator else None
+    # Keep query conservative and fast; limit results
+    sparql = (
+        "PREFIX dct: <http://purl.org/dc/terms/>\n"
+        "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
+        "PREFIX foaf: <http://xmlns.com/foaf/0.1/>\n"
+        "PREFIX owl: <http://www.w3.org/2002/07/owl#>\n"
+        "SELECT ?work ?title ?creatorName ?same ?ident WHERE {\n"
+        "  ?work dct:title ?title .\n"
+        f"  FILTER(CONTAINS(LCASE(STR(?title)), LCASE(\"{t}\")))\n"
+        "  OPTIONAL {\n"
+        "    ?work dct:creator ?creator .\n"
+        "    OPTIONAL { ?creator foaf:name ?creatorName }\n"
+        "    OPTIONAL { ?creator rdfs:label ?creatorName }\n"
+        "  }\n"
+        "  OPTIONAL { ?work owl:sameAs ?same }\n"
+        "  OPTIONAL { ?work rdfs:seeAlso ?same }\n"
+        "  OPTIONAL { ?work dct:identifier ?ident }\n"
+        + (f"  FILTER(CONTAINS(LCASE(COALESCE(STR(?creatorName), \"\")), LCASE(\"{c}\")))\n" if c else "")
+        + "}\n"
+        + f"LIMIT {max(5, max_results * 3)}\n"
+    )
+    try:
+        data = make_request(
+            BNB_SPARQL_URL,
+            params={"query": sparql},
+            headers={"Accept": "application/sparql-results+json"},
+        )
+    except Exception:
+        data = None
+    results: List[SearchResult] = []
+    try:
+        bindings = (data or {}).get("results", {}).get("bindings", [])
+        for b in bindings:
+            def _val(name: str) -> str | None:
+                v = b.get(name)
+                if isinstance(v, dict):
+                    return v.get("value")
+                return None
+            title_v = _val("title") or title
+            creator_v = _val("creatorName")
+            ark = None
+            for key in ("same", "ident", "work"):
+                v = _val(key)
+                if isinstance(v, str) and "ark:/81055/" in v:
+                    m = re.search(r'ark:/81055/([^\s"\'<>]+)', v)
+                    if m:
+                        ark = m.group(1)
+                        break
+            if ark:
+                raw = {
+                    "title": title_v or "N/A",
+                    "creator": creator_v or (creator or "N/A"),
+                    "identifier": ark,
+                    "source": "bnb_sparql",
+                }
+                results.append(convert_to_searchresult("British Library", raw))
+                if len(results) >= max_results:
+                    break
+    except Exception:
+        logger.exception("BNB SPARQL fallback parsing error")
+    return results
+
+
 def search_british_library(title, creator=None, max_results=3) -> List[SearchResult]:
-    """Search the British Library using SRU."""
+    """Search the British Library using SRU; fallback to BNB SPARQL if needed."""
 
     q_title = escape_sru_literal(title)
     query_parts = [f'title all "{q_title}"']
@@ -48,7 +121,7 @@ def search_british_library(title, creator=None, max_results=3) -> List[SearchRes
         "recordSchema": "dc",
     }
 
-    logger.info("Searching British Library for: %s", title)
+    logger.info("Searching British Library (SRU) for: %s", title)
     response_text = make_request(SRU_BASE_URL, params=params, headers={"Accept": "application/xml,text/xml"})
 
     results: List[SearchResult] = []
@@ -83,7 +156,16 @@ def search_british_library(title, creator=None, max_results=3) -> List[SearchRes
         except ET.ParseError as e:
             logger.error("Error parsing BL SRU XML: %s", e)
 
-    return results
+    if results:
+        return results
+
+    logger.info("BL SRU returned no results; trying BNB SPARQL fallback for: %s", title)
+    try:
+        sparql_results = _search_bnb_sparql(title, creator, max_results)
+    except Exception:
+        logger.exception("BNB SPARQL fallback failed")
+        sparql_results = []
+    return sparql_results
 
 
 def download_british_library_work(item_data: Union[SearchResult, dict], output_folder) -> bool:

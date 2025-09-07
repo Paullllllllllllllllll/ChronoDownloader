@@ -21,7 +21,7 @@ _SESSION: Optional[requests.Session] = None
 # Map URL hostnames to provider keys for centralized per-provider rate limiting and policies
 _PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
     "gallica": ("gallica.bnf.fr",),
-    "british_library": ("api.bl.uk", "sru.bl.uk", "iiif.bl.uk", "access.bl.uk"),
+    "british_library": ("api.bl.uk", "sru.bl.uk", "iiif.bl.uk", "access.bl.uk", "bnb.data.bl.uk"),
     "mdz": ("api.digitale-sammlungen.de", "www.digitale-sammlungen.de", "digitale-sammlungen.de"),
     "europeana": ("api.europeana.eu", "iiif.europeana.eu"),
     "wellcome": ("api.wellcomecollection.org", "iiif.wellcomecollection.org"),
