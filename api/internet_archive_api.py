@@ -8,13 +8,33 @@ from .utils import (
     make_request,
     download_iiif_renderings,
     prefer_pdf_over_images,
+    get_provider_setting,
+    budget_exhausted,
 )
+from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
 
 SEARCH_API_URL = "https://archive.org/advancedsearch.php"
 METADATA_API_URL = "https://archive.org/metadata/{identifier}"
+
+
+def _ia_max_pages() -> int | None:
+    """Read max pages from config provider_settings.internet_archive.max_pages (0/None = all).
+
+    Optional env override: IA_MAX_PAGES
+    """
+    val = get_provider_setting("internet_archive", "max_pages", None)
+    if isinstance(val, int):
+        return val
+    try:
+        import os
+
+        v = int(os.getenv("IA_MAX_PAGES", "0"))
+        return v
+    except Exception:
+        return 0
 
 
 def search_internet_archive(title, creator=None, max_results=3) -> List[SearchResult]:
@@ -49,7 +69,14 @@ def search_internet_archive(title, creator=None, max_results=3) -> List[SearchRe
 
 
 def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
-    """Download metadata and IIIF manifest for an Internet Archive item."""
+    """Download available objects for an Internet Archive item.
+
+    Order of preference:
+      1) Manifest-level renderings (PDF/EPUB) when present in IIIF manifest
+      2) Direct files listed in metadata (PDF first, then EPUB, then DjVu)
+      3) Page images via IIIF Image API (subject to max_pages)
+      4) Cover/thumbnail images from metadata
+    """
     identifier = None
     if isinstance(item_data, SearchResult):
         identifier = item_data.source_id or item_data.raw.get("identifier")
@@ -63,6 +90,11 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> boo
     metadata = make_request(metadata_url)
     if metadata:
         save_json(metadata, output_folder, f"ia_{identifier}_metadata")
+
+        any_object_downloaded = False
+        primary_obtained = False
+
+        # Resolve IIIF manifest URL candidates
         iiif_manifest_url = None
         if metadata.get("misc") and metadata["misc"].get("ia_iiif_url"):
             iiif_manifest_url = metadata["misc"]["ia_iiif_url"]
@@ -75,6 +107,7 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> boo
             ]
         else:
             candidates = [iiif_manifest_url]
+
         iiif_manifest_data = None
         for url in candidates:
             logger.info("Attempting to fetch IA IIIF manifest: %s", url)
@@ -87,58 +120,118 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> boo
             # Try to download manifest-level renderings (PDF/EPUB) if present
             try:
                 renders = download_iiif_renderings(iiif_manifest_data, output_folder, filename_prefix=f"ia_{identifier}_")
-                if renders > 0 and prefer_pdf_over_images():
-                    logger.info("Internet Archive: downloaded %d rendering(s); skipping image downloads per config.", renders)
+                if renders > 0:
+                    any_object_downloaded = True
+                    primary_obtained = True
+                    if prefer_pdf_over_images():
+                        logger.info(
+                            "Internet Archive: downloaded %d rendering(s); skipping image downloads per config.",
+                            renders,
+                        )
+                        return True
             except Exception:
                 logger.exception("IA: error while downloading manifest renderings for %s", identifier)
-        # Cover image present in metadata.misc.image
-        if metadata.get("misc") and metadata["misc"].get("image"):
-            cover_image_url = metadata["misc"]["image"]
-            if not cover_image_url.startswith("http"):
-                cover_image_url = f"https://archive.org{cover_image_url}"
-            download_file(cover_image_url, output_folder, f"ia_{identifier}_cover.jpg")
-        elif metadata.get("files"):
+
+        # Attempt direct file downloads from metadata (PDF > EPUB > DjVu)
+        try:
             files = metadata.get("files")
-            # IA often returns a list of file dicts with 'name' and 'format'
+            preferred_exts = [".pdf", ".epub", ".djvu"]
+            # List handling
+            def _download_from_list(fl: list) -> tuple[bool, bool]:
+                ok = False
+                got_primary = False
+                # Try preferred formats first
+                for ext in preferred_exts:
+                    for f in fl:
+                        name = (f.get("name") or f.get("file") or "").strip()
+                        fmt = str(f.get("format") or "").lower()
+                        if not name:
+                            continue
+                        if name.lower().endswith(ext) or ext.lstrip(".") in fmt:
+                            file_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(name)}"
+                            if download_file(file_url, output_folder, f"ia_{identifier}_content"):
+                                ok = True
+                                got_primary = True
+                                # Do not download multiple of the same primary type
+                                break
+                    if ok and prefer_pdf_over_images():
+                        # If we got a primary object and prefer that, we can return early
+                        return True, got_primary
+                return ok, got_primary
+
             if isinstance(files, list):
-                # Prefer downloading a PDF if available
-                pdf_downloaded = False
-                for f in files:
-                    name = f.get("name") or f.get("file")
-                    fmt = (f.get("format") or "").lower()
-                    if not name:
-                        continue
-                    if name.lower().endswith(".pdf") or "pdf" in fmt:
-                        pdf_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(name)}"
-                        out = download_file(pdf_url, output_folder, f"ia_{identifier}_content")
-                        if out:
-                            pdf_downloaded = True
-                            # Don't download multiple PDFs; keep it small
-                            break
-                if pdf_downloaded and prefer_pdf_over_images():
-                    return True
+                ok, got_primary = _download_from_list(files)
+                if ok:
+                    any_object_downloaded = True
+                if got_primary:
+                    primary_obtained = True
+                # Thumbnails and covers
+                thumb_got = False
                 for f in files:
                     name = f.get("name") or f.get("file")
                     fmt = f.get("format")
-                    # Prefer explicit Thumbnail format
                     if fmt == "Thumbnail" and name:
                         thumb_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(name)}"
-                        download_file(thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg")
-                        break
-                else:
-                    # Fallback: look for typical thumb filenames
+                        if download_file(thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg"):
+                            any_object_downloaded = True
+                            thumb_got = True
+                            break
+                if not thumb_got:
                     for f in files:
                         name = f.get("name") or f.get("file")
                         if name and (name.endswith("_thumb.jpg") or name.endswith("_thumb.png")):
                             thumb_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(name)}"
-                            download_file(thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg")
-                            break
+                            if download_file(thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg"):
+                                any_object_downloaded = True
+                                break
             elif isinstance(files, dict):
                 # Backward compatibility if dict mapping name -> info
                 for fname, finfo in files.items():
                     if isinstance(finfo, dict) and finfo.get("format") == "Thumbnail":
                         thumb_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(fname)}"
-                        download_file(thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg")
+                        if download_file(thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg"):
+                            any_object_downloaded = True
                         break
-        return True
+        except Exception:
+            logger.exception("IA: error while processing file list for %s", identifier)
+
+        # If allowed, download page images via IIIF Image API after trying to get a primary object
+        # Skip if we successfully obtained a primary object and config prefers PDFs/EPUBs over images
+        if not (primary_obtained and prefer_pdf_over_images()) and 'iiif_manifest_data' in locals() and iiif_manifest_data:
+            try:
+                bases = extract_image_service_bases(iiif_manifest_data)
+                if bases:
+                    max_pages = _ia_max_pages()
+                    to_dl = bases[:max_pages] if max_pages and max_pages > 0 else bases
+                    logger.info(
+                        "Internet Archive: downloading %d/%d page images for %s",
+                        len(to_dl), len(bases), identifier,
+                    )
+                    for idx, svc in enumerate(to_dl, start=1):
+                        if budget_exhausted():
+                            logger.warning(
+                                "Download budget exhausted; stopping IA downloads at %d/%d pages for %s",
+                                idx - 1,
+                                len(to_dl),
+                                identifier,
+                            )
+                            break
+                        fname = f"ia_{identifier}_p{idx:05d}.jpg"
+                        if download_one_from_service(svc, output_folder, fname):
+                            any_object_downloaded = True
+            except Exception:
+                logger.exception("IA: error while downloading IIIF images for %s", identifier)
+
+        # Cover image present in metadata.misc.image (useful preview)
+        try:
+            if metadata.get("misc") and metadata["misc"].get("image"):
+                cover_image_url = metadata["misc"]["image"]
+                if not cover_image_url.startswith("http"):
+                    cover_image_url = f"https://archive.org{cover_image_url}"
+                if download_file(cover_image_url, output_folder, f"ia_{identifier}_cover.jpg"):
+                    any_object_downloaded = True
+        except Exception:
+            logger.exception("IA: error while downloading cover for %s", identifier)
+
+        return any_object_downloaded
     return False

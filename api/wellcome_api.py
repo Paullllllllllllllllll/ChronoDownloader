@@ -14,7 +14,7 @@ import logging
 import os
 from typing import List, Union
 
-from .utils import make_request, save_json, get_provider_setting
+from .utils import make_request, save_json, get_provider_setting, budget_exhausted, download_file
 from .iiif import download_one_from_service
 from .model import SearchResult, convert_to_searchresult
 
@@ -128,6 +128,14 @@ def download_wellcome_work(item_data: Union[SearchResult, dict], output_folder) 
     )
     ok_any = False
     for idx, svc in enumerate(to_download, start=1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping Wellcome downloads at %d/%d images for %s",
+                idx - 1,
+                len(to_download),
+                work_id or title,
+            )
+            break
         try:
             fname = f"wellcome_{(work_id or 'work')}_img{idx:04d}.jpg"
             if download_one_from_service(svc, output_folder, fname):
@@ -136,4 +144,22 @@ def download_wellcome_work(item_data: Union[SearchResult, dict], output_folder) 
                 logger.warning("Failed to download image from %s", svc)
         except Exception:
             logger.exception("Error downloading Wellcome image from %s", svc)
+    # Attempt thumbnail download as an additional/fallback object
+    try:
+        thumb_url = None
+        if isinstance(item_data, SearchResult):
+            thumb_url = item_data.raw.get("thumbnail")
+        else:
+            thumb_url = item_data.get("thumbnail")
+        if not thumb_url and work_id:
+            # Try refetching minimal work to get thumbnail if missing
+            work = make_request(f"{CATALOGUE_WORKS_URL}/{work_id}")
+            if isinstance(work, dict):
+                thumb_url = (work.get("thumbnail") or {}).get("url")
+        if thumb_url:
+            if download_file(thumb_url, output_folder, f"wellcome_{work_id or 'work'}_thumbnail.jpg"):
+                ok_any = True
+    except Exception:
+        logger.exception("Wellcome: error downloading thumbnail for %s", work_id or title)
+
     return ok_any

@@ -147,7 +147,14 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
 
 
 def download_google_books_work(item_data: Union[SearchResult, dict], output_folder):
-    """Download metadata and available files for a Google Books volume."""
+    """Download metadata and available files for a Google Books volume.
+
+    Strategy:
+      1) Fetch volume metadata
+      2) Download PDF/EPUB if direct links provided (or DRM link if allowed)
+      3) If no main file, download best available cover images (imageLinks and books/content endpoint)
+    Returns True if any object was downloaded.
+    """
 
     if isinstance(item_data, SearchResult):
         volume_id = item_data.source_id or item_data.raw.get("id")
@@ -221,24 +228,41 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
                 seen.add(u)
                 uniq_links.append(u)
 
-        main_ok = False
+        any_ok = False
         for idx, url in enumerate(uniq_links[:max_files]):
             # Let Content-Disposition determine the exact filename; provide a sensible fallback
             fallback = f"google_{volume_id}_file_{idx + 1}"
             path = download_file(url, output_folder, fallback)
             if path:
-                main_ok = True
+                any_ok = True
 
-        # Save cover images only if at least one main file was downloaded
-        if main_ok:
-            image_links = volume_data.get("volumeInfo", {}).get("imageLinks", {})
-            # Try higher-quality images first
-            for key_name in ["extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"]:
-                if image_links.get(key_name):
-                    filename = f"google_{volume_id}_{key_name}.jpg"
-                    download_file(image_links[key_name], output_folder, filename)
-            return True
-        else:
-            return False
+        # Always attempt to save cover images (acts as fallback object if no main file)
+        image_links = volume_data.get("volumeInfo", {}).get("imageLinks", {})
+        cover_candidates = []
+        # Preferred metadata image sizes
+        for key_name in ["extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"]:
+            if image_links.get(key_name):
+                cover_candidates.append((image_links[key_name], key_name))
+        # Heuristic high-quality cover via books/content endpoint
+        # Try several zoom levels to increase chances
+        for zoom in (5, 4, 3):
+            cover_candidates.append((
+                f"https://books.google.com/books/content?id={urllib.parse.quote(volume_id)}&printsec=frontcover&img=1&zoom={zoom}&edge=curl",
+                f"content_zoom{zoom}",
+            ))
+
+        saved_any_cover = False
+        used = set()
+        for url, label in cover_candidates:
+            if url in used:
+                continue
+            used.add(url)
+            filename = f"google_{volume_id}_{label}.jpg"
+            if download_file(url, output_folder, filename):
+                any_ok = True
+                saved_any_cover = True
+                # Do not break; allow multiple sizes but keep it small implicitly via dedup and network pacing
+
+        return any_ok
 
     return False

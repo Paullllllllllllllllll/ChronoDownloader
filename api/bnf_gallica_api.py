@@ -9,6 +9,7 @@ from .utils import (
     get_provider_setting,
     download_iiif_renderings,
     prefer_pdf_over_images,
+    budget_exhausted,
 )
 from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
@@ -130,6 +131,14 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder) -
     logger.info("Gallica: downloading %d/%d page images for %s", len(to_download), total, ark_id)
     success_any = False
     for idx, svc in enumerate(to_download, start=1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping Gallica downloads at %d/%d pages for %s",
+                idx - 1,
+                len(to_download),
+                ark_id,
+            )
+            break
         try:
             fname = f"gallica_{ark_id}_p{idx:05d}.jpg"
             if download_one_from_service(svc, output_folder, fname):

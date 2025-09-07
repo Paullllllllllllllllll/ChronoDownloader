@@ -173,7 +173,7 @@
     "download_limits": {
     "max_total_files": 2000,
     "max_total_bytes": 5000000000,
-    "per_work": { "max_files": 50, "max_bytes": 1500000000 },
+    "per_work": { "max_files": 2000, "max_bytes": 1500000000 },
     "per_provider": {
       "mdz": { "max_files": 800, "max_bytes": 2500000000 },
       "gallica": { "max_files": 800, "max_bytes": 2500000000 }
