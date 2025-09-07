@@ -116,7 +116,13 @@ def _get_naming_config() -> Dict[str, Any]:
     return nm
 
 
-def process_work(title, creator: Optional[str] = None, base_output_dir: str = "downloaded_works", dry_run: bool = False):
+def process_work(
+    title,
+    creator: Optional[str] = None,
+    entry_id: Optional[str] = None,
+    base_output_dir: str = "downloaded_works",
+    dry_run: bool = False,
+):
     logger = logging.getLogger(__name__)
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
 
@@ -271,20 +277,23 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
     # Build work directory and write metadata
     naming_cfg = _get_naming_config()
     work_id = _compute_work_id(title, creator)
-    title_slug = _title_slug(title, max_len=int(naming_cfg.get("title_slug_max_len", 80)))
-    parts = [work_id, title_slug]
-    if naming_cfg.get("include_creator_in_work_dir", True) and creator:
-        parts.append(_title_slug(creator, max_len=40))
-    if naming_cfg.get("include_year_in_work_dir", True) and selected and selected.date:
-        y = parse_year(selected.date)
-        if y:
-            parts.append(str(y))
-    work_dir_name = "_".join([p for p in parts if p])
+    # New folder scheme: strictly snake_case: <entry_id>_<work_name>
+    entry_slug = utils.to_snake_case(str(entry_id)) if entry_id else None
+    title_slug_sc = utils.to_snake_case(str(title))
+    work_stem = "_".join([p for p in [entry_slug, title_slug_sc] if p])
+    work_dir_name = work_stem or _title_slug(title, max_len=int(naming_cfg.get("title_slug_max_len", 80)))
     work_dir = os.path.join(base_output_dir, work_dir_name)
     os.makedirs(work_dir, exist_ok=True)
 
     # Set per-work context for centralized download budgeting
     utils.set_current_work(work_id)
+    # Configure naming for this work and reset per-work counters
+    utils.set_current_entry(entry_id)
+    utils.set_current_name_stem(work_stem)
+    try:
+        utils.reset_counters()
+    except Exception:
+        pass
 
     selected_dir = None
     selected_provider_name = None
@@ -292,13 +301,13 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
     if selected and selected_provider_tuple:
         selected_provider_name = selected.provider or selected_provider_tuple[3]
         selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
-        selected_dir = os.path.join(work_dir, "selected", selected.provider_key or "unknown")
-        os.makedirs(selected_dir, exist_ok=True)
+        # For the new structure we pass the parent directory; utils will route to 'objects/'
+        selected_dir = work_dir
 
     # Persist work.json summarizing decision
     work_json_path = os.path.join(work_dir, "work.json")
     work_meta: Dict[str, Any] = {
-        "input": {"title": title, "creator": creator},
+        "input": {"title": title, "creator": creator, "entry_id": entry_id},
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "selection": sel_cfg,
         "candidates": [
@@ -332,15 +341,20 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
     except Exception:
         logger.exception("Failed to write work.json to %s", work_json_path)
 
-    # Optionally persist non-selected metadata (SearchResult dict) for auditing
+    # Optionally persist non-selected metadata (SearchResult dict) for auditing into metadata/
     if sel_cfg.get("keep_non_selected_metadata", True):
         for sr in all_candidates:
             try:
-                prov_dir = os.path.join(work_dir, "sources", sr.provider_key or "unknown", sr.source_id or "unknown")
-                os.makedirs(prov_dir, exist_ok=True)
-                meta_path = os.path.join(prov_dir, "search_result.json")
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump(sr.to_dict(include_raw=True), f, indent=2, ensure_ascii=False)
+                if not sr.provider_key:
+                    continue
+                try:
+                    utils.set_current_provider(sr.provider_key)
+                    utils.save_json(sr.to_dict(include_raw=True), work_dir, "search_result")
+                finally:
+                    try:
+                        utils.clear_current_provider()
+                    except Exception:
+                        pass
             except Exception:
                 logger.exception("Failed to persist candidate metadata for %s:%s", sr.provider_key, sr.source_id)
 
@@ -350,7 +364,14 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
         pkey, _search_func, download_func, pname = selected_provider_tuple
         try:
             logger.info("Downloading selected item from %s into %s", pname, selected_dir)
-            ok = download_func(selected, selected_dir)
+            try:
+                utils.set_current_provider(pkey)
+                ok = download_func(selected, selected_dir)
+            finally:
+                try:
+                    utils.clear_current_provider()
+                except Exception:
+                    pass
             if not ok:
                 logger.warning("Download function reported failure for %s:%s", pkey, selected.source_id)
         except Exception:
@@ -362,22 +383,29 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
                     if selected and sr.provider_key == selected.provider_key and sr.source_id == selected.source_id:
                         continue
                     prov_key = sr.provider_key or "unknown"
-                    dest_dir = os.path.join(work_dir, "sources", prov_key, sr.source_id or "unknown")
-                    os.makedirs(dest_dir, exist_ok=True)
+                    dest_dir = work_dir
                     if prov_key in provider_map:
                         _s, dfunc, pname2 = provider_map[prov_key]
                         logger.info("Downloading additional candidate from %s into %s", pname2, dest_dir)
-                        dfunc(sr, dest_dir)
+                        try:
+                            utils.set_current_provider(prov_key)
+                            dfunc(sr, dest_dir)
+                        finally:
+                            try:
+                                utils.clear_current_provider()
+                            except Exception:
+                                pass
                 except Exception:
                     logger.exception("Failed to download additional candidate %s:%s", sr.provider_key, sr.source_id)
     elif dry_run:
         logger.info("Dry-run: skipping download for selected item.")
 
-    # Update index.csv summary
+    # Update index.csv summary and index.xlsx (Excel)
     try:
         index_path = os.path.join(base_output_dir, "index.csv")
         row = {
             "work_id": work_id,
+            "entry_id": entry_id,
             "work_dir": work_dir,
             "title": title,
             "creator": creator,
@@ -390,6 +418,27 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
         df = pd.DataFrame([row])
         header = not os.path.exists(index_path)
         df.to_csv(index_path, mode="a", header=header, index=False)
+
+        # Also maintain an Excel index for downstream processing
+        excel_path = os.path.join(base_output_dir, "index.xlsx")
+        try:
+            if os.path.exists(excel_path):
+                # Read existing and append
+                try:
+                    existing = pd.read_excel(excel_path)
+                except Exception:
+                    existing = None
+                if existing is not None and not existing.empty:
+                    out_df = pd.concat([existing, df], ignore_index=True)
+                else:
+                    out_df = df
+            else:
+                out_df = df
+            # Write the combined DataFrame back
+            with pd.ExcelWriter(excel_path, engine="openpyxl", mode="w") as writer:
+                out_df.to_excel(writer, sheet_name="index", index=False)
+        except Exception:
+            logger.exception("Failed to update index.xlsx")
     except Exception:
         logger.exception("Failed to update index.csv")
 
@@ -397,6 +446,14 @@ def process_work(title, creator: Optional[str] = None, base_output_dir: str = "d
         # Clear per-work context
         try:
             utils.clear_current_work()
+        except Exception:
+            pass
+        try:
+            utils.clear_current_entry()
+        except Exception:
+            pass
+        try:
+            utils.clear_current_name_stem()
         except Exception:
             pass
     logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
@@ -455,10 +512,20 @@ def main():
     for index, row in works_df.iterrows():
         title = row["Title"]
         creator = row.get("Creator")
+        entry_id = row.get("entry_id") if "entry_id" in works_df.columns else None
+        if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
+            # Backward compatibility: generate a stable fallback for this run
+            entry_id = f"E{index + 1:04d}"
         if pd.isna(title) or not str(title).strip():
             logger.warning("Skipping row %d due to missing or empty title.", index + 1)
             continue
-        process_work(str(title), None if pd.isna(creator) else str(creator), args.output_dir, dry_run=args.dry_run)
+        process_work(
+            str(title),
+            None if pd.isna(creator) else str(creator),
+            None if pd.isna(entry_id) else str(entry_id),
+            args.output_dir,
+            dry_run=args.dry_run,
+        )
         logger.info("%s", "-" * 50)
         # Stop early if the global download budget has been exhausted
         try:

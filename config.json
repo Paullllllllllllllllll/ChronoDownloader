@@ -120,8 +120,15 @@
         "timeout_s": 30
       }
     }
-  }
-  ,
+  },
+  "download": {
+    "prefer_pdf_over_images": true,
+    "download_manifest_renderings": true,
+    "max_renderings_per_manifest": 1,
+    "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
+    "overwrite_existing": false,
+    "include_metadata": true
+  },
   "selection": {
     "strategy": "collect_and_select",
     "provider_hierarchy": [

@@ -51,12 +51,23 @@ This project provides a Python-based tool to search for and download digitized h
 
 ## Usage
 
-1. **Prepare your input CSV file.** It should contain at least a column named `Title`. Example (`sample_works.csv`):
+1. **Prepare your input CSV file.** It must contain a column `Title`. You can also include an optional `Creator` and a recommended `entry_id` column to uniquely identify each row. If `entry_id` is missing, the tool will generate a fallback like `E0001`, `E0002`, ... for the current run.
+
+   Example (`sample_works.csv`):
    ```csv
-   Title,Creator
-   "Le Morte d'Arthur","Thomas Malory"
-   "The Raven","Edgar Allan Poe"
-   "Philosophiæ Naturalis Principia Mathematica","Isaac Newton"
+   entry_id,Title,Creator
+   E0001,"Le Morte d'Arthur","Thomas Malory"
+   E0002,"The Raven","Edgar Allan Poe"
+   E0003,"Philosophiæ Naturalis Principia Mathematica","Isaac Newton"
+   E0004,"De revolutionibus orbium coelestium","Nicolaus Copernicus"
+   E0005,"Discours de la méthode","René Descartes"
+   E0006,"On the Origin of Species","Charles Darwin"
+   E0007,"De Magnete","William Gilbert"
+   E0008,"Principia Ethica","G. E. Moore"
+   E0009,"Dialogo sopra i due massimi sistemi del mondo","Galileo Galilei"
+   E0010,"De humani corporis fabrica","Andreas Vesalius"
+   E0011,"Historia regum Britanniae","Geoffrey of Monmouth"
+   E0012,"Divina Commedia","Dante Alighieri"
    ```
 2. **Run the downloader script:**
    ```bash
@@ -159,7 +170,8 @@ The downloader enforces optional global/per-work/per-provider download budgets a
     "download_manifest_renderings": true,
     "max_renderings_per_manifest": 1,
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
-    "overwrite_existing": false
+    "overwrite_existing": false,
+    "include_metadata": true  // set to false to download only objects (skip saving metadata files)
   },
   "download_limits": {
     "max_total_files": 0,
@@ -206,20 +218,35 @@ The downloader now performs a pre-download selection across all enabled provider
 - In `collect_and_select`, the tool searches all providers, scores candidates (title + optional creator), then picks the best according to `provider_hierarchy` and quality signals (e.g., IIIF availability).
 - In `sequential_first_hit`, the tool searches providers in `provider_hierarchy` order and selects the first acceptable match.
 
-### Output Folder Structure
+### Output Folder Structure and Naming
 
-For each CSV row, a stable work directory is created:
+For each CSV row, a stable work directory is created in strict snake_case using the `entry_id` and `Title`:
 
 ```
-downloaded_works/<work_id>_<title_slug>[_<creator_slug>][_YYYY]/
-  work.json             // unified metadata: inputs, candidates, scores, selection decision
-  selected/<provider_key>/
-    ...                 // downloaded files and manifests from the selected provider
-  sources/<provider_key>/<source_id>/
-    search_result.json  // (optional) raw candidate metadata for auditing/re-selection
+downloaded_works/<entry_id>_<work_name>/
+  work.json     // unified metadata: inputs (includes entry_id), candidates, scores, selection decision
+  metadata/     // downloaded metadata (manifests, API responses), if enabled in config
+    <entry_id>_<work_name>_<provider>.json
+    <entry_id>_<work_name>_<provider>_2.json
+    ...
+  objects/      // all downloaded objects (images, PDFs, EPUBs)
+    <entry_id>_<work_name>_<provider>.pdf
+    <entry_id>_<work_name>_<provider>_2.pdf
+    <entry_id>_<work_name>_<provider>_image_001.jpg
+    <entry_id>_<work_name>_<provider>_image_002.jpg
+    ...
 ```
 
-Additionally an `index.csv` is appended under `downloaded_works/` summarizing processed works (work_id, title, creator, selected provider, paths).
+Notes:
+- `entry_id`, `work_name`, and `provider` are always included in file names, all in snake_case.
+- Images are always numbered with a 3-digit counter (`_image_001`, `_image_002`, ...).
+- Non-image objects (PDF/EPUB/etc.) get a number only when multiple files of the same type exist for the same provider (e.g., `_2`).
+
+Two summary files are maintained under `downloaded_works/`:
+- `index.csv` — appended per row
+- `index.xlsx` — Excel workbook with the same content
+
+Both include columns: `work_id`, `entry_id`, `work_dir`, `title`, `creator`, `selected_provider`, `selected_provider_key`, `selected_source_id`, `selected_dir`, `work_json`.
 
 ## Implemented APIs
 The downloader currently supports connectors for:
@@ -253,6 +280,13 @@ Recent maintenance and bug fixes:
   - Corrected `Retry-After` HTTP-date parsing to use `datetime.now(tz)` for accurate backoff durations.
   - Moved the success log for downloads to occur only after confirming the file was not truncated by budget limits.
   - Made urllib3 `Retry.allowed_methods` a `frozenset` for broader compatibility.
+  - Added thread-local `entry_id` support and automatic filename suffixing with `entry_id` and provider abbreviation for all downloads.
+- Main downloader (`main/downloader.py`):
+  - Parent folder is now named `<entry_id>_<title_slug>[_creator][_YYYY]` for easier browsing.
+  - `work.json` now includes `entry_id` in the `input` block.
+  - The run writes both `index.csv` and `index.xlsx` including an `entry_id` column.
+- Samples: `sample_works.csv` now includes an `entry_id` column and additional sample rows.
+- Requirements: Added `openpyxl` for Excel writing.
 - Gallica connector (`api/bnf_gallica_api.py`): Removed manual `time.sleep()` pacing; rate limiting is now handled centrally per-provider.
 - BNE connector (`api/bne_api.py`): Hardened IIIF manifest resolution by trying both `/manifest` and `/manifest.json` patterns.
 - Requirements: Pinned versions in `requirements.txt` for stability (requests/urllib3/pandas/beautifulsoup4).

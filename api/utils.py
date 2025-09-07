@@ -10,7 +10,7 @@ from urllib.parse import unquote, urlparse
 from email.utils import parsedate_to_datetime
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union, Dict, List, Any
+from typing import Optional, Union, Dict, List, Any, Tuple
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -32,6 +32,43 @@ _PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
     "dpla": ("api.dp.la",),
     "internet_archive": ("archive.org", "archivelab.org", "iiif.archivelab.org"),
     "google_books": ("www.googleapis.com", "books.google.com", "books.googleusercontent.com", "play.google.com"),
+}
+
+# Preferred short slugs for provider registry keys (snake_case, lower)
+_PROVIDER_SLUGS: dict[str, str] = {
+    "bnf_gallica": "gallica",
+    "british_library": "bl",
+    "mdz": "mdz",
+    "europeana": "europeana",
+    "wellcome": "wellcome",
+    "loc": "loc",
+    "ddb": "ddb",
+    "polona": "polona",
+    "bne": "bne",
+    "dpla": "dpla",
+    "internet_archive": "ia",
+    "google_books": "gb",
+    "hathitrust": "hathi",
+}
+
+# Abbreviations for providers (keys correspond to _PROVIDER_HOST_MAP keys)
+_PROVIDER_ABBREV: dict[str, str] = {
+    # Host-map keys
+    "gallica": "GAL",
+    "british_library": "BL",
+    "mdz": "MDZ",
+    "europeana": "EUROPEANA",
+    "wellcome": "WELLCOME",
+    "loc": "LOC",
+    "ddb": "DDB",
+    "polona": "POLONA",
+    "bne": "BNE",
+    "dpla": "DPLA",
+    "internet_archive": "IA",
+    "google_books": "GB",
+    # Provider registry keys (may differ from host-map keys)
+    "bnf_gallica": "GAL",
+    "hathitrust": "HATHI",
 }
 
 
@@ -224,6 +261,10 @@ _BUDGET = _DownloadBudget()
 # Thread-local current work context so providers don't need to pass work_id around
 _TLS = threading.local()
 setattr(_TLS, "work_id", None)
+setattr(_TLS, "entry_id", None)
+setattr(_TLS, "provider_key", None)
+setattr(_TLS, "name_stem", None)  # e.g., e_0001_the_raven
+setattr(_TLS, "counters", {})     # per-entry counters for numbering
 
 
 def set_current_work(work_id: Optional[str]) -> None:
@@ -234,9 +275,75 @@ def clear_current_work() -> None:
     setattr(_TLS, "work_id", None)
 
 
+def set_current_entry(entry_id: Optional[str]) -> None:
+    setattr(_TLS, "entry_id", entry_id)
+
+
+def clear_current_entry() -> None:
+    setattr(_TLS, "entry_id", None)
+
+
+def set_current_provider(provider_key: Optional[str]) -> None:
+    setattr(_TLS, "provider_key", provider_key)
+
+
+def clear_current_provider() -> None:
+    setattr(_TLS, "provider_key", None)
+
+
+def set_current_name_stem(stem: Optional[str]) -> None:
+    setattr(_TLS, "name_stem", stem)
+
+
+def clear_current_name_stem() -> None:
+    setattr(_TLS, "name_stem", None)
+
+
+def _current_name_stem() -> Optional[str]:
+    try:
+        return getattr(_TLS, "name_stem", None)
+    except Exception:
+        return None
+
+
+def _counters() -> Dict[Tuple[str, str, str], int]:
+    try:
+        c = getattr(_TLS, "counters", None)
+        if c is None:
+            c = {}
+            setattr(_TLS, "counters", c)
+        return c
+    except Exception:
+        # Fall back to a module-level dictionary if TLS fails
+        if not hasattr(_counters, "_fallback"):
+            setattr(_counters, "_fallback", {})
+        return getattr(_counters, "_fallback")
+
+
+def reset_counters() -> None:
+    try:
+        setattr(_TLS, "counters", {})
+    except Exception:
+        pass
+
+
 def _current_work_id() -> Optional[str]:
     try:
         return getattr(_TLS, "work_id", None)
+    except Exception:
+        return None
+
+
+def _current_entry_id() -> Optional[str]:
+    try:
+        return getattr(_TLS, "entry_id", None)
+    except Exception:
+        return None
+
+
+def _current_provider_key() -> Optional[str]:
+    try:
+        return getattr(_TLS, "provider_key", None)
     except Exception:
         return None
 
@@ -265,6 +372,43 @@ def prefer_pdf_over_images() -> bool:
 
 def overwrite_existing() -> bool:
     return _overwrite_existing()
+
+
+def _include_metadata() -> bool:
+    cfg = get_config()
+    dl = cfg.get("download", {}) or {}
+    val = dl.get("include_metadata")
+    return True if val is None else bool(val)
+
+
+def include_metadata() -> bool:
+    return _include_metadata()
+
+
+def to_snake_case(value: str) -> str:
+    """Convert arbitrary string to snake_case: lowercase, alnum + underscores only."""
+    if value is None:
+        return ""
+    s = str(value)
+    # Replace non-alnum with underscores
+    s = re.sub(r"[^0-9A-Za-z]+", "_", s)
+    # Insert underscore between letter-number boundaries (e.g., e0001 -> e_0001)
+    s = re.sub(r"([A-Za-z])([0-9])", r"\1_\2", s)
+    s = re.sub(r"([0-9])([A-Za-z])", r"\1_\2", s)
+    # Collapse underscores
+    s = re.sub(r"_+", "_", s)
+    # Trim underscores and lowercase
+    s = s.strip("_").lower()
+    return s
+
+
+def _provider_slug(pref_key: Optional[str], url_provider: Optional[str]) -> str:
+    key = pref_key or url_provider or "unknown"
+    # Prefer mapped short slug
+    if key in _PROVIDER_SLUGS:
+        return _PROVIDER_SLUGS[key]
+    # Otherwise snake-case the key as best effort
+    return to_snake_case(key)
 
 
 def download_iiif_renderings(manifest: Dict[str, Any], folder_path: str, filename_prefix: str = "") -> int:
@@ -329,21 +473,8 @@ def download_iiif_renderings(manifest: Dict[str, Any], folder_path: str, filenam
     count = 0
     for idx, r in enumerate(selected, start=1):
         url = r["url"]
-        label = r.get("label")
-        # Build a friendly filename stem
-        stem = None
-        if isinstance(label, dict):
-            # IIIF v3 label may be a language map
-            for v in label.values():
-                if isinstance(v, list) and v:
-                    stem = v[0]
-                    break
-        elif isinstance(label, str):
-            stem = label
-        if not stem:
-            stem = f"rendering_{idx:02d}"
-        fname = f"{filename_prefix}{stem}"
-        if download_file(url, folder_path, fname):
+        # Delegate naming to download_file() to ensure standardization
+        if download_file(url, folder_path, f"rendering_{idx:02d}"):
             count += 1
     return count
 
@@ -544,10 +675,9 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                     return None
                 response.raise_for_status()
                 cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
-                chosen_name = cd_name if cd_name else filename
-                safe_name = sanitize_filename(chosen_name)
+                # Determine extension and type up front
 
-                # If no extension on safe_name, try to infer from URL or Content-Type
+                # If no explicit extension, try to infer from URL or Content-Type
                 def _infer_ext() -> str:
                     from urllib.parse import urlparse
 
@@ -571,12 +701,43 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                         if k in ct:
                             return v
                     return ""
+                # Build standardized filename in 'objects/' directory
+                inferred_ext = _infer_ext()
+                ext = inferred_ext or Path(cd_name or "").suffix or Path(filename or "").suffix or ""
+                if not ext:
+                    ext = ".bin"
+                ext = ext.lower()
 
-                if not Path(safe_name).suffix:
-                    inferred = _infer_ext()
-                    if inferred:
-                        safe_name = f"{safe_name}{inferred}"
-                filepath = os.path.join(folder_path, safe_name)
+                stem = _current_name_stem() or to_snake_case(filename) or "object"
+                prov_slug = _provider_slug(_current_provider_key(), provider)
+                # Determine type key for numbering
+                image_exts = {".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".gif", ".bmp", ".webp"}
+                if ext in image_exts:
+                    type_key = "image"
+                else:
+                    type_key = ext.lstrip(".") or "bin"
+
+                # Determine target directory
+                target_dir = os.path.join(folder_path, "objects")
+                os.makedirs(target_dir, exist_ok=True)
+
+                # Resolve sequence number
+                key = (stem, prov_slug, type_key)
+                counters = _counters()
+                counters[key] = int(counters.get(key, 0)) + 1
+                seq = counters[key]
+
+                if type_key == "image":
+                    safe_base = f"{stem}_{prov_slug}_image_{seq:03d}"
+                else:
+                    # For non-image types, only number when more than one exists
+                    if seq <= 1:
+                        safe_base = f"{stem}_{prov_slug}"
+                    else:
+                        safe_base = f"{stem}_{prov_slug}_{seq}"
+
+                safe_name = sanitize_filename(f"{safe_base}{ext}")
+                filepath = os.path.join(target_dir, safe_name)
 
                 # Respect overwrite setting
                 if not _overwrite_existing() and os.path.exists(filepath):
@@ -632,8 +793,25 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
 
 
 def save_json(data, folder_path, filename) -> Optional[str]:
+    if not include_metadata():
+        logger.debug("Config download.include_metadata=false; skipping metadata save for %s", filename)
+        return None
     os.makedirs(folder_path, exist_ok=True)
-    filepath = os.path.join(folder_path, sanitize_filename(filename) + ".json")
+    # Standardize metadata naming and directory
+    stem = _current_name_stem() or to_snake_case(filename) or "item"
+    prov_slug = _provider_slug(_current_provider_key(), None)
+    meta_dir = os.path.join(folder_path, "metadata")
+    os.makedirs(meta_dir, exist_ok=True)
+    # For metadata, do not number the first file for a provider; append _2, _3... when multiple
+    key = (stem, prov_slug or "unknown", "metadata")
+    counters = _counters()
+    counters[key] = int(counters.get(key, 0)) + 1
+    idx = counters[key]
+    if idx <= 1:
+        base = f"{stem}_{prov_slug}"
+    else:
+        base = f"{stem}_{prov_slug}_{idx}"
+    filepath = os.path.join(meta_dir, sanitize_filename(base) + ".json")
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
