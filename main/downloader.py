@@ -411,6 +411,42 @@ def process_work(
                     pass
             if not ok:
                 logger.warning("Download function reported failure for %s:%s", pkey, selected.source_id)
+                # Fallback: try the next-best candidate based on provider priority and score
+                try:
+                    prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
+                    ranked_fallbacks: List[Tuple[int, float, SearchResult]] = []
+                    for sr in all_candidates:
+                        try:
+                            if selected and sr.provider_key == selected.provider_key and sr.source_id == selected.source_id:
+                                continue
+                            sc = sr.raw.get("__matching__", {})
+                            if float(sc.get("score", 0.0)) < float(sel_cfg.get("min_title_score", 85)):
+                                continue
+                            pprio = prov_priority.get(sr.provider_key or "", 9999)
+                            ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))
+                        except Exception:
+                            continue
+                    ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
+                    for _pprio, _tot, sr in ranked_fallbacks:
+                        prov_key = sr.provider_key or "unknown"
+                        if prov_key not in provider_map:
+                            continue
+                        _s, dfunc, _pname = provider_map[prov_key]
+                        logger.info("Attempting fallback download from %s", _pname)
+                        try:
+                            utils.set_current_provider(prov_key)
+                            if dfunc(sr, selected_dir):
+                                logger.info("Fallback download from %s succeeded.", _pname)
+                                break
+                        except Exception:
+                            logger.exception("Fallback download error for %s:%s", prov_key, sr.source_id)
+                        finally:
+                            try:
+                                utils.clear_current_provider()
+                            except Exception:
+                                pass
+                except Exception:
+                    logger.exception("Error while attempting fallback download candidates.")
         except Exception:
             logger.exception("Error during download for %s:%s", pkey, selected.source_id)
         # If 'all', also download other candidates into sources/ subfolders

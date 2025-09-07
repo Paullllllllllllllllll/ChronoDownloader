@@ -34,14 +34,14 @@ def search_loc(title, creator=None, max_results=3) -> List[SearchResult]:
         "fo": "json",
         "c": str(max_results),
     }
-    search_url = urllib.parse.urljoin(LOC_API_BASE_URL, "search/")
-    logger.info("Searching Library of Congress for: %s", title)
     headers = {"Accept": "application/json"}
-    data = make_request(search_url, params=params, headers=headers)
+    logger.info("Searching Library of Congress for: %s", title)
+    # Prefer the Books collection endpoint first; fall back to the generic search if needed
+    books_url = urllib.parse.urljoin(LOC_API_BASE_URL, "books/")
+    data = make_request(books_url, params=params, headers=headers)
     if not data or not (data.get("results") or (data.get("content") and data["content"].get("results"))):
-        # Fallback to Books collection endpoint
-        books_url = urllib.parse.urljoin(LOC_API_BASE_URL, "books/")
-        data = make_request(books_url, params=params, headers=headers)
+        search_url = urllib.parse.urljoin(LOC_API_BASE_URL, "search/")
+        data = make_request(search_url, params=params, headers=headers)
     results: List[SearchResult] = []
     if data and data.get("results"):
         for item in data["results"]:

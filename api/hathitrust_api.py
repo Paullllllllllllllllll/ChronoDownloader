@@ -4,8 +4,6 @@ import logging
 import os
 from typing import List, Union
 
-from bs4 import BeautifulSoup
-
 from .utils import save_json, make_request, download_file
 from .model import SearchResult, convert_to_searchresult
 
@@ -20,35 +18,17 @@ def _api_key() -> str | None:
 
 
 def search_hathitrust(title, creator=None, max_results=3) -> List[SearchResult]:
-    """Attempt a simple title search by parsing the public catalog website.
+    """HathiTrust does not expose a keyword search API; skip search.
 
-    Note: HathiTrust does not provide a public keyword search API; only ID-based APIs
-    are officially supported. This function may be blocked by anti-bot measures and
-    will return an empty list if access is denied.
+    According to the official docs, the Bibliographic API supports lookups by known
+    identifiers (OCLC, LCCN, ISBN, etc.) but is not intended for free-text search.
+    To avoid fragile HTML scraping and frequent 403s, we return no results here.
     """
-
-    query = title.replace(" ", "+")
-    url = f"https://catalog.hathitrust.org/Search/Home?lookfor={query}&searchtype=title&ft=ft"
-
-    logger.info("Searching HathiTrust for: %s", title)
-    headers = {"Accept": "text/html"}
-    html = make_request(url, headers=headers)
-
-    results: List[SearchResult] = []
-    if isinstance(html, str):
-        soup = BeautifulSoup(html, "html.parser")
-        for link in soup.select("a.title")[:max_results]:
-            href = link.get("href")
-            if href and "/Record/" in href:
-                record_id = href.split("/Record/")[-1].strip()
-                raw = {
-                    "title": link.get_text(strip=True),
-                    "creator": creator or "N/A",
-                    "id": record_id,
-                }
-                results.append(convert_to_searchresult("HathiTrust", raw))
-
-    return results
+    logger.info(
+        "Skipping HathiTrust search for '%s': no public keyword search API; provide an identifier to use download endpoints.",
+        title,
+    )
+    return []
 
 
 def download_hathitrust_work(item_data: Union[SearchResult, dict], output_folder):

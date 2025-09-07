@@ -49,7 +49,7 @@ def search_british_library(title, creator=None, max_results=3) -> List[SearchRes
     }
 
     logger.info("Searching British Library for: %s", title)
-    response_text = make_request(SRU_BASE_URL, params=params)
+    response_text = make_request(SRU_BASE_URL, params=params, headers={"Accept": "application/xml,text/xml"})
 
     results: List[SearchResult] = []
     if isinstance(response_text, str):
@@ -65,6 +65,7 @@ def search_british_library(title, creator=None, max_results=3) -> List[SearchRes
                     continue
                 title_el = dc.find("dc:title", namespaces)
                 creator_el = dc.find("dc:creator", namespaces)
+                date_el = dc.find("dc:date", namespaces)
                 identifier_el = dc.find("dc:identifier", namespaces)
                 identifier = None
                 if identifier_el is not None and identifier_el.text:
@@ -75,6 +76,7 @@ def search_british_library(title, creator=None, max_results=3) -> List[SearchRes
                 raw = {
                     "title": title_el.text if title_el is not None else "N/A",
                     "creator": creator_el.text if creator_el is not None else "N/A",
+                    "date": date_el.text if date_el is not None else None,
                     "identifier": identifier,
                 }
                 results.append(convert_to_searchresult("British Library", raw))
@@ -96,10 +98,30 @@ def download_british_library_work(item_data: Union[SearchResult, dict], output_f
         logger.warning("No BL identifier provided for download.")
         return False
 
-    manifest_url = IIIF_MANIFEST_BASE.format(identifier=identifier)
+    # Normalize identifier: viewer ARKs often include a ".0x..." suffix which is not present in the manifest path
+    id_for_manifest = identifier.split(".")[0] if "." in identifier else identifier
+
+    manifest_url = IIIF_MANIFEST_BASE.format(identifier=id_for_manifest)
     logger.info("Fetching BL IIIF manifest: %s", manifest_url)
     manifest = make_request(manifest_url)
 
+    # Fallback: if direct manifest fetch failed, try discovering it from the public viewer page
+    if not manifest:
+        try:
+            viewer_url = f"https://access.bl.uk/item/viewer/ark:/81055/{identifier}"
+            logger.info("BL fallback: attempting to discover manifest from %s", viewer_url)
+            html = make_request(viewer_url)
+            if isinstance(html, str):
+                import re as _re
+                m = _re.search(r"https?://[^\"'<>]+/manifest\.json", html)
+                if m:
+                    alt_manifest = m.group(0)
+                    logger.info("BL fallback: found manifest URL %s", alt_manifest)
+                    manifest = make_request(alt_manifest)
+                    if manifest:
+                        manifest_url = alt_manifest
+        except Exception:
+            logger.exception("BL: error while attempting viewer-based manifest discovery for %s", identifier)
     if not manifest:
         return False
 

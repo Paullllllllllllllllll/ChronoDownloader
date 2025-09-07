@@ -45,7 +45,8 @@
         "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
-        "timeout_s": 30
+        "timeout_s": 30,
+        "headers": { "Accept": "application/json" }
       }
     },
     "ddb": {
@@ -67,7 +68,9 @@
         "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
-        "timeout_s": 30
+        "timeout_s": 30,
+        "dns_retry": true,
+        "headers": { "Accept": "application/xml, text/xml" }
       }
     },
     "polona": {
@@ -95,7 +98,8 @@
         "max_attempts": 25,
         "base_backoff_s": 1.2,
         "backoff_multiplier": 1.5,
-        "timeout_s": 30
+        "timeout_s": 30,
+        "headers": { "Referer": "https://books.google.com/" }
       }
     },
     "wellcome": {
@@ -117,7 +121,9 @@
         "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
-        "timeout_s": 30
+        "timeout_s": 30,
+        "ssl_error_policy": "retry_insecure_once",
+        "headers": { "Accept": "application/sparql-results+json" }
       }
     }
   },
@@ -127,7 +133,7 @@
     "max_renderings_per_manifest": 1,
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
     "overwrite_existing": false,
-    "include_metadata": true
+    "include_metadata": false
   },
   "selection": {
     "strategy": "collect_and_select",
@@ -155,7 +161,7 @@
     "download_limits": {
     "max_total_files": 2000,
     "max_total_bytes": 5000000000,
-    "per_work": { "max_files": 500, "max_bytes": 1500000000 },
+    "per_work": { "max_files": 50, "max_bytes": 1500000000 },
     "per_provider": {
       "mdz": { "max_files": 800, "max_bytes": 2500000000 },
       "gallica": { "max_files": 800, "max_bytes": 2500000000 }

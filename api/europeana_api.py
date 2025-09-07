@@ -8,6 +8,7 @@ from .utils import (
     get_provider_setting,
     download_iiif_renderings,
     prefer_pdf_over_images,
+    download_file,
 )
 from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
@@ -15,6 +16,7 @@ from .model import SearchResult, convert_to_searchresult
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://api.europeana.eu/record/v2/search.json"
+RECORD_API_BASE = "https://api.europeana.eu/record/v2"
 EUROPEANA_MANIFEST_HOST = "https://iiif.europeana.eu"
 
 def _api_key() -> str | None:
@@ -148,40 +150,87 @@ def download_europeana_work(item_data: Union[SearchResult, dict], output_folder)
     manifest_data = make_request(iiif_manifest_url)
     if not manifest_data:
         logger.warning("Failed to fetch IIIF manifest from %s", iiif_manifest_url)
-        return False
+        # Continue to fallback below
+        manifest_data = None
 
-    save_json(manifest_data, output_folder, f"europeana_{item_id}_iiif_manifest")
+    if manifest_data:
+        save_json(manifest_data, output_folder, f"europeana_{item_id}_iiif_manifest")
 
     # Try manifest-level renderings (PDF/EPUB) first
-    try:
-        renders = download_iiif_renderings(manifest_data, output_folder, filename_prefix=f"europeana_{item_id}_")
-        if renders > 0 and prefer_pdf_over_images():
-            logger.info("Europeana: downloaded %d rendering(s); skipping image downloads per config.", renders)
-            return True
-    except Exception:
-        logger.exception("Europeana: error while downloading manifest renderings for %s", item_id)
+    if manifest_data:
+        try:
+            renders = download_iiif_renderings(manifest_data, output_folder, filename_prefix=f"europeana_{item_id}_")
+            if renders > 0 and prefer_pdf_over_images():
+                logger.info("Europeana: downloaded %d rendering(s); skipping image downloads per config.", renders)
+                return True
+        except Exception:
+            logger.exception("Europeana: error while downloading manifest renderings for %s", item_id)
 
     # Extract IIIF Image API service bases and download images (v2/v3)
-    service_bases: List[str] = extract_image_service_bases(manifest_data)
+    ok_any = False
+    if manifest_data:
+        service_bases: List[str] = extract_image_service_bases(manifest_data)
 
-    if not service_bases:
-        logger.info("No IIIF image services found in Europeana manifest for %s", item_id)
+        if not service_bases:
+            logger.info("No IIIF image services found in Europeana manifest for %s", item_id)
+        else:
+            # Use shared helper to download a single image per canvas
+            max_pages = _europeana_max_pages()
+            total = len(service_bases)
+            to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
+            logger.info("Europeana: downloading %d/%d page images for %s", len(to_download), total, item_id)
+            for idx, svc in enumerate(to_download, start=1):
+                try:
+                    fname = f"europeana_{item_id}_p{idx:05d}.jpg"
+                    if download_one_from_service(svc, output_folder, fname):
+                        ok_any = True
+                    else:
+                        logger.warning("Failed to download Europeana image from %s", svc)
+                except Exception:
+                    logger.exception("Error downloading Europeana image for %s from %s", item_id, svc)
+
+    if ok_any:
         return True
 
-    # Use shared helper to download a single image per canvas
-
-    max_pages = _europeana_max_pages()
-    total = len(service_bases)
-    to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
-    logger.info("Europeana: downloading %d/%d page images for %s", len(to_download), total, item_id)
-    ok_any = False
-    for idx, svc in enumerate(to_download, start=1):
-        try:
-            fname = f"europeana_{item_id}_p{idx:05d}.jpg"
-            if download_one_from_service(svc, output_folder, fname):
-                ok_any = True
-            else:
-                logger.warning("Failed to download Europeana image from %s", svc)
-        except Exception:
-            logger.exception("Error downloading Europeana image for %s from %s", item_id, svc)
-    return ok_any
+    # Fallback: query Europeana Record API for media links (edmIsShownBy, edmPreview)
+    try:
+        key = _api_key()
+        record_url = None
+        if isinstance(item_data, SearchResult):
+            euro_id = item_data.raw.get("id") or item_id
+        else:
+            euro_id = item_id
+        if euro_id and isinstance(euro_id, str) and euro_id.startswith("/"):
+            record_url = f"{RECORD_API_BASE}{euro_id}.json"
+        elif euro_id:
+            # Try to coerce
+            record_url = f"{RECORD_API_BASE}/{euro_id.strip('/')}.json"
+        if record_url:
+            params = {"wskey": key} if key else None
+            logger.info("Europeana fallback: fetching Record API JSON %s", record_url)
+            rec = make_request(record_url, params=params)
+            if isinstance(rec, dict):
+                # Try common fields
+                candidates: List[str] = []
+                def _add(u: str | None):
+                    if u and isinstance(u, str):
+                        candidates.append(u)
+                obj = rec.get("object") or {}
+                _add(obj.get("edmIsShownBy"))
+                _add(obj.get("edmPreview"))
+                # Also look inside aggregations
+                for agg in rec.get("aggregations", []) or []:
+                    if isinstance(agg, dict):
+                        _add(agg.get("edmIsShownBy"))
+                        _add(agg.get("edmPreview"))
+                # Download first working candidate
+                for idx, u in enumerate(candidates, start=1):
+                    try:
+                        fname = f"europeana_{item_id}_fallback_{idx:02d}"
+                        if download_file(u, output_folder, fname):
+                            return True
+                    except Exception:
+                        continue
+    except Exception:
+        logger.exception("Europeana fallback failed for %s", item_id)
+    return False

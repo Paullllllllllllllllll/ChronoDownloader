@@ -127,8 +127,9 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
             public_domain = bool(access_info.get("publicDomain"))
             viewability = str(access_info.get("viewability") or volume_info.get("viewability") or "").lower()
             is_full_view = any(k in viewability for k in ("all_pages", "all_pages_public_domain", "full_public_domain", "full"))
-            has_any_ebook = bool((access_info.get("epub") or {}).get("isAvailable") or (access_info.get("pdf") or {}).get("isAvailable"))
-            if free_only and not (download_link or public_domain or is_full_view or has_any_ebook):
+            # Only accept clearly downloadable or fully viewable items when free_only is requested
+            # Some items report generic ebook availability without a direct download; exclude those
+            if free_only and not (download_link or public_domain or is_full_view):
                 # Skip items that are not obviously free when free_only is requested
                 continue
             raw = {

@@ -21,7 +21,7 @@ _SESSION: Optional[requests.Session] = None
 # Map URL hostnames to provider keys for centralized per-provider rate limiting and policies
 _PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
     "gallica": ("gallica.bnf.fr",),
-    "british_library": ("api.bl.uk", "sru.bl.uk", "iiif.bl.uk"),
+    "british_library": ("api.bl.uk", "sru.bl.uk", "iiif.bl.uk", "access.bl.uk"),
     "mdz": ("api.digitale-sammlungen.de", "www.digitale-sammlungen.de", "digitale-sammlungen.de"),
     "europeana": ("api.europeana.eu", "iiif.europeana.eu"),
     "wellcome": ("api.wellcomecollection.org", "iiif.wellcomecollection.org"),
@@ -32,6 +32,8 @@ _PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
     "dpla": ("api.dp.la",),
     "internet_archive": ("archive.org", "archivelab.org", "iiif.archivelab.org"),
     "google_books": ("www.googleapis.com", "books.google.com", "books.googleusercontent.com", "play.google.com"),
+    # Add HathiTrust hosts so provider-specific network policies apply
+    "hathitrust": ("catalog.hathitrust.org", "babel.hathitrust.org"),
 }
 
 # Preferred short slugs for provider registry keys (snake_case, lower)
@@ -490,7 +492,11 @@ def get_network_config(provider_key: Optional[str]) -> dict:
         "max_attempts": 5,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
-        "timeout_s": null
+        "timeout_s": null,
+        "verify_ssl": true,
+        "ssl_error_policy": "fail",              # "fail" | "retry_insecure_once"
+        "dns_retry": false,                       # if true, retry on DNS errors with backoff
+        "headers": { }                            # optional per-provider default headers
       },
       # Back-compat: allow legacy "delay_ms" at provider root
       "delay_ms": 1200
@@ -509,6 +515,11 @@ def get_network_config(provider_key: Optional[str]) -> dict:
     net.setdefault("base_backoff_s", 1.5)
     net.setdefault("backoff_multiplier", 1.5)
     net.setdefault("verify_ssl", True)
+    net.setdefault("ssl_error_policy", "fail")
+    net.setdefault("dns_retry", False)
+    # Ensure headers is a dict if provided
+    if not isinstance(net.get("headers", {}), dict):
+        net["headers"] = {}
     # timeout_s may be None to use function default
     return net
 
@@ -552,6 +563,8 @@ def _build_session() -> requests.Session:
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
             "Accept": "*/*",
+            # Encourage English-language responses and better cache hits across providers
+            "Accept-Language": "en-US,en;q=0.9",
         }
     )
     return session
@@ -635,15 +648,23 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
     backoff_mult = float(net.get("backoff_multiplier", 1.5) or 1.5)
     timeout_s = net.get("timeout_s")
     timeout = float(timeout_s) if timeout_s is not None else 30.0
-    verify = bool(net.get("verify_ssl", True))
+    verify_default = bool(net.get("verify_ssl", True))
+    ssl_policy = str(net.get("ssl_error_policy", "fail") or "fail").lower()
+    provider_headers = dict(net.get("headers", {}) or {})
+    # Merge headers: session defaults < provider headers
+    req_headers = {}
+    if provider_headers:
+        req_headers.update({str(k): str(v) for k, v in provider_headers.items() if v is not None})
     rl = _get_rate_limiter(provider)
     work_id = _current_work_id()
     try:
+        insecure_retry_used = False
+        verify = verify_default
         for attempt in range(1, max_attempts + 1):
             # Centralized pacing
             if rl:
                 rl.wait()
-            with session.get(url, stream=True, timeout=timeout, verify=verify) as response:
+            with session.get(url, stream=True, timeout=timeout, verify=verify, headers=req_headers or None) as response:
                 # Handle rate-limiting explicitly to respect Retry-After
                 if response.status_code == 429:
                     retry_after = response.headers.get("Retry-After")
@@ -784,6 +805,34 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
         # If we exit the loop without returning, all attempts failed due to 429
         logger.error("Giving up after %d attempts due to rate limiting for %s", max_attempts, url)
         return None
+    except requests.exceptions.SSLError as e:
+        # Handle SSL errors similarly to make_request
+        if ssl_policy == "retry_insecure_once" and not insecure_retry_used:
+            logger.warning("SSL verify failed for %s; retrying once with verify=False due to policy.", url)
+            try:
+                with session.get(url, stream=True, timeout=timeout, verify=False, headers=req_headers or None) as response:
+                    response.raise_for_status()
+                    # Fallback to generic name if needed
+                    cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
+                    inferred_ext = Path(cd_name or "").suffix or ".bin"
+                    stem = _current_name_stem() or to_snake_case(filename) or "object"
+                    prov_slug = _provider_slug(_current_provider_key(), provider)
+                    target_dir = os.path.join(folder_path, "objects")
+                    os.makedirs(target_dir, exist_ok=True)
+                    safe_name = sanitize_filename(f"{stem}_{prov_slug}{inferred_ext}")
+                    filepath = os.path.join(target_dir, safe_name)
+                    with open(filepath, "wb") as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                    logger.info("Downloaded %s -> %s (insecure)", url, filepath)
+                    _BUDGET.add_file(provider, work_id)
+                    return filepath
+            except Exception as ee:
+                logger.error("Insecure retry failed for %s: %s", url, ee)
+                return None
+        logger.error("SSL error downloading %s: %s", url, e)
+        return None
     except requests.exceptions.RequestException as e:
         logger.error("Error downloading %s: %s", url, e)
         return None
@@ -844,13 +893,23 @@ def make_request(
     net_timeout = net.get("timeout_s")
     effective_timeout = float(net_timeout) if net_timeout is not None else float(timeout)
     rl = _get_rate_limiter(provider)
-    verify = bool(net.get("verify_ssl", True))
+    verify_default = bool(net.get("verify_ssl", True))
+    ssl_policy = str(net.get("ssl_error_policy", "fail") or "fail").lower()
+    provider_headers = dict(net.get("headers", {}) or {})
+    # Merge headers: session defaults < provider headers < per-call headers
+    req_headers = {}
+    if provider_headers:
+        req_headers.update({str(k): str(v) for k, v in provider_headers.items() if v is not None})
+    if headers:
+        req_headers.update(headers)
 
+    insecure_retry_used = False
+    verify = verify_default
     for attempt in range(1, max_attempts + 1):
         try:
             if rl:
                 rl.wait()
-            resp = session.get(url, params=params, headers=headers, timeout=effective_timeout, verify=verify)
+            resp = session.get(url, params=params, headers=req_headers or None, timeout=effective_timeout, verify=verify)
             # Explicit 429 handling with Retry-After
             if resp.status_code == 429:
                 retry_after = resp.headers.get("Retry-After")
@@ -898,7 +957,7 @@ def make_request(
             logger.error("Request timed out: %s", url)
             return None
         except requests.exceptions.RequestException as e:
-            # Treat DNS/Name resolution errors as non-retryable to avoid very long waits
+            # Treat DNS/Name resolution errors according to policy (default non-retryable)
             msg = str(e).lower()
             if (
                 "nameresolutionerror" in msg
@@ -906,6 +965,12 @@ def make_request(
                 or "getaddrinfo failed" in msg
                 or "temporary failure in name resolution" in msg
             ):
+                dns_retry = bool(net.get("dns_retry", False))
+                if dns_retry and attempt < max_attempts:
+                    sleep_s = base_backoff * (backoff_mult ** (attempt - 1))
+                    logger.warning("Name resolution error for %s: %s; dns_retry=true, sleeping %.1fs (attempt %d/%d)", url, e, sleep_s, attempt, max_attempts)
+                    time.sleep(sleep_s)
+                    continue
                 logger.warning("Name resolution error for %s: %s; not retrying", url, e)
                 return None
             # Treat SSL certificate verification errors as non-retryable as well
@@ -914,6 +979,16 @@ def make_request(
                 or "sslcertverificationerror" in msg
                 or "ssl: certificate_verify_failed" in msg
             ):
+                if not verify and insecure_retry_used:
+                    # We already tried insecure; give up
+                    logger.warning("SSL error (insecure retry already used) for %s: %s; not retrying", url, e)
+                    return None
+                if ssl_policy == "retry_insecure_once" and verify:
+                    logger.warning("SSL verify failed for %s; retrying once with verify=False due to policy.", url)
+                    verify = False
+                    insecure_retry_used = True
+                    # retry immediately without sleeping/backoff
+                    continue
                 logger.warning("SSL certificate verification error for %s: %s; not retrying", url, e)
                 return None
             if attempt < max_attempts:

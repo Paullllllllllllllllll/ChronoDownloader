@@ -5,20 +5,40 @@ IIIF Presentation (v2/v3) and IIIF Image API endpoints.
 
 Functions exported:
 - extract_image_service_bases(manifest): List[str]
-- image_url_candidates(service_base): List[str]
+- image_url_candidates(service_base, info=None): List[str]
 - download_one_from_service(service_base, output_folder, filename): bool
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List
+import logging
 
-from .utils import download_file
+from .utils import download_file, make_request
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "extract_image_service_bases",
     "image_url_candidates",
     "download_one_from_service",
 ]
+
+# Simple, process-local cache for IIIF info.json documents
+_INFO_JSON_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _fetch_info_json(service_base: str) -> Dict[str, Any] | None:
+    """Fetch and cache the IIIF Image API info.json for a service base."""
+    b = service_base.rstrip("/")
+    cached = _INFO_JSON_CACHE.get(b)
+    if isinstance(cached, dict) and cached:
+        return cached
+    info_url = f"{b}/info.json"
+    info = make_request(info_url)
+    if isinstance(info, dict) and info:
+        _INFO_JSON_CACHE[b] = info
+        return info
+    return None
 
 
 def extract_image_service_bases(manifest: Dict[str, Any]) -> List[str]:
@@ -98,25 +118,74 @@ def extract_image_service_bases(manifest: Dict[str, Any]) -> List[str]:
     return unique
 
 
-def image_url_candidates(service_base: str) -> List[str]:
+def image_url_candidates(service_base: str, info: Dict[str, Any] | None = None) -> List[str]:
     """Return a list of likely IIIF Image API URLs for a service base.
 
-    Includes variants compatible with common v2 and v3 servers.
+    Includes variants compatible with common v2 and v3 servers. If `info` (info.json)
+    is provided, generate size-aware candidates using the largest available size.
     """
     b = service_base.rstrip("/")
-    return [
+    candidates: List[str] = [
         f"{b}/full/full/0/default.jpg",
         f"{b}/full/max/0/default.jpg",
+        f"{b}/full/pct:100/0/default.jpg",
         f"{b}/full/full/0/native.jpg",
+        f"{b}/full/full/0/color.jpg",
     ]
+    try:
+        if isinstance(info, dict) and info:
+            # v2 has 'sizes' list of {width,height}; choose the largest width
+            sizes = info.get("sizes") or []
+            max_w = 0
+            if isinstance(sizes, list) and sizes:
+                for s in sizes:
+                    try:
+                        w = int(s.get("width") or 0)
+                        if w > max_w:
+                            max_w = w
+                    except Exception:
+                        continue
+            if max_w > 0:
+                # Width-only size request (server chooses height): {w},
+                candidates[:0] = [
+                    f"{b}/full/{max_w},/0/default.jpg",
+                    f"{b}/full/{max_w},/0/native.jpg",
+                ]
+            # Also try a couple of fixed large widths if sizes are absent
+            if max_w == 0:
+                candidates.extend([
+                    f"{b}/full/2000,/0/default.jpg",
+                    f"{b}/full/1000,/0/default.jpg",
+                ])
+    except Exception:
+        pass
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    uniq: List[str] = []
+    for u in candidates:
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    return uniq
 
 
 def download_one_from_service(service_base: str, output_folder: str, filename: str) -> bool:
     """Try downloading a single image for one canvas using default candidates.
 
+    If those fail, fetch info.json to derive size-aware candidates, then retry.
     Returns True on first successful download.
     """
+    # First, quick defaults
     for url in image_url_candidates(service_base):
         if download_file(url, output_folder, filename):
             return True
+    # Fall back to info.json-derived sizes
+    try:
+        info = _fetch_info_json(service_base)
+    except Exception:
+        info = None
+    if info:
+        for url in image_url_candidates(service_base, info=info):
+            if download_file(url, output_folder, filename):
+                return True
     return False
