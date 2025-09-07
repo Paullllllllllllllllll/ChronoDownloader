@@ -12,6 +12,7 @@ from .utils import (
     get_provider_setting,
     download_iiif_renderings,
     prefer_pdf_over_images,
+    budget_exhausted,
 )
 from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
@@ -175,11 +176,27 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bo
     logger.info("MDZ: downloading %d/%d page images for %s", len(to_download), total_pages, object_id)
     success_any = False
     for idx, svc in enumerate(to_download, start=1):
+        # Stop immediately if the global download budget has been exhausted
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping MDZ downloads at %d/%d pages for %s",
+                idx - 1,
+                len(to_download),
+                object_id,
+            )
+            break
         try:
             filename = f"mdz_{object_id}_p{idx:05d}.jpg"
             if download_one_from_service(svc, output_folder, filename):
                 success_any = True
             else:
+                # If budget was hit during the attempt, stop looping to avoid noisy retries
+                if budget_exhausted():
+                    logger.warning(
+                        "Download budget hit while downloading MDZ %s; stopping further page downloads.",
+                        object_id,
+                    )
+                    break
                 logger.warning("Failed to download MDZ image for %s from %s", object_id, svc)
         except Exception:
             logger.exception("Failed to download MDZ image for %s from %s", object_id, svc)

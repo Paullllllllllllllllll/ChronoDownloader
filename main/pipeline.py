@@ -121,12 +121,12 @@ def filter_enabled_providers_for_keys(
     if missing:
         logger = logging.getLogger(__name__)
         for _pkey, pname, envvar in missing:
-            logger.error(
+            logger.warning(
                 "Provider '%s' requires environment variable %s; it is not set. Skipping this provider for this run.",
                 pname,
                 envvar,
             )
-        logger.error(
+        logger.warning(
             "Missing required API keys for %d provider(s). See messages above.",
             len(missing),
         )

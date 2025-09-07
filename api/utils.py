@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Optional, Union, Dict, List, Any, Tuple
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import urllib3
+from urllib3.exceptions import InsecureRequestWarning
 
 logger = logging.getLogger(__name__)
 
@@ -567,6 +569,11 @@ def _build_session() -> requests.Session:
             "Accept-Language": "en-US,en;q=0.9",
         }
     )
+    # Silence warnings when a provider's policy mandates an insecure retry once
+    try:
+        urllib3.disable_warnings(InsecureRequestWarning)
+    except Exception:
+        pass
     return session
 
 
@@ -657,6 +664,14 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
         req_headers.update({str(k): str(v) for k, v in provider_headers.items() if v is not None})
     rl = _get_rate_limiter(provider)
     work_id = _current_work_id()
+    # If the download budget has already been exhausted globally, avoid any HTTP requests
+    if _BUDGET.exhausted():
+        logger.warning("Download budget exhausted; skipping %s", url)
+        return None
+    # Pre-check file-count limits so we don't make a request we can't save
+    if not _BUDGET.allow_new_file(provider, work_id):
+        logger.warning("Download budget (files) exceeded; skipping %s", url)
+        return None
     try:
         insecure_retry_used = False
         verify = verify_default
