@@ -18,9 +18,10 @@ This project provides a Python-based tool to search for and download digitized h
   - `iiif.py`: Shared helpers to parse IIIF manifests and download representative images (DRY across providers).
   - `providers.py`: Central registry that maps provider keys to their search/download functions.
   - `[library_name]_api.py`: Individual modules for each API (e.g., `bnf_gallica_api.py`, `internet_archive_api.py`, etc.).
-- `main/`: Contains the main downloader script.
+- `main/`: CLI and orchestration layer.
   - `__init__.py`
-  - `downloader.py`: The main script to process a CSV input file and orchestrate downloads.
+  - `pipeline.py`: Core orchestration pipeline (search, select, download). Reusable from code.
+  - `downloader.py`: Thin CLI wrapper that parses arguments and delegates to `pipeline.py`.
 - `sample_works.csv`: An example CSV file format.
 - `requirements.txt`: Python dependencies.
 - `README.md`: This file.
@@ -83,7 +84,7 @@ This project provides a Python-based tool to search for and download digitized h
    # Dry run (search + scoring + metadata only, no downloads)
    python main/downloader.py your_input_file.csv --config config.json --dry-run
    ```
-  The script resolves providers from the config, searches across them, selects the best match per row, writes metadata, and downloads according to your strategy.
+  The CLI resolves providers from the config, searches across them, selects the best match per row, writes metadata, and downloads according to your strategy. Internally it delegates to `main/pipeline.py`, which encapsulates the orchestration logic for easier reuse and testing.
 
 ### CLI options
 
@@ -275,6 +276,23 @@ The downloader currently supports connectors for:
 - Enhance search capabilities by using more fields from the CSV.
 - IIIF parsing and per-canvas downloads are centralized in `api/iiif.py` to reduce duplication across providers.
 - Adjust fuzzy matching or selection rules via `api/matching.py` and `config.json`.
+ - Programmatic use (advanced): import and call the pipeline directly from your own Python code:
+
+   ```python
+   from main import pipeline
+
+   providers = pipeline.load_enabled_apis("config.json")
+   providers = pipeline.filter_enabled_providers_for_keys(providers)
+   pipeline.ENABLED_APIS = providers
+
+   pipeline.process_work(
+       title="Le Morte d'Arthur",
+       creator="Thomas Malory",
+       entry_id="E0001",
+       base_output_dir="downloaded_works",
+       dry_run=False,
+   )
+   ```
 
 ## Changelog
 
@@ -296,3 +314,9 @@ Recent maintenance and bug fixes:
 - BNE connector (`api/bne_api.py`): Hardened IIIF manifest resolution by trying both `/manifest` and `/manifest.json` patterns.
 - Requirements: Pinned versions in `requirements.txt` for stability (requests/urllib3/pandas/beautifulsoup4).
 - Repo hygiene: Added a top-level `.gitignore` and included `sample_works.csv` referenced in this README.
+
+Architecture and code quality:
+
+- Introduced `main/pipeline.py` to encapsulate the orchestration flow (search → select → persist → download). `main/downloader.py` is now a thin CLI wrapper calling the pipeline. This improves modularity, readability, and reuse.
+- Centralized selection and naming helpers in the pipeline; simplified the CLI and reduced duplication.
+- Minor cleanup: removed unused imports in `main/downloader.py`, improved error messages, and kept backward-compatible shims for legacy imports.
