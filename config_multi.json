@@ -1,0 +1,196 @@
+{
+  "providers": {
+    "internet_archive": true,
+    "bnf_gallica": true,
+    "loc": true,
+    "europeana": true,
+    "british_library": false,
+    "google_books": true,
+    "ddb": true,
+    "dpla": true,
+    "mdz": true,
+    "polona": true,
+    "bne": false,
+    "hathitrust": false,
+    "wellcome": true
+  },
+  "provider_settings": {
+    "internet_archive": {
+      "max_pages": 0
+    },
+    "gallica": {
+      "max_pages": 10,
+      "network": {
+        "delay_ms": 1500,
+        "jitter_ms": 400,
+        "max_attempts": 8,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
+    },
+    "mdz": {
+      "max_pages": 15,
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 150,
+        "max_attempts": 8,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
+    },
+    "polona": {
+      "max_pages": 12,
+      "network": {
+        "delay_ms": 600,
+        "jitter_ms": 200,
+        "max_attempts": 6,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
+    },
+    "loc": {
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30,
+        "headers": {"Accept": "application/json"}
+      }
+    },
+    "bne": {
+      "network": {
+        "delay_ms": 1700,
+        "jitter_ms": 200,
+        "max_attempts": 6,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 45,
+        "ssl_error_policy": "retry_insecure_once",
+        "headers": {"Accept": "application/sparql-results+json"}
+      }
+    },
+    "ddb": {
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 150,
+        "max_attempts": 6,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
+    },
+    "dpla": {
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 200,
+        "max_attempts": 6,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30,
+        "headers": {"Accept": "application/json"}
+      }
+    },
+    "wellcome": {
+      "max_images": 25,
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 150,
+        "max_attempts": 8,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
+    },
+    "europeana": {
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 200,
+        "max_attempts": 6,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30
+      }
+    },
+    "british_library": {
+      "network": {
+        "delay_ms": 600,
+        "jitter_ms": 250,
+        "max_attempts": 4,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30,
+        "dns_retry": true,
+        "headers": {"Accept": "application/xml, text/xml"}
+      }
+    },
+    "google_books": {
+      "free_only": true,
+      "prefer": "pdf",
+      "allow_drm": false,
+      "max_files": 3,
+      "network": {
+        "delay_ms": 200,
+        "jitter_ms": 100,
+        "max_attempts": 8,
+        "base_backoff_s": 1.2,
+        "backoff_multiplier": 1.5,
+        "timeout_s": 30,
+        "headers": {"Referer": "https://books.google.com/"}
+      }
+    }
+  },
+  "download": {
+    "prefer_pdf_over_images": true,
+    "download_manifest_renderings": true,
+    "max_renderings_per_manifest": 3,
+    "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
+    "overwrite_existing": false,
+    "include_metadata": true
+  },
+  "selection": {
+    "strategy": "collect_and_select",
+    "provider_hierarchy": [
+      "internet_archive",
+      "bnf_gallica",
+      "loc",
+      "mdz",
+      "dpla",
+      "ddb",
+      "wellcome",
+      "google_books",
+      "europeana",
+      "polona"
+    ],
+    "min_title_score": 80,
+    "creator_weight": 0.25,
+    "year_tolerance": 2,
+    "max_candidates_per_provider": 4,
+    "download_strategy": "selected_only",
+    "keep_non_selected_metadata": true
+  },
+  "naming": {
+    "include_creator_in_work_dir": true,
+    "include_year_in_work_dir": true,
+    "title_slug_max_len": 80
+  },
+  "download_limits": {
+    "max_total_files": 320,
+    "max_total_bytes": 3200000000,
+    "per_work": {"max_files": 24, "max_bytes": 900000000},
+    "per_provider": {
+      "internet_archive": {"max_files": 120, "max_bytes": 1600000000},
+      "gallica": {"max_files": 60, "max_bytes": 600000000},
+      "loc": {"max_files": 30, "max_bytes": 300000000},
+      "mdz": {"max_files": 40, "max_bytes": 400000000},
+      "wellcome": {"max_files": 40, "max_bytes": 400000000},
+      "ddb": {"max_files": 30, "max_bytes": 250000000},
+      "dpla": {"max_files": 30, "max_bytes": 250000000}
+    },
+    "on_exceed": "stop"
+  }
+}

@@ -1,9 +1,14 @@
 import os
+import sys
 import argparse
 import logging
 from typing import Any, List, Tuple
 
 import pandas as pd
+from pathlib import Path
+
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from main import pipeline
 from api import utils

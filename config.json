@@ -6,10 +6,10 @@
     "europeana": true,
     "dpla": true,
     "ddb": true,
-    "british_library": true,
+    "british_library": false,
     "mdz": true,
     "polona": true,
-    "bne": true,
+    "bne": false,
     "google_books": true,
     "hathitrust": true,
     "wellcome": true
