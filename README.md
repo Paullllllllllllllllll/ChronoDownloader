@@ -1,11 +1,3 @@
-- The core HTTP stack (`api/utils.py`) centralizes retries, pacing, and download budgeting. Use `download_file()` for all network file downloads and `make_request()` for API calls.
-- When working with IIIF, save manifests and consider calling `utils.download_iiif_renderings(manifest, out_dir, prefix)` to automatically pick up PDFs/EPUBs exposed via manifest-level `rendering` entries.
-
-## Scalability and Reliability
-
-- The session layer uses `requests.Session` with limited urllib3 retries and explicit handling of 429/5xx with exponential backoff. Per-provider pacing is configured in `provider_settings.*.network`.
-- A global download budget guards against runaway jobs (see "Download limits and preferences"). The main loop will stop early when the budget is exhausted.
-- For very large jobs, consider splitting input CSVs and running multiple processes. Per-provider limits and budget checks will throttle IO; keep an eye on provider terms of use.
 # Historical Sources Downloader
 
 This project provides a Python-based tool to search for and download digitized historical sources (books, manuscripts, etc.) from various European and American digital libraries and platforms.
@@ -13,18 +5,35 @@ This project provides a Python-based tool to search for and download digitized h
 ## Project Structure
 
 - `api/`: Contains modules for interacting with specific digital library APIs.
-  - `__init__.py`
-  - `utils.py`: Core HTTP, retries/backoff, pacing, download budgeting, file helpers.
-  - `iiif.py`: Shared helpers to parse IIIF manifests and download representative images (DRY across providers).
-  - `providers.py`: Central registry that maps provider keys to their search/download functions.
-  - `[library_name]_api.py`: Individual modules for each API (e.g., `bnf_gallica_api.py`, `internet_archive_api.py`, etc.).
-- `main/`: CLI and orchestration layer.
+  - `core/`: Modular core utilities
+    - `config.py`: Configuration loading and provider settings
+    - `network.py`: HTTP session management, rate limiting, and requests
+    - `context.py`: Thread-local work/entry/provider tracking
+    - `naming.py`: Filename sanitization and naming conventions
+    - `budget.py`: Download budget tracking and enforcement
+  - `__init__.py`: Package documentation and key symbol exports
+  - `utils.py`: Backward-compatible façade re-exporting from `core/` modules, plus file coordination (`download_file()`, `save_json()`)
+  - `iiif.py`: Shared helpers to parse IIIF manifests and download representative images (DRY across providers)
+  - `model.py`: `SearchResult` dataclass for unified provider responses
+  - `matching.py`: Fuzzy matching and scoring utilities for candidate selection
+  - `query_helpers.py`: Query string escaping for SRU/SPARQL
+  - `providers.py`: Central registry that maps provider keys to their search/download functions
+  - `[library_name]_api.py`: Individual modules for each API (e.g., `bnf_gallica_api.py`, `internet_archive_api.py`, etc.)
+- `main/`: CLI and orchestration layer
   - `__init__.py`
   - `pipeline.py`: Core orchestration pipeline (search, select, download). Reusable from code.
-  - `downloader.py`: Thin CLI wrapper that parses arguments and delegates to `pipeline.py`.
-- `sample_works.csv`: An example CSV file format.
-- `requirements.txt`: Python dependencies.
-- `README.md`: This file.
+  - `downloader.py`: Thin CLI wrapper that parses arguments and delegates to `pipeline.py`
+- `sample_works.csv`: An example CSV file format
+- `requirements.txt`: Python dependencies
+- `README.md`: This file
+
+## Scalability and Reliability
+
+- The core HTTP stack is organized in the modular `api/core/network.py`. Use `download_file()` for all network file downloads and `make_request()` for API calls. These functions are re-exported by `api/utils.py` for backward compatibility.
+- When working with IIIF, save manifests and consider calling `utils.download_iiif_renderings(manifest, out_dir, prefix)` to automatically pick up PDFs/EPUBs exposed via manifest-level `rendering` entries.
+- The session layer uses `requests.Session` with limited urllib3 retries and explicit handling of 429/5xx with exponential backoff. Per-provider pacing is configured in `provider_settings.*.network`.
+- A global download budget guards against runaway jobs (see "Download limits and preferences"). The main loop will stop early when the budget is exhausted.
+- For very large jobs, consider splitting input CSVs and running multiple processes. Per-provider limits and budget checks will throttle IO; keep an eye on provider terms of use.
 
 ## Setup
 
@@ -293,30 +302,3 @@ The downloader currently supports connectors for:
        dry_run=False,
    )
    ```
-
-## Changelog
-
-Recent maintenance and bug fixes:
-
-- Network core (`api/utils.py`):
-  - Fixed provider host matching to match exact domains or subdomains and avoid false positives (e.g., `notarchive.org` no longer matches `archive.org`).
-  - Corrected `Retry-After` HTTP-date parsing to use `datetime.now(tz)` for accurate backoff durations.
-  - Moved the success log for downloads to occur only after confirming the file was not truncated by budget limits.
-  - Made urllib3 `Retry.allowed_methods` a `frozenset` for broader compatibility.
-  - Added thread-local `entry_id` support and automatic filename suffixing with `entry_id` and provider abbreviation for all downloads.
-- Main downloader (`main/downloader.py`):
-  - Parent folder is now named `<entry_id>_<title_slug>[_creator][_YYYY]` for easier browsing.
-  - `work.json` now includes `entry_id` in the `input` block.
-  - The run writes `index.csv` (CSV only) including an `entry_id` column.
-- Samples: `sample_works.csv` now includes an `entry_id` column and additional sample rows.
-- Requirements: Removed `openpyxl`; indexing is now CSV-only.
-- Gallica connector (`api/bnf_gallica_api.py`): Removed manual `time.sleep()` pacing; rate limiting is now handled centrally per-provider.
-- BNE connector (`api/bne_api.py`): Hardened IIIF manifest resolution by trying both `/manifest` and `/manifest.json` patterns.
-- Requirements: Pinned versions in `requirements.txt` for stability (requests/urllib3/pandas/beautifulsoup4).
-- Repo hygiene: Added a top-level `.gitignore` and included `sample_works.csv` referenced in this README.
-
-Architecture and code quality:
-
-- Introduced `main/pipeline.py` to encapsulate the orchestration flow (search → select → persist → download). `main/downloader.py` is now a thin CLI wrapper calling the pipeline. This improves modularity, readability, and reuse.
-- Centralized selection and naming helpers in the pipeline; simplified the CLI and reduced duplication.
-- Minor cleanup: removed unused imports in `main/downloader.py`, improved error messages, and kept backward-compatible shims for legacy imports.

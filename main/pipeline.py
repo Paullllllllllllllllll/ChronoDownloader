@@ -15,7 +15,6 @@ and delegates to functions in this module. Import and use:
     providers = pipeline.filter_enabled_providers_for_keys(providers)
     pipeline.ENABLED_APIS = providers
     pipeline.process_work(...)
-
 """
 from __future__ import annotations
 
@@ -24,32 +23,44 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from api import utils
-from api.providers import PROVIDERS
-from api.model import SearchResult, convert_to_searchresult
-from api.matching import (
-    combined_match_score,
-    normalize_text,
+from api.core.config import get_config, get_provider_setting
+from api.core.context import (
+    clear_current_work,
+    reset_counters,
+    set_current_entry,
+    set_current_name_stem,
+    set_current_work,
 )
+from api.core.naming import to_snake_case
+from api.matching import combined_match_score, normalize_text
+from api.model import SearchResult, convert_to_searchresult
+from api.providers import PROVIDERS
 
-# Providers are registered centrally in api/providers.py as PROVIDERS
+logger = logging.getLogger(__name__)
+
+# Type alias for provider tuple
+ProviderTuple = Tuple[str, Callable, Callable, str]
 
 
-def load_enabled_apis(config_path: str) -> List[Tuple[str, Any, Any, str]]:
+def load_enabled_apis(config_path: str) -> List[ProviderTuple]:
     """Load enabled providers from a JSON config file.
 
-    Returns a list of tuples: (provider_key, search_func, download_func, provider_friendly_name)
+    Args:
+        config_path: Path to configuration JSON file
+
+    Returns:
+        List of tuples: (provider_key, search_func, download_func, provider_friendly_name)
 
     Config format:
-    {
-      "providers": { "internet_archive": true, "europeana": false, ... }
-    }
+        {
+          "providers": { "internet_archive": true, "europeana": false, ... }
+        }
     """
-    logger = logging.getLogger(__name__)
     if not os.path.exists(config_path):
         logger.info(
             "Config file %s not found; using default providers: Internet Archive only",
@@ -57,6 +68,7 @@ def load_enabled_apis(config_path: str) -> List[Tuple[str, Any, Any, str]]:
         )
         s, d, n = PROVIDERS["internet_archive"]
         return [("internet_archive", s, d, n)]
+    
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -68,21 +80,24 @@ def load_enabled_apis(config_path: str) -> List[Tuple[str, Any, Any, str]]:
         )
         s, d, n = PROVIDERS["internet_archive"]
         return [("internet_archive", s, d, n)]
-    enabled: List[Tuple[str, Any, Any, str]] = []
+    
+    enabled: List[ProviderTuple] = []
     for key, flag in (cfg.get("providers") or {}).items():
         if flag and key in PROVIDERS:
             s, d, n = PROVIDERS[key]
             enabled.append((key, s, d, n))
+    
     if not enabled:
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "No providers enabled in config; nothing to do. Enable providers in %s under 'providers'.",
             config_path,
         )
+    
     return enabled
 
 
 # Default to Internet Archive only; this will be overridden by the CLI using this module
-ENABLED_APIS: List[Tuple[str, Any, Any, str]] = [
+ENABLED_APIS: List[ProviderTuple] = [
     ("internet_archive",) + PROVIDERS["internet_archive"],
 ]
 
@@ -102,24 +117,28 @@ def _required_provider_envvars() -> Dict[str, str]:
 
 
 def filter_enabled_providers_for_keys(
-    enabled: List[Tuple[str, Any, Any, str]]
-) -> List[Tuple[str, Any, Any, str]]:
+    enabled: List[ProviderTuple]
+) -> List[ProviderTuple]:
     """Filter out providers missing required API keys in the environment.
 
-    - Logs a clear ERROR for each enabled provider missing a required env var.
-    - Returns the subset of providers that pass the check.
+    Args:
+        enabled: List of enabled provider tuples
+
+    Returns:
+        Filtered list with only providers that have required keys set
     """
     req = _required_provider_envvars()
-    kept: List[Tuple[str, Any, Any, str]] = []
+    kept: List[ProviderTuple] = []
     missing: List[Tuple[str, str, str]] = []  # (provider_key, provider_name, envvar)
+    
     for pkey, s, d, pname in enabled:
         envvar = req.get(pkey)
         if envvar and not os.getenv(envvar):
             missing.append((pkey, pname, envvar))
             continue
         kept.append((pkey, s, d, pname))
+    
     if missing:
-        logger = logging.getLogger(__name__)
         for _pkey, pname, envvar in missing:
             logger.warning(
                 "Provider '%s' requires environment variable %s; it is not set. Skipping this provider for this run.",
@@ -130,12 +149,15 @@ def filter_enabled_providers_for_keys(
             "Missing required API keys for %d provider(s). See messages above.",
             len(missing),
         )
+    
     return kept
 
 
 def _get_selection_config() -> Dict[str, Any]:
-    cfg = utils.get_config()
+    """Get selection configuration with defaults."""
+    cfg = get_config()
     sel = dict(cfg.get("selection", {}) or {})
+    
     # Defaults
     sel.setdefault("strategy", "collect_and_select")  # or "sequential_first_hit"
     sel.setdefault("provider_hierarchy", [])
@@ -143,46 +165,55 @@ def _get_selection_config() -> Dict[str, Any]:
     sel.setdefault("creator_weight", 0.2)
     sel.setdefault("year_tolerance", 2)
     sel.setdefault("max_candidates_per_provider", 5)
-    sel.setdefault("download_strategy", "selected_only")  # selected_only | selected_plus_metadata | all
+    sel.setdefault("download_strategy", "selected_only")
     sel.setdefault("keep_non_selected_metadata", True)
+    
     return sel
 
 
 def _title_slug(title: str, max_len: int = 80) -> str:
+    """Generate a URL-safe slug from a title."""
     base = "_".join([t for t in normalize_text(title).split() if t])
     if not base:
         base = "untitled"
     base = base[:max_len]
-    # sanitize for filesystem
     return utils.sanitize_filename(base)
 
 
 def _compute_work_id(title: str, creator: Optional[str]) -> str:
+    """Generate a stable hash-based work ID from title and creator."""
     norm = f"{normalize_text(title)}|{normalize_text(creator) if creator else ''}"
     h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:10]
     return h
 
 
 def _provider_order(
-    enabled: List[Tuple[str, Any, Any, str]], hierarchy: List[str]
-) -> List[Tuple[str, Any, Any, str]]:
+    enabled: List[ProviderTuple], hierarchy: List[str]
+) -> List[ProviderTuple]:
+    """Reorder providers according to hierarchy preference."""
     if not hierarchy:
         return enabled
+    
     key_to_tuple = {e[0]: e for e in enabled}
     ordered = [key_to_tuple[k] for k in hierarchy if k in key_to_tuple]
-    # append any enabled not explicitly listed
+    
+    # Append any enabled not explicitly listed
     for item in enabled:
         if item[0] not in hierarchy:
             ordered.append(item)
+    
     return ordered
 
 
 def _get_naming_config() -> Dict[str, Any]:
-    cfg = utils.get_config()
+    """Get naming configuration with defaults."""
+    cfg = get_config()
     nm = dict(cfg.get("naming", {}) or {})
+    
     nm.setdefault("include_creator_in_work_dir", True)
     nm.setdefault("include_year_in_work_dir", True)
     nm.setdefault("title_slug_max_len", 80)
+    
     return nm
 
 
@@ -228,7 +259,7 @@ def process_work(
     # Gather candidates depending on strategy
     all_candidates: List[SearchResult] = []
     selected: Optional[SearchResult] = None
-    selected_provider_tuple: Optional[Tuple[str, Any, Any, str]] = None
+    selected_provider_tuple: Optional[ProviderTuple] = None
 
     def _score_item(sr: SearchResult) -> Dict[str, Any]:
         score = combined_match_score(
@@ -249,7 +280,7 @@ def process_work(
         return {"score": score, "boost": boost, "total": total}
 
     def _max_results_for_provider(pkey: str) -> int:
-        val = utils.get_provider_setting(pkey, "max_results", None)
+        val = get_provider_setting(pkey, "max_results", None)
         try:
             return int(val) if val is not None else int(sel_cfg.get("max_candidates_per_provider", 5))
         except Exception:
@@ -345,7 +376,7 @@ def process_work(
     if not all_candidates:
         logger.info("No items found for '%s' across all enabled APIs.", title)
         try:
-            utils.clear_current_work()
+            clear_current_work()
         except Exception:
             pass
         return
@@ -354,20 +385,20 @@ def process_work(
     naming_cfg = _get_naming_config()
     work_id = _compute_work_id(title, creator)
     # New folder scheme: strictly snake_case: <entry_id>_<work_name>
-    entry_slug = utils.to_snake_case(str(entry_id)) if entry_id else None
-    title_slug_sc = utils.to_snake_case(str(title))
+    entry_slug = to_snake_case(str(entry_id)) if entry_id else None
+    title_slug_sc = to_snake_case(str(title))
     work_stem = "_".join([p for p in [entry_slug, title_slug_sc] if p])
     work_dir_name = work_stem or _title_slug(title, max_len=int(naming_cfg.get("title_slug_max_len", 80)))
     work_dir = os.path.join(base_output_dir, work_dir_name)
     os.makedirs(work_dir, exist_ok=True)
 
     # Set per-work context for centralized download budgeting
-    utils.set_current_work(work_id)
+    set_current_work(work_id)
     # Configure naming for this work and reset per-work counters
-    utils.set_current_entry(entry_id)
-    utils.set_current_name_stem(work_stem)
+    set_current_entry(entry_id)
+    set_current_name_stem(work_stem)
     try:
-        utils.reset_counters()
+        reset_counters()
     except Exception:
         pass
 
@@ -422,11 +453,11 @@ def process_work(
                 if not sr.provider_key:
                     continue
                 try:
-                    utils.set_current_provider(sr.provider_key)
+                    set_current_provider(sr.provider_key)
                     utils.save_json(sr.to_dict(include_raw=True), work_dir, "search_result")
                 finally:
                     try:
-                        utils.clear_current_provider()
+                        clear_current_provider()
                     except Exception:
                         pass
             except Exception:
@@ -443,11 +474,11 @@ def process_work(
         try:
             logger.info("Downloading selected item from %s into %s", pname, selected_dir)
             try:
-                utils.set_current_provider(pkey)
+                set_current_provider(pkey)
                 ok = download_func(selected, selected_dir)
             finally:
                 try:
-                    utils.clear_current_provider()
+                    clear_current_provider()
                 except Exception:
                     pass
             if not ok:
@@ -479,7 +510,7 @@ def process_work(
                         _s, dfunc, _pname = provider_map[prov_key]
                         logger.info("Attempting fallback download from %s", _pname)
                         try:
-                            utils.set_current_provider(prov_key)
+                            set_current_provider(prov_key)
                             if dfunc(sr, selected_dir):
                                 logger.info("Fallback download from %s succeeded.", _pname)
                                 break
@@ -489,7 +520,7 @@ def process_work(
                             )
                         finally:
                             try:
-                                utils.clear_current_provider()
+                                clear_current_provider()
                             except Exception:
                                 pass
                 except Exception:
@@ -512,11 +543,11 @@ def process_work(
                             dest_dir,
                         )
                         try:
-                            utils.set_current_provider(prov_key)
+                            set_current_provider(prov_key)
                             dfunc(sr, dest_dir)
                         finally:
                             try:
-                                utils.clear_current_provider()
+                                clear_current_provider()
                             except Exception:
                                 pass
                 except Exception:
@@ -552,15 +583,15 @@ def process_work(
     finally:
         # Clear per-work context
         try:
-            utils.clear_current_work()
+            clear_current_work()
         except Exception:
             pass
         try:
-            utils.clear_current_entry()
+            clear_current_entry()
         except Exception:
             pass
         try:
-            utils.clear_current_name_stem()
+            clear_current_name_stem()
         except Exception:
             pass
     logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
