@@ -10,7 +10,7 @@ ChronoDownloader automates the process of searching, selecting, and downloading 
 - **Intelligent Selection**: Automatic fuzzy matching and scoring to select the best candidate from multiple sources
 - **Flexible Download Strategies**: Download PDFs, EPUBs, or high-resolution page images based on availability and preferences
 - **IIIF Support**: Native support for IIIF Presentation and Image APIs for high-quality downloads
-- **Budget Management**: Configurable download limits (files, bytes) at global, per-work, and per-provider levels
+- **Budget Management**: Content-type download budgets (images, PDFs, metadata) with simple GB-based limits
 - **Rate Limiting**: Built-in per-provider rate limiting with exponential backoff to respect API quotas
 - **Robust Error Handling**: Automatic retries, fallback providers, and comprehensive logging
 - **Batch Processing**: Process CSV files with hundreds or thousands of works efficiently
@@ -245,7 +245,7 @@ E0012,"Divina Commedia","Dante Alighieri"
 
 ## Configuration
 
-ChronoDownloader uses a JSON configuration file (`config.json` by default) to control all aspects of its behavior. You can specify an alternative config file using the `--config` flag or the `CHRONO_CONFIG_PATH` environment variable.
+ChronoDownloader uses a JSON configuration file (`config.json` by default) to control all aspects of its behavior. You can specify an alternative config file using the `--config` flag or the `CHRONO_CONFIG_PATH` environment variable. For detailed guidance and sample configurations, see `CONFIG_GUIDE.md`.
 
 ### Configuration Overview
 
@@ -343,7 +343,7 @@ Some providers support environment variables for quick adjustments:
 
 ### 3. Download Preferences
 
-The downloader enforces optional global/per-work/per-provider download budgets and can prefer bundled PDFs/EPUBs from IIIF manifests over page images. Configure in `config.json`:
+The downloader enforces optional content-type download budgets and can prefer bundled PDFs/EPUBs from IIIF manifests over page images. Configure in `config.json`:
 
 ```json
 {
@@ -353,17 +353,20 @@ The downloader enforces optional global/per-work/per-provider download budgets a
     "max_renderings_per_manifest": 1,
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
     "overwrite_existing": false,
-    "include_metadata": true  // set to false to download only objects (skip saving metadata files)
+    "include_metadata": true
   },
   "download_limits": {
-    "max_total_files": 0,
-    "max_total_bytes": 0,
-    "per_work": { "max_files": 0, "max_bytes": 0 },
-    "per_provider": {
-      "mdz": { "max_files": 0, "max_bytes": 0 },
-      "gallica": { "max_files": 0, "max_bytes": 0 }
+    "total": {
+      "images_gb": 100,
+      "pdfs_gb": 50,
+      "metadata_gb": 1
     },
-    "on_exceed": "skip"  // or "stop" to abort processing immediately
+    "per_work": {
+      "images_gb": 5,
+      "pdfs_gb": 3,
+      "metadata_mb": 10
+    },
+    "on_exceed": "stop"
   }
 }
 ```
@@ -383,18 +386,20 @@ The downloader enforces optional global/per-work/per-provider download budgets a
 
 ### 4. Download Budget Limits
 
-Download budgets prevent runaway jobs and help manage storage/bandwidth:
+Download budgets prevent runaway jobs and help manage storage/bandwidth. Limits are defined per content type, expressed in GB (metadata per work uses MB for finer control):
 
 ```json
 {
   "download_limits": {
-    "max_total_files": 60000,
-    "max_total_bytes": 150000000000,
-    "per_work": { "max_files": 5000, "max_bytes": 5000000000 },
-    "per_provider": {
-      "internet_archive": { "max_files": 20000, "max_bytes": 50000000000 },
-      "bnf_gallica": { "max_files": 20000, "max_bytes": 50000000000 },
-      "loc": { "max_files": 10000, "max_bytes": 25000000000 }
+    "total": {
+      "images_gb": 100,
+      "pdfs_gb": 50,
+      "metadata_gb": 1
+    },
+    "per_work": {
+      "images_gb": 5,
+      "pdfs_gb": 3,
+      "metadata_mb": 10
     },
     "on_exceed": "stop"
   }
@@ -402,16 +407,15 @@ Download budgets prevent runaway jobs and help manage storage/bandwidth:
 ```
 
 **Budget parameters:**
-- `max_total_files` - Global file count limit (0 = unlimited)
-- `max_total_bytes` - Global byte limit (0 = unlimited)
-- `per_work.max_files` - Maximum files per individual work
-- `per_work.max_bytes` - Maximum bytes per individual work
-- `per_provider.<provider>.max_files` - Maximum files from specific provider
-- `per_provider.<provider>.max_bytes` - Maximum bytes from specific provider
-- `on_exceed` - Action when limit exceeded: `"skip"` (skip file, continue) or `"stop"` (abort immediately)
+- `total.images_gb` - Maximum combined GB of page images across all works (0 or missing = unlimited)
+- `total.pdfs_gb` - Maximum combined GB of PDF downloads across all works
+- `total.metadata_gb` - Maximum combined GB of metadata saved across all works
+- `per_work.images_gb` - Maximum GB of images per individual work
+- `per_work.pdfs_gb` - Maximum GB of PDFs per individual work
+- `per_work.metadata_mb` - Maximum metadata size per work (in MB for finer granularity)
+- `on_exceed` - Action when limit exceeded: `"skip"` (skip item, continue) or `"stop"` (abort immediately)
 
-**Provider keys for limits:**
-`gallica`, `british_library`, `mdz`, `europeana`, `wellcome`, `loc`, `ddb`, `polona`, `bne`, `dpla`, `internet_archive`, `google_books`, `hathitrust`
+Legacy byte- and provider-based fields are still understood when present but new configurations should migrate to the simplified structure above.
 
 ### 5. Selection Strategy and Fuzzy Matching
 

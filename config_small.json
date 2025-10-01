@@ -38,11 +38,15 @@
     "title_slug_max_len": 80
   },
   "download_limits": {
-    "max_total_files": 100,
-    "max_total_bytes": 500000000,
-    "per_work": {"max_files": 10, "max_bytes": 200000000},
-    "per_provider": {
-      "internet_archive": {"max_files": 100, "max_bytes": 500000000}
+    "total": {
+      "images_gb": 0.5,
+      "pdfs_gb": 0.3,
+      "metadata_gb": 0.01
+    },
+    "per_work": {
+      "images_gb": 0.2,
+      "pdfs_gb": 0.1,
+      "metadata_mb": 2
     },
     "on_exceed": "stop"
   }
