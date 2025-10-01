@@ -1,7 +1,7 @@
 """Download budget tracking and enforcement for ChronoDownloader.
 
-Manages global, per-work, and per-provider download limits to prevent runaway jobs
-and respect configured constraints.
+Manages global and per-work download limits by content type (images, PDFs, metadata)
+to prevent runaway jobs and respect configured constraints.
 """
 from __future__ import annotations
 
@@ -19,21 +19,47 @@ class DownloadBudget:
 
     Limits are configured under config.json -> download_limits:
     {
-      "max_total_files": 0,            # 0 or missing = unlimited
-      "max_total_bytes": 0,
-      "per_work": { "max_files": 0, "max_bytes": 0 },
-      "per_provider": { "mdz": {"max_files": 0, "max_bytes": 0}, ... },
-      "on_exceed": "skip"             # "skip" | "stop"
+      "total": {
+        "images_gb": 100,
+        "pdfs_gb": 50,
+        "metadata_gb": 1
+      },
+      "per_work": {
+        "images_gb": 5,
+        "pdfs_gb": 3,
+        "metadata_mb": 10
+      },
+      "on_exceed": "skip"  # "skip" | "stop"
     }
     """
 
     def __init__(self):
         self._lock = threading.Lock()
-        self.total_files = 0
-        self.total_bytes = 0
+        # Global counters by content type (in bytes)
+        self.total_images_bytes = 0
+        self.total_pdfs_bytes = 0
+        self.total_metadata_bytes = 0
+        # Per-work counters: {work_id: {"images": bytes, "pdfs": bytes, "metadata": bytes}}
         self.per_work: Dict[str, Dict[str, int]] = {}
-        self.per_provider: Dict[str, Dict[str, int]] = {}
         self._exhausted = False
+
+    @staticmethod
+    def _gb_to_bytes(gb: Any) -> Optional[int]:
+        """Convert GB value to bytes, or None if unlimited."""
+        try:
+            val = float(gb)
+            return int(val * 1024 * 1024 * 1024) if val > 0 else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _mb_to_bytes(mb: Any) -> Optional[int]:
+        """Convert MB value to bytes, or None if unlimited."""
+        try:
+            val = float(mb)
+            return int(val * 1024 * 1024) if val > 0 else None
+        except Exception:
+            return None
 
     @staticmethod
     def _limit_value(v: Any) -> Optional[int]:
@@ -57,7 +83,7 @@ class DownloadBudget:
 
     def _inc(self, bucket: Dict[str, Dict[str, int]], key: str, field: str, delta: int) -> int:
         """Increment a counter in a nested bucket."""
-        m = bucket.setdefault(key, {"files": 0, "bytes": 0})
+        m = bucket.setdefault(key, {"images": 0, "pdfs": 0, "metadata": 0})
         m[field] = int(m.get(field, 0)) + int(delta)
         return m[field]
 
@@ -65,87 +91,56 @@ class DownloadBudget:
         """Get a counter value from a nested bucket."""
         return int(bucket.get(key, {}).get(field, 0))
 
-    def allow_new_file(self, provider: Optional[str], work_id: Optional[str]) -> bool:
-        """Check if a new file can be downloaded within budget limits.
+    def allow_content(self, content_type: str, work_id: Optional[str], add_bytes: Optional[int]) -> bool:
+        """Check if additional content can be downloaded within budget limits.
         
         Args:
-            provider: Provider key for per-provider limits
-            work_id: Work ID for per-work limits
-            
-        Returns:
-            True if file is allowed, False if limit would be exceeded
-        """
-        dl = get_download_limits()
-        
-        # Global file limit
-        max_total_files = self._limit_value(dl.get("max_total_files"))
-        if max_total_files is not None and (self.total_files + 1) > max_total_files:
-            if self._policy() == "stop":
-                with self._lock:
-                    self._exhausted = True
-            return False
-        
-        # Per-provider file limit
-        if provider:
-            per = dict(dl.get("per_provider", {}) or {})
-            pl = self._limit_value((per.get(provider) or {}).get("max_files"))
-            if pl is not None and (self._get(self.per_provider, provider, "files") + 1) > pl:
-                if self._policy() == "stop":
-                    with self._lock:
-                        self._exhausted = True
-                return False
-        
-        # Per-work file limit
-        if work_id:
-            pw = dict(dl.get("per_work", {}) or {})
-            wl = self._limit_value(pw.get("max_files"))
-            if wl is not None and (self._get(self.per_work, work_id, "files") + 1) > wl:
-                if self._policy() == "stop":
-                    with self._lock:
-                        self._exhausted = True
-                return False
-        
-        return True
-
-    def allow_bytes(self, provider: Optional[str], work_id: Optional[str], add_bytes: Optional[int]) -> bool:
-        """Check if additional bytes can be downloaded within budget limits.
-        
-        Args:
-            provider: Provider key for per-provider limits
+            content_type: Type of content ("images", "pdfs", or "metadata")
             work_id: Work ID for per-work limits
             add_bytes: Number of bytes to add
             
         Returns:
-            True if bytes are allowed, False if limit would be exceeded
+            True if content is allowed, False if limit would be exceeded
         """
         if not add_bytes or add_bytes <= 0:
             return True
         
+        if content_type not in ["images", "pdfs", "metadata"]:
+            logger.warning(f"Unknown content type: {content_type}, defaulting to allow")
+            return True
+        
         dl = get_download_limits()
         
-        # Global byte limit
-        mtb = self._limit_value(dl.get("max_total_bytes"))
-        if mtb is not None and (self.total_bytes + add_bytes) > mtb:
+        # Get total limits
+        total_limits = dl.get("total", {})
+        
+        # Global limit for this content type
+        limit_key = f"{content_type}_gb"
+        max_total = self._gb_to_bytes(total_limits.get(limit_key))
+        
+        current_total = getattr(self, f"total_{content_type}_bytes", 0)
+        if max_total is not None and (current_total + add_bytes) > max_total:
+            logger.info(f"Global {content_type} limit would be exceeded: {(current_total + add_bytes) / (1024**3):.2f} GB > {max_total / (1024**3):.2f} GB")
             if self._policy() == "stop":
                 with self._lock:
                     self._exhausted = True
             return False
         
-        # Per-provider byte limit
-        if provider:
-            per = dict(dl.get("per_provider", {}) or {})
-            pl = self._limit_value((per.get(provider) or {}).get("max_bytes"))
-            if pl is not None and (self._get(self.per_provider, provider, "bytes") + add_bytes) > pl:
-                if self._policy() == "stop":
-                    with self._lock:
-                        self._exhausted = True
-                return False
-        
-        # Per-work byte limit
+        # Per-work limit for this content type
         if work_id:
-            pw = dict(dl.get("per_work", {}) or {})
-            wl = self._limit_value(pw.get("max_bytes"))
-            if wl is not None and (self._get(self.per_work, work_id, "bytes") + add_bytes) > wl:
+            per_work_limits = dl.get("per_work", {})
+            
+            # Handle MB for metadata, GB for others
+            if content_type == "metadata":
+                limit_key = "metadata_mb"
+                max_work = self._mb_to_bytes(per_work_limits.get(limit_key))
+            else:
+                limit_key = f"{content_type}_gb"
+                max_work = self._gb_to_bytes(per_work_limits.get(limit_key))
+            
+            current_work = self._get(self.per_work, work_id, content_type)
+            if max_work is not None and (current_work + add_bytes) > max_work:
+                logger.info(f"Per-work {content_type} limit would be exceeded for {work_id}")
                 if self._policy() == "stop":
                     with self._lock:
                         self._exhausted = True
@@ -153,55 +148,93 @@ class DownloadBudget:
         
         return True
 
-    def add_bytes(self, provider: Optional[str], work_id: Optional[str], n: int) -> bool:
-        """Add bytes to counters; return True if still within limits.
+    def record_download(self, content_type: str, work_id: Optional[str], size_bytes: int) -> None:
+        """Record a completed download.
         
         Args:
-            provider: Provider key
-            work_id: Work ID
-            n: Number of bytes to add
-            
-        Returns:
-            True if within limits after adding, False if exceeded
+            content_type: Type of content ("images", "pdfs", or "metadata")
+            work_id: Work ID for per-work tracking
+            size_bytes: Size of downloaded content in bytes
         """
-        if n <= 0:
-            return True
+        if content_type not in ["images", "pdfs", "metadata"]:
+            logger.warning(f"Unknown content type for recording: {content_type}")
+            return
         
         with self._lock:
-            self.total_bytes += n
-            if provider:
-                self._inc(self.per_provider, provider, "bytes", n)
-            if work_id:
-                self._inc(self.per_work, work_id, "bytes", n)
+            # Update global counter
+            attr_name = f"total_{content_type}_bytes"
+            current = getattr(self, attr_name, 0)
+            setattr(self, attr_name, current + size_bytes)
             
-            # Re-check limits after adding
-            ok = self.allow_bytes(provider, work_id, 0)
-            if not ok and self._policy() == "stop":
-                self._exhausted = True
-            return ok
+            # Update per-work counter
+            if work_id:
+                self._inc(self.per_work, work_id, content_type, size_bytes)
 
-    def add_file(self, provider: Optional[str], work_id: Optional[str]) -> bool:
-        """Add a file to counters; return True if still within limits.
+    def log_summary(self) -> None:
+        """Log a summary of current download statistics."""
+        with self._lock:
+            logger.info("=== Download Budget Summary ===")
+            logger.info(f"Images: {self.total_images_bytes / (1024**3):.2f} GB")
+            logger.info(f"PDFs: {self.total_pdfs_bytes / (1024**3):.2f} GB")
+            logger.info(f"Metadata: {self.total_metadata_bytes / (1024**2):.2f} MB")
+            logger.info(f"Total works tracked: {len(self.per_work)}")
+            
+            # Log per-work details if not too many
+            if len(self.per_work) <= 10:
+                for wid, stats in self.per_work.items():
+                    logger.info(f"  Work {wid}: images={stats.get('images', 0) / (1024**2):.1f}MB, "
+                              f"pdfs={stats.get('pdfs', 0) / (1024**2):.1f}MB, "
+                              f"metadata={stats.get('metadata', 0) / 1024:.1f}KB")
+
+    # Legacy compatibility methods
+    def allow_new_file(self, provider: Optional[str], work_id: Optional[str]) -> bool:
+        """Legacy method for backward compatibility. Always returns True."""
+        return not self._exhausted
+
+    def allow_bytes(self, provider: Optional[str], work_id: Optional[str], add_bytes: Optional[int]) -> bool:
+        """Legacy method for backward compatibility. Checks against total limits."""
+        if not add_bytes or add_bytes <= 0:
+            return True
+        # Default to checking against images limit for legacy calls
+        return self.allow_content("images", work_id, add_bytes)
+
+    def add_bytes(self, provider: Optional[str], work_id: Optional[str], add_bytes: int) -> bool:
+        """Add bytes to budget during streaming download.
         
         Args:
-            provider: Provider key
-            work_id: Work ID
+            provider: Provider key (unused in new system)
+            work_id: Work ID for per-work tracking
+            add_bytes: Number of bytes to add
             
         Returns:
-            True if within limits after adding, False if exceeded
+            True if bytes were accepted, False if limit exceeded
         """
+        # Try to allow the bytes first (checks limits)
+        if not self.allow_content("images", work_id, add_bytes):
+            return False
+        
+        # Record the bytes
         with self._lock:
-            self.total_files += 1
-            if provider:
-                self._inc(self.per_provider, provider, "files", 1)
+            self.total_images_bytes += add_bytes
             if work_id:
-                self._inc(self.per_work, work_id, "files", 1)
-            
-            # Re-check limits after adding
-            ok = self.allow_new_file(provider, work_id)
-            if not ok and self._policy() == "stop":
-                self._exhausted = True
-            return ok
+                self._inc(self.per_work, work_id, "images", add_bytes)
+        
+        return True
+
+    def add_file(self, provider: Optional[str], work_id: Optional[str]) -> None:
+        """Record a completed file download (legacy method).
+        
+        Args:
+            provider: Provider key (unused in new system)
+            work_id: Work ID for per-work tracking
+        """
+        # This method is called after successful download, no size needed
+        # The size was already tracked via add_bytes during download
+        pass
+
+    def record_file(self, provider: Optional[str], work_id: Optional[str], size_bytes: int) -> None:
+        """Legacy method for backward compatibility."""
+        self.record_download("images", work_id, size_bytes)
 
 
 # Global singleton budget tracker

@@ -157,21 +157,15 @@
     "title_slug_max_len": 80
   },
   "download_limits": {
-    "max_total_files": 60000,
-    "max_total_bytes": 150000000000,
-    "per_work": { "max_files": 5000, "max_bytes": 5000000000 },
-    "per_provider": {
-      "internet_archive": { "max_files": 20000, "max_bytes": 50000000000 },
-      "bnf_gallica": { "max_files": 20000, "max_bytes": 50000000000 },
-      "loc": { "max_files": 10000, "max_bytes": 25000000000 },
-      "mdz": { "max_files": 10000, "max_bytes": 25000000000 },
-      "dpla": { "max_files": 8000, "max_bytes": 20000000000 },
-      "ddb": { "max_files": 8000, "max_bytes": 20000000000 },
-      "europeana": { "max_files": 8000, "max_bytes": 20000000000 },
-      "polona": { "max_files": 4000, "max_bytes": 10000000000 },
-      "google_books": { "max_files": 8000, "max_bytes": 15000000000 },
-      "hathitrust": { "max_files": 8000, "max_bytes": 15000000000 },
-      "wellcome": { "max_files": 8000, "max_bytes": 20000000000 }
+    "total": {
+      "images_gb": 100,
+      "pdfs_gb": 50,
+      "metadata_gb": 1
+    },
+    "per_work": {
+      "images_gb": 5,
+      "pdfs_gb": 3,
+      "metadata_mb": 10
     },
     "on_exceed": "stop"
   }

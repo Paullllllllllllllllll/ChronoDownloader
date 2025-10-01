@@ -179,17 +179,15 @@
     "title_slug_max_len": 80
   },
   "download_limits": {
-    "max_total_files": 320,
-    "max_total_bytes": 3200000000,
-    "per_work": {"max_files": 24, "max_bytes": 900000000},
-    "per_provider": {
-      "internet_archive": {"max_files": 120, "max_bytes": 1600000000},
-      "gallica": {"max_files": 60, "max_bytes": 600000000},
-      "loc": {"max_files": 30, "max_bytes": 300000000},
-      "mdz": {"max_files": 40, "max_bytes": 400000000},
-      "wellcome": {"max_files": 40, "max_bytes": 400000000},
-      "ddb": {"max_files": 30, "max_bytes": 250000000},
-      "dpla": {"max_files": 30, "max_bytes": 250000000}
+    "total": {
+      "images_gb": 3,
+      "pdfs_gb": 1.5,
+      "metadata_gb": 0.1
+    },
+    "per_work": {
+      "images_gb": 0.8,
+      "pdfs_gb": 0.5,
+      "metadata_mb": 5
     },
     "on_exceed": "stop"
   }
