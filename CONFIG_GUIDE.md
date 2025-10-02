@@ -1,6 +1,8 @@
 # Configuration Guide for ChronoDownloader
 
-This guide explains how to configure `config.json` for optimal usage.
+This guide provides a technical reference for all configuration options in `config.json`. It explains what each setting does and provides examples of common configurations.
+
+For guidance on running large-scale downloads (50+ items), batch processing strategies, and operational workflows, see WORKFLOW_GUIDE.md.
 
 ## Download Limits
 

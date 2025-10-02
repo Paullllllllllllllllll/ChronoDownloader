@@ -30,10 +30,12 @@ import pandas as pd
 from api import utils
 from api.core.config import get_config, get_provider_setting
 from api.core.context import (
+    clear_current_provider,
     clear_current_work,
     reset_counters,
     set_current_entry,
     set_current_name_stem,
+    set_current_provider,
     set_current_work,
 )
 from api.core.naming import to_snake_case

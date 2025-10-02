@@ -12,6 +12,7 @@ A comprehensive Python tool for discovering and downloading digitized historical
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [Documentation](#documentation)
 - [Output Structure](#output-structure)
 - [Advanced Usage](#advanced-usage)
 - [Architecture](#architecture)
@@ -19,23 +20,25 @@ A comprehensive Python tool for discovering and downloading digitized historical
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ## Overview
 
-ChronoDownloader is designed for is designed for researchers and archivists who need to discover and download historical materials from multiple digital libraries at scale. The tool provides intelligent candidate selection, fuzzy matching, and robust download management while respecting provider terms of service.
+ChronoDownloader is designed for researchers and archivists who need to discover and download historical materials from multiple digital libraries at scale. The tool provides intelligent candidate selection, fuzzy matching, and robust download management while respecting provider terms of service.
 Meant to be used in conjunction with [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) and [ChronoTranscriber](https://github.com/Paullllllllllllllllll/ChronoTranscriber) for a full historical document retrieval, transcription and data extraction pipeline.
 
 ## Key Features
 
 - Multi-Provider Search: Query 13 major digital libraries simultaneously including Internet Archive, BnF Gallica, Library of Congress, Google Books, and more
-- Intelligent Selection: Automatic fuzzy matching and scoring to select the best candidate from multiple sources
+- Intelligent Selection: Automatic fuzzy matching and scoring to select the best candidate from multiple sources with configurable thresholds for multilingual collections
 - Flexible Download Strategies: Download PDFs, EPUBs, or high-resolution page images based on availability and preferences
-- IIIF Support: Native support for IIIF Presentation and Image APIs for high-quality downloads
+- IIIF Support: Native support for IIIF Presentation and Image APIs with optimized performance for faster downloads
 - Budget Management: Content-type download budgets (images, PDFs, metadata) with simple GB-based limits
 - Rate Limiting: Built-in per-provider rate limiting with exponential backoff to respect API quotas
 - Robust Error Handling: Automatic retries, fallback providers, and comprehensive logging
-- Batch Processing: Process CSV files with hundreds or thousands of works efficiently
+- Batch Processing: Process CSV files with hundreds or thousands of works efficiently with proven workflows for large-scale operations
 - Metadata Preservation: Save search results, manifests, and selection decisions for auditing
+- Performance Optimizations: Internet Archive PDF-first strategy with IIIF fallback for 60% faster downloads
 
 ## Supported Providers
 
@@ -77,6 +80,8 @@ python main/downloader.py sample_works.csv --output_dir my_downloads
 # Check results
 ls my_downloads
 ```
+
+For large-scale downloads (50+ items), see WORKFLOW_GUIDE.md for batch processing strategies, performance tuning, and quality control procedures.
 
 ## System Requirements
 
@@ -263,7 +268,7 @@ Provider-Specific Limits:
 
 Download Preference Parameters:
 
-- `prefer_pdf_over_images`: Skip page images when PDF/EPUB is available
+- `prefer_pdf_over_images`: Skip page images when PDF/EPUB is available (recommended: true for faster downloads, especially with Internet Archive)
 - `download_manifest_renderings`: Download PDFs/EPUBs linked in IIIF manifests
 - `max_renderings_per_manifest`: Maximum number of rendering files per manifest
 - `rendering_mime_whitelist`: Allowed MIME types for renderings
@@ -321,7 +326,7 @@ Selection Parameters:
 
 - `strategy`: Selection strategy (collect_and_select or sequential_first_hit)
 - `provider_hierarchy`: Ordered list of preferred providers
-- `min_title_score`: Minimum fuzzy match score (0-100) to accept a candidate
+- `min_title_score`: Minimum fuzzy match score (0-100) to accept a candidate (configurable threshold for multilingual collections)
 - `creator_weight`: Weight of creator match in scoring (0.0-1.0)
 - `year_tolerance`: Reserved for future date-based matching
 - `max_candidates_per_provider`: Limit search results per provider
@@ -344,7 +349,7 @@ Selection Strategies:
 
 Fuzzy Matching:
 
-The tool uses token-set ratio matching to handle minor spelling variations, different word orders, punctuation differences, and subtitle variations. Scoring combines title similarity, creator similarity (weighted), and quality signals (IIIF availability, item URL).
+The tool uses token-set ratio matching to handle minor spelling variations, different word orders, punctuation differences, and subtitle variations. Scoring combines title similarity, creator similarity (weighted), and quality signals (IIIF availability, item URL). The min_title_score threshold is configurable and can be adjusted based on your collection: use lower values (50-60) for multilingual or historical collections with variant spellings, and higher values (70-85) for modern English-language collections where exact matching is expected.
 
 ### 6. Naming Conventions
 
@@ -363,6 +368,22 @@ Naming Parameters:
 - `include_creator_in_work_dir`: Include creator in folder name
 - `include_year_in_work_dir`: Include publication year in folder name
 - `title_slug_max_len`: Maximum length of title slug in filenames
+
+## Documentation
+
+ChronoDownloader includes comprehensive documentation for different use cases:
+
+### Configuration Reference
+
+**CONFIG_GUIDE.md** - Technical reference for all configuration options in config.json. Explains what each setting does, provides examples of common configurations, and details the download limits structure. Use this when you need to understand specific configuration parameters.
+
+### Operational Workflows
+
+**WORKFLOW_GUIDE.md** - Best practices guide for large-scale downloads (50+ items). Covers batch processing strategies, performance tuning, monitoring and recovery procedures, quality control, and storage management. Essential reading for production deployments and large collections.
+
+### Quick Reference
+
+For basic usage, see the Configuration and Usage sections in this README. For specialized use cases such as historical cookbooks or other domain-specific collections, check the respective directories for additional guides.
 
 ## Usage
 
