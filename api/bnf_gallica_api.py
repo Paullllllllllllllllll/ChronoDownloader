@@ -6,7 +6,7 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
     budget_exhausted,
@@ -21,8 +21,18 @@ logger = logging.getLogger(__name__)
 SRU_BASE_URL = "https://gallica.bnf.fr/SRU"
 IIIF_MANIFEST_BASE_URL = "https://gallica.bnf.fr/iiif/ark:/12148/{ark_id}/manifest.json"
 
-def search_gallica(title, creator=None, max_results=3) -> List[SearchResult]:
-    """Searches Gallica using its SRU API."""
+
+def search_gallica(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+    """Search Gallica using its SRU API.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of SearchResult objects
+    """
     q_title = escape_sru_literal(title)
     query_parts = [f'gallica all "{q_title}"']
     if creator:
@@ -75,20 +85,20 @@ def search_gallica(title, creator=None, max_results=3) -> List[SearchResult]:
         logger.exception("Unexpected error during Gallica XML parsing: %s", e)
     return results
 
-def _gallica_max_pages() -> int | None:
-    """Read max pages from config provider_settings.gallica.max_pages (0 or None = all)."""
-    val = get_provider_setting("gallica", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    return 0
 
-
-def download_gallica_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_gallica_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     """Download Gallica IIIF manifest and full-size page images.
 
     - Fetches IIIF manifest (usually v2; handle v3 structures too).
     - Extracts IIIF Image API service base per canvas.
     - Downloads images with a small set of quality/size fallbacks to ensure compatibility.
+
+    Args:
+        item_data: SearchResult or dict with ark_id
+        output_folder: Folder to save files to
+
+    Returns:
+        True if any files were downloaded, False otherwise
     """
     ark_id = None
     if isinstance(item_data, SearchResult):
@@ -125,7 +135,7 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder) -
 
     # Use shared helper to try full-size image candidates per canvas
 
-    max_pages = _gallica_max_pages()
+    max_pages = get_max_pages("gallica")
     total = len(image_service_bases)
     to_download = image_service_bases[:max_pages] if max_pages and max_pages > 0 else image_service_bases
     logger.info("Gallica: downloading %d/%d page images for %s", len(to_download), total, ark_id)

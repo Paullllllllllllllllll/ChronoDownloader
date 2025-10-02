@@ -145,3 +145,18 @@ def get_download_limits() -> Dict[str, Any]:
     """
     cfg = get_config()
     return dict(cfg.get("download_limits", {}) or {})
+
+
+def get_max_pages(provider_key: str) -> int | None:
+    """Get max pages limit for a provider.
+    
+    Args:
+        provider_key: Provider identifier (e.g., 'internet_archive', 'gallica', 'loc')
+        
+    Returns:
+        Max pages limit (0 or None means unlimited)
+    """
+    val = get_provider_setting(provider_key, "max_pages", None)
+    if isinstance(val, int):
+        return val
+    return None

@@ -12,27 +12,33 @@ logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://www.googleapis.com/books/v1/volumes"
 
+
 def _api_key() -> str | None:
+    """Get Google Books API key from environment."""
     # Environment-only API key
     return os.getenv("GOOGLE_BOOKS_API_KEY")
 
 
 def _gb_free_only() -> bool:
+    """Check if only free books should be searched."""
     val = get_provider_setting("google_books", "free_only", True)
     return bool(val)
 
 
 def _gb_prefer_format() -> str:
+    """Get preferred download format (pdf or epub)."""
     val = get_provider_setting("google_books", "prefer", "pdf")
     return str(val or "pdf").lower()
 
 
 def _gb_allow_drm() -> bool:
+    """Check if DRM-protected content is allowed."""
     val = get_provider_setting("google_books", "allow_drm", False)
     return bool(val)
 
 
 def _gb_max_files() -> int:
+    """Get maximum number of files to download per work."""
     val = get_provider_setting("google_books", "max_files", 2)
     try:
         return int(val)
@@ -40,12 +46,23 @@ def _gb_max_files() -> int:
         return 2
 
 
-def search_google_books(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_google_books(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+    """Search Google Books API for works.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of SearchResult objects
+    """
     key = _api_key()
     free_only = _gb_free_only()
     prefer_fmt = _gb_prefer_format()
 
     def _params(q: str, use_filter: str | None) -> dict:
+        """Build query parameters for Google Books API."""
         p = {
             "q": q,
             "maxResults": str(max_results),
@@ -69,6 +86,7 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
         return p
 
     def _try(q: str, use_filter: str | None):
+        """Make a request to the Google Books API."""
         return make_request(API_BASE_URL, params=_params(q, use_filter))
 
     # Build a few query variants
@@ -112,6 +130,7 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
             access_info = item.get("accessInfo", {}) if isinstance(item.get("accessInfo", {}), dict) else {}
             # Determine if there is a direct downloadable link (pdf/epub)
             def _dl(ai: dict) -> str | None:
+                """Get direct downloadable link from access info."""
                 if not isinstance(ai, dict):
                     return None
                 # Prefer configured format, but accept either
@@ -146,14 +165,15 @@ def search_google_books(title, creator=None, max_results=3) -> List[SearchResult
     return results
 
 
-def download_google_books_work(item_data: Union[SearchResult, dict], output_folder):
+def download_google_books_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     """Download metadata and available files for a Google Books volume.
-
-    Strategy:
-      1) Fetch volume metadata
-      2) Download PDF/EPUB if direct links provided (or DRM link if allowed)
-      3) If no main file, download best available cover images (imageLinks and books/content endpoint)
-    Returns True if any object was downloaded.
+    
+    Args:
+        item_data: SearchResult or dict containing volume data
+        output_folder: Folder to save files to
+        
+    Returns:
+        True if any object was downloaded
     """
 
     if isinstance(item_data, SearchResult):
@@ -177,6 +197,7 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
         max_files = _gb_max_files()
 
         def _collect_links() -> List[str]:
+            """Collect download links from access info."""
             links: List[str] = []
             # Preferred format first; try both pdf and epub variants
             fmt_order = [prefer, "pdf" if prefer != "pdf" else "epub"]

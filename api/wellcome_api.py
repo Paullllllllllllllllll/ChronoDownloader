@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List, Union
+from typing import List, Union, Dict, Optional
 
 from .utils import make_request, save_json, get_provider_setting, budget_exhausted, download_file
 from .iiif import download_one_from_service
@@ -25,7 +25,9 @@ CATALOGUE_WORKS_URL = "https://api.wellcomecollection.org/catalogue/v2/works"
 
 def _max_images() -> int | None:
     """Read max images per work from config (provider_settings.wellcome.max_images).
-    0 or None means all images.
+    
+    Returns:
+        Max images limit (0 or None means all images)
     """
     val = get_provider_setting("wellcome", "max_images", None)
     if isinstance(val, int):
@@ -37,11 +39,17 @@ def _max_images() -> int | None:
         return 0
 
 
-def _extract_image_services(work: dict) -> List[str]:
+def _extract_image_services(work: Dict) -> List[str]:
     """Return a list of IIIF Image API service base URLs from a Work doc (with include=items).
 
     Looks for items[].locations[] entries with locationType.id == "iiif-image".
     Each such location has a URL ending with /info.json; we return the base before info.json.
+    
+    Args:
+        work: Wellcome work dictionary
+        
+    Returns:
+        List of IIIF Image API service base URLs
     """
     services: List[str] = []
     for item in work.get("items", []) or []:
@@ -55,11 +63,19 @@ def _extract_image_services(work: dict) -> List[str]:
     return services
 
 
-def search_wellcome(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_wellcome(title: str, creator: Optional[str] = None, max_results: int = 3) -> List[SearchResult]:
     """Search Wellcome works and return entries that have IIIF Image services.
 
     We combine title and optional creator into a simple query string, request include=items,
     then collect works that provide at least one iiif-image location.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of SearchResult objects
     """
     q = title if not creator else f"{title} {creator}"
     # Pull a few extra results to increase the chance of having iiif images
@@ -91,11 +107,18 @@ def search_wellcome(title, creator=None, max_results=3) -> List[SearchResult]:
     return results
 
 
-def download_wellcome_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_wellcome_work(item_data: Union[SearchResult, Dict], output_folder: str) -> bool:
     """Download full-size images from Wellcome IIIF Image services.
 
     If the SearchResult contains raw.image_services, we use them directly.
     Otherwise, we refetch the Work with include=items to discover iiif-image locations.
+    
+    Args:
+        item_data: SearchResult or dict containing item data
+        output_folder: Folder to download files to
+        
+    Returns:
+        True if download was successful, False otherwise
     """
     if isinstance(item_data, SearchResult):
         work_id = item_data.source_id or item_data.raw.get("id")

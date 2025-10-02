@@ -9,7 +9,7 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
     budget_exhausted,
@@ -28,22 +28,7 @@ IIIF_MANIFEST_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v2/{ob
 IIIF_MANIFEST_V3_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v3/{object_id}/manifest"
 MDZ_WEB_SEARCH_URL = "https://www.digitale-sammlungen.de/api/search"
 
-# MDZ page download limit (0 or missing means all pages). Controlled via config.json:
-# {
-#   "provider_settings": { "mdz": { "max_pages": 0 } }
-# }
-# Falls back to environment MDZ_MAX_PAGES only if not present in config
-def _max_pages() -> int | None:
-    cfg_val = get_provider_setting("mdz", "max_pages", None)
-    if isinstance(cfg_val, int):
-        return cfg_val
-    try:
-        return int(os.getenv("MDZ_MAX_PAGES", "0"))
-    except ValueError:
-        return 0
-
-
-def search_mdz(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Search MDZ using the public JSON search endpoint, with HTML/Solr fallbacks.
 
     Primary endpoint: /api/search (same domain as the website), returns JSON with 'docs'.
@@ -171,7 +156,7 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bo
 
     # Download images (limit pages by config provider_settings.mdz.max_pages; 0 or missing = all)
     total_pages = len(image_service_bases)
-    max_pages = _max_pages()
+    max_pages = get_max_pages("mdz")
     to_download = image_service_bases[:max_pages] if max_pages and max_pages > 0 else image_service_bases
     logger.info("MDZ: downloading %d/%d page images for %s", len(to_download), total_pages, object_id)
     success_any = False

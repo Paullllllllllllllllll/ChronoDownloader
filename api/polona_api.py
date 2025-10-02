@@ -1,13 +1,12 @@
 """Connector for the Polona.pl API."""
 
 import logging
-import urllib.parse
 from typing import List, Union
 
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
@@ -23,15 +22,7 @@ SEARCH_PAGE_URL = "https://polona.pl/search/?query={query}"
 IIIF_MANIFEST_URL = "https://polona.pl/iiif/item/{item_id}/manifest.json"
 
 
-def _polona_max_pages() -> int | None:
-    """Read max pages from config provider_settings.polona.max_pages (0/None = all)."""
-    val = get_provider_setting("polona", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    return 0
-
-
-def search_polona(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_polona(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Search Polona by parsing the public search page for item links.
 
     Note: Polona does not expose a stable, documented JSON search for items.
@@ -113,7 +104,7 @@ def download_polona_work(item_data: Union[SearchResult, dict], output_folder) ->
 
     # Use shared helper to attempt per-canvas downloads
 
-    max_pages = _polona_max_pages()
+    max_pages = get_max_pages("polona")
     total = len(service_bases)
     to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
     logger.info("Polona: downloading %d/%d page images for %s", len(to_download), total, item_id)

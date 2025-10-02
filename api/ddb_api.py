@@ -7,7 +7,7 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
@@ -19,22 +19,13 @@ logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://api.deutsche-digitale-bibliothek.de/"
 
+
 def _api_key() -> str | None:
+    """Get DDB API key from environment."""
     return os.getenv("DDB_API_KEY")
 
 
-def _ddb_max_pages() -> int | None:
-    """Read max pages from config provider_settings.ddb.max_pages (0/None = all)."""
-    val = get_provider_setting("ddb", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    try:
-        return int(os.getenv("DDB_MAX_PAGES", "0"))
-    except ValueError:
-        return 0
-
-
-def search_ddb(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Search the DDB API for a title and optional creator."""
 
     key = _api_key()
@@ -70,7 +61,7 @@ def search_ddb(title, creator=None, max_results=3) -> List[SearchResult]:
     return results
 
 
-def download_ddb_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_ddb_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     """Download IIIF manifest and page images for a DDB item.
 
     - Fetch item metadata (for provenance and possible manifest URL).
@@ -128,7 +119,7 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder) -> bo
 
     # Use shared helper to attempt per-canvas image downloads
 
-    max_pages = _ddb_max_pages()
+    max_pages = get_max_pages("ddb")
     total = len(image_service_bases)
     to_download = image_service_bases[:max_pages] if max_pages and max_pages > 0 else image_service_bases
     logger.info("DDB: downloading %d/%d page images for %s", len(to_download), total, item_id)

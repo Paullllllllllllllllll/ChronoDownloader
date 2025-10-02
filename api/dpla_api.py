@@ -7,7 +7,7 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
     download_file,
@@ -20,22 +20,13 @@ logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://api.dp.la/v2/"
 
+
 def _api_key() -> str | None:
+    """Get DPLA API key from environment."""
     return os.getenv("DPLA_API_KEY")
 
 
-def _dpla_max_pages() -> int | None:
-    """Read max pages from config provider_settings.dpla.max_pages (0/None = all)."""
-    val = get_provider_setting("dpla", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    try:
-        return int(os.getenv("DPLA_MAX_PAGES", "0"))
-    except ValueError:
-        return 0
-
-
-def search_dpla(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_dpla(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Search the DPLA API for a title and optional creator."""
 
     key = _api_key()
@@ -110,7 +101,7 @@ def search_dpla(title, creator=None, max_results=3) -> List[SearchResult]:
     return results
 
 
-def download_dpla_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_dpla_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     """Download metadata, IIIF manifest, and page images for a DPLA item (when available)."""
 
     if isinstance(item_data, SearchResult):
@@ -186,7 +177,7 @@ def download_dpla_work(item_data: Union[SearchResult, dict], output_folder) -> b
 
             if service_bases:
                 # Use shared helper to try full-size image candidates per canvas
-                max_pages = _dpla_max_pages()
+                max_pages = get_max_pages("dpla")
                 total = len(service_bases)
                 to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
                 logger.info("DPLA: downloading %d/%d page images for %s", len(to_download), total, item_id)

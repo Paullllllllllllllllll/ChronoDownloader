@@ -1,11 +1,12 @@
 import logging
 import urllib.parse
 from typing import List, Union
+
 from .utils import (
     save_json,
     download_file,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
@@ -17,14 +18,17 @@ logger = logging.getLogger(__name__)
 LOC_API_BASE_URL = "https://www.loc.gov/"
 
 
-def _loc_max_pages() -> int | None:
-    """Read max pages from config provider_settings.loc.max_pages (0/None = all)."""
-    val = get_provider_setting("loc", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    return 0
-
-def search_loc(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+    """Search Library of Congress for works.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of SearchResult objects
+    """
     query_parts = [title]
     if creator:
         query_parts.append(creator)
@@ -94,7 +98,16 @@ def search_loc(title, creator=None, max_results=3) -> List[SearchResult]:
             results.append(convert_to_searchresult("Library of Congress", raw))
     return results
 
-def download_loc_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_loc_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+    """Download a Library of Congress work.
+    
+    Args:
+        item_data: SearchResult or dict containing item data
+        output_folder: Folder to download files to
+        
+    Returns:
+        True if download was successful, False otherwise
+    """
     if isinstance(item_data, SearchResult):
         item_url = item_data.item_url or item_data.raw.get("url")
         item_id = item_data.source_id or item_data.raw.get("id") or item_data.title or "unknown_item"
@@ -116,12 +129,12 @@ def download_loc_work(item_data: Union[SearchResult, dict], output_folder) -> bo
         if not iiif_manifest_url and item_full_json.get("item") and item_full_json["item"].get("resources"):
             for res in item_full_json["item"]["resources"]:
                 if res.get("iiif_manifest"):
-                    iiif_manifest_url = res["iiif_manifest"]
+                    iiif_manifest_url = res.get("iiif_manifest")
                     break
         elif not iiif_manifest_url and item_full_json.get("resources"):
             for res in item_full_json["resources"]:
                 if isinstance(res, dict) and res.get("iiif_manifest"):
-                    iiif_manifest_url = res["iiif_manifest"]
+                    iiif_manifest_url = res.get("iiif_manifest")
                     break
         if iiif_manifest_url:
             logger.info("Fetching LOC IIIF manifest: %s", iiif_manifest_url)
@@ -144,7 +157,7 @@ def download_loc_work(item_data: Union[SearchResult, dict], output_folder) -> bo
                 if service_bases:
                     # Use shared helper to attempt per-canvas image downloads
 
-                    max_pages = _loc_max_pages()
+                    max_pages = get_max_pages("loc")
                     total = len(service_bases)
                     to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
                     logger.info("LOC: downloading %d/%d page images for %s", len(to_download), total, item_id)

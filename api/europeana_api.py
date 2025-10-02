@@ -5,7 +5,7 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
     download_file,
@@ -19,17 +19,11 @@ API_BASE_URL = "https://api.europeana.eu/record/v2/search.json"
 RECORD_API_BASE = "https://api.europeana.eu/record/v2"
 EUROPEANA_MANIFEST_HOST = "https://iiif.europeana.eu"
 
+
 def _api_key() -> str | None:
+    """Get Europeana API key from environment."""
     # Read at call time so keys loaded from .env or environment later are picked up
     return os.getenv("EUROPEANA_API_KEY")
-
-
-def _europeana_max_pages() -> int | None:
-    """Read max pages from config provider_settings.europeana.max_pages (0/None = all)."""
-    val = get_provider_setting("europeana", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    return 0
 
 
 def _build_manifest_url_from_id(euro_id: str, api_key: str | None, prefer_v3: bool = True) -> str | None:
@@ -56,7 +50,8 @@ def _build_manifest_url_from_id(euro_id: str, api_key: str | None, prefer_v3: bo
         return url
     return None
 
-def search_europeana(title, creator=None, max_results=3) -> List[SearchResult]:
+
+def search_europeana(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     key = _api_key()
     if not key:
         logger.warning("Europeana API key not configured. Skipping search.")
@@ -124,7 +119,8 @@ def search_europeana(title, creator=None, max_results=3) -> List[SearchResult]:
         logger.error("Europeana API error: %s", data.get("error"))
     return results
 
-def download_europeana_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+
+def download_europeana_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     # Save search metadata
     if isinstance(item_data, SearchResult):
         item_id = item_data.source_id or item_data.raw.get("id") or item_data.title or "unknown_item"
@@ -175,7 +171,7 @@ def download_europeana_work(item_data: Union[SearchResult, dict], output_folder)
             logger.info("No IIIF image services found in Europeana manifest for %s", item_id)
         else:
             # Use shared helper to download a single image per canvas
-            max_pages = _europeana_max_pages()
+            max_pages = get_max_pages("europeana")
             total = len(service_bases)
             to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
             logger.info("Europeana: downloading %d/%d page images for %s", len(to_download), total, item_id)

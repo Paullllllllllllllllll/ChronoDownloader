@@ -8,7 +8,7 @@ from .utils import (
     make_request,
     download_iiif_renderings,
     prefer_pdf_over_images,
-    get_provider_setting,
+    get_max_pages,
     budget_exhausted,
 )
 from .iiif import extract_image_service_bases, download_one_from_service
@@ -20,25 +20,17 @@ SEARCH_API_URL = "https://archive.org/advancedsearch.php"
 METADATA_API_URL = "https://archive.org/metadata/{identifier}"
 
 
-def _ia_max_pages() -> int | None:
-    """Read max pages from config provider_settings.internet_archive.max_pages (0/None = all).
-
-    Optional env override: IA_MAX_PAGES
+def search_internet_archive(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+    """Search Internet Archive using the Advanced Search API and return SearchResult list.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of SearchResult objects
     """
-    val = get_provider_setting("internet_archive", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    try:
-        import os
-
-        v = int(os.getenv("IA_MAX_PAGES", "0"))
-        return v
-    except Exception:
-        return 0
-
-
-def search_internet_archive(title, creator=None, max_results=3) -> List[SearchResult]:
-    """Search Internet Archive using the Advanced Search API and return SearchResult list."""
     query_parts = [f'title:("{title}")']
     if creator:
         query_parts.append(f'creator:("{creator}")')
@@ -68,7 +60,7 @@ def search_internet_archive(title, creator=None, max_results=3) -> List[SearchRe
     return results
 
 
-def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_ia_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     """Download available objects for an Internet Archive item.
 
     Order of preference:
@@ -76,6 +68,13 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> boo
       2) Direct files listed in metadata (PDF first, then EPUB, then DjVu)
       3) Page images via IIIF Image API (subject to max_pages)
       4) Cover/thumbnail images from metadata
+      
+    Args:
+        item_data: SearchResult or dict containing item metadata
+        output_folder: Target directory for downloads
+        
+    Returns:
+        True if any content was downloaded, False otherwise
     """
     identifier = None
     if isinstance(item_data, SearchResult):
@@ -201,7 +200,7 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder) -> boo
             try:
                 bases = extract_image_service_bases(iiif_manifest_data)
                 if bases:
-                    max_pages = _ia_max_pages()
+                    max_pages = get_max_pages("internet_archive")
                     to_dl = bases[:max_pages] if max_pages and max_pages > 0 else bases
                     logger.info(
                         "Internet Archive: downloading %d/%d page images for %s",

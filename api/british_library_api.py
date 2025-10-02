@@ -8,27 +8,19 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
 from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
-from .query_helpers import escape_sru_literal, escape_sparql_string
+from .query_helpers import escape_sparql_string, escape_sru_literal
 
 logger = logging.getLogger(__name__)
 
 SRU_BASE_URL = "https://sru.bl.uk/SRU"
 IIIF_MANIFEST_BASE = "https://api.bl.uk/metadata/iiif/ark:/81055/{identifier}/manifest.json"
 BNB_SPARQL_URL = "https://bnb.data.bl.uk/sparql"
-
-
-def _bl_max_pages() -> int | None:
-    """Read max pages from config provider_settings.british_library.max_pages (0/None = all)."""
-    val = get_provider_setting("british_library", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    return 0
 
 
 def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> List[SearchResult]:
@@ -103,7 +95,7 @@ def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> Lis
     return results
 
 
-def search_british_library(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_british_library(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Search the British Library using SRU; fallback to BNB SPARQL if needed."""
 
     q_title = escape_sru_literal(title)
@@ -228,7 +220,7 @@ def download_british_library_work(item_data: Union[SearchResult, dict], output_f
 
     # Use shared helper to attempt per-canvas image downloads
 
-    max_pages = _bl_max_pages()
+    max_pages = get_max_pages("british_library")
     total = len(service_bases)
     to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
     logger.info("British Library: downloading %d/%d page images for %s", len(to_download), total, identifier)

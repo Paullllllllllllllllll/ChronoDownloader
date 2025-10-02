@@ -3,7 +3,7 @@
 import logging
 import os
 import re
-from typing import List, Union, Dict, Any
+from typing import Any, Dict, List, Union
 
 from .utils import save_json, make_request, download_file
 from .model import SearchResult, convert_to_searchresult
@@ -14,18 +14,35 @@ logger = logging.getLogger(__name__)
 BIB_BASE_URL = "https://catalog.hathitrust.org/api/volumes/brief/"
 DATA_API_URL = "https://babel.hathitrust.org/cgi/htd/volume/pages"
 
+
 def _api_key() -> str | None:
+    """Get HathiTrust API key from environment."""
     return os.getenv("HATHI_API_KEY")
 
 
 def _bib_url(id_type: str, value: str) -> str:
-    """Build Bibliographic API URL for a given identifier type and value."""
+    """Build Bibliographic API URL for a given identifier type and value.
+    
+    Args:
+        id_type: Identifier type (e.g., 'oclc', 'isbn', 'lccn')
+        value: Identifier value
+        
+    Returns:
+        Full API URL for the bibliographic record
+    """
     id_type = id_type.lower().strip()
     return f"{BIB_BASE_URL}{id_type}/{value}.json"
 
 
 def _parse_identifiers(text: str) -> Dict[str, List[str]]:
-    """Parse explicit identifier hints from a string like 'oclc:12345 isbn:978...'."""
+    """Parse explicit identifier hints from a string like 'oclc:12345 isbn:978...'.
+    
+    Args:
+        text: Text containing identifiers
+        
+    Returns:
+        Dictionary mapping identifier types to lists of values
+    """
     if not text:
         return {}
     s = str(text)
@@ -45,12 +62,16 @@ def _parse_identifiers(text: str) -> Dict[str, List[str]]:
     return {k: v for k, v in ids.items() if v}
 
 
-def search_hathitrust(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_hathitrust(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Identifier-aware search using the HathiTrust Bibliographic API.
-
-    If the query contains explicit identifiers (oclc:, isbn:, lccn:, issn:, htid:),
-    we query the Bibliographic API (or accept htid directly). Free-text search is
-    intentionally disabled to avoid scraping and 403s.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of SearchResult objects
     """
     id_hints = {}
     id_hints.update(_parse_identifiers(str(title)))
@@ -136,13 +157,19 @@ def search_hathitrust(title, creator=None, max_results=3) -> List[SearchResult]:
     return results
 
 
-def download_hathitrust_work(item_data: Union[SearchResult, dict], output_folder):
+def download_hathitrust_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     """Download metadata and a representative page for a HathiTrust item.
 
     - Save Bibliographic API record (if present in raw.bib).
     - If HATHI_API_KEY is set, fetch the first page image via the Data API using HTID.
+    
+    Args:
+        item_data: SearchResult or dict containing item data
+        output_folder: Folder to download files to
+        
+    Returns:
+        True if download was successful, False otherwise
     """
-
     if isinstance(item_data, SearchResult):
         htid = item_data.source_id or item_data.raw.get("htid")
         bib = item_data.raw.get("bib")

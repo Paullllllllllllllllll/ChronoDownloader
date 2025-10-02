@@ -6,7 +6,7 @@ from typing import List, Union
 from .utils import (
     save_json,
     make_request,
-    get_provider_setting,
+    get_max_pages,
     download_iiif_renderings,
     prefer_pdf_over_images,
 )
@@ -15,7 +15,6 @@ from .model import SearchResult, convert_to_searchresult
 from .query_helpers import escape_sparql_string
 
 logger = logging.getLogger(__name__)
-
 
 SEARCH_API_URL = "https://datos.bne.es/sparql"
 # BNE IIIF manifests have been seen with both "/manifest" and "/manifest.json" endings across time.
@@ -26,7 +25,7 @@ IIIF_MANIFEST_PATTERNS = [
 ]
 
 
-def search_bne(title, creator=None, max_results=3) -> List[SearchResult]:
+def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Search the BNE SPARQL endpoint for works by title and creator."""
 
     t = escape_sparql_string(title)
@@ -62,14 +61,6 @@ def search_bne(title, creator=None, max_results=3) -> List[SearchResult]:
                 results.append(convert_to_searchresult("BNE", raw))
 
     return results
-
-
-def _bne_max_pages() -> int | None:
-    """Read max pages from config provider_settings.bne.max_pages (0/None = all)."""
-    val = get_provider_setting("bne", "max_pages", None)
-    if isinstance(val, int):
-        return val
-    return 0
 
 
 def download_bne_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
@@ -122,7 +113,7 @@ def download_bne_work(item_data: Union[SearchResult, dict], output_folder) -> bo
 
     # Use shared helper for per-canvas downloads
 
-    max_pages = _bne_max_pages()
+    max_pages = get_max_pages("bne")
     total = len(service_bases)
     to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
     logger.info("BNE: downloading %d/%d page images for %s", len(to_download), total, item_identifier)
