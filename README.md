@@ -1,6 +1,6 @@
 # ChronoDownloader
 
-A comprehensive Python tool for discovering and downloading digitized historical sources from major digital libraries worldwide. ChronoDownloader automates the process of searching, selecting, and downloading historical books, manuscripts, and documents from 13+ digital library providers.
+A comprehensive Python tool for discovering and downloading digitized historical sources from major digital libraries worldwide. ChronoDownloader automates the process of searching, selecting, and downloading historical books, manuscripts, and documents from 14+ digital library providers.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Meant to be used in conjunction with [ChronoMiner](https://github.com/Paulllllll
 
 ## Key Features
 
-- Multi-Provider Search: Query 13 major digital libraries simultaneously including Internet Archive, BnF Gallica, Library of Congress, Google Books, and more
+- Multi-Provider Search: Query 14 major digital libraries simultaneously including Internet Archive, BnF Gallica, Library of Congress, Google Books, Anna's Archive, and more
 - Intelligent Selection: Automatic fuzzy matching and scoring to select the best candidate from multiple sources with configurable thresholds for multilingual collections
 - Flexible Download Strategies: Download PDFs, EPUBs, or high-resolution page images based on availability and preferences
 - IIIF Support: Native support for IIIF Presentation and Image APIs with optimized performance for faster downloads
@@ -59,6 +59,9 @@ ChronoDownloader currently supports the following digital library providers:
 | Biblioteca Nacional de España | Spain | No | Yes |
 | HathiTrust | US | Optional | Yes |
 | Wellcome Collection | UK | No | Yes |
+| Anna's Archive | Global (Aggregator) | Optional* | No |
+
+\* Anna's Archive works without an API key using public download links. Member API key enables faster downloads.
 
 ## Quick Start
 
@@ -137,22 +140,25 @@ $env:EUROPEANA_API_KEY="your_europeana_key"
 $env:DDB_API_KEY="your_ddb_key"
 $env:DPLA_API_KEY="your_dpla_key"
 $env:GOOGLE_BOOKS_API_KEY="your_google_books_key"
+$env:ANNAS_ARCHIVE_API_KEY="your_annas_archive_key"  # Optional, for fast downloads
 
 # Linux/macOS
 export EUROPEANA_API_KEY=your_europeana_key
 export DDB_API_KEY=your_ddb_key
 export DPLA_API_KEY=your_dpla_key
 export GOOGLE_BOOKS_API_KEY=your_google_books_key
+export ANNAS_ARCHIVE_API_KEY=your_annas_archive_key  # Optional, for fast downloads
 ```
 
 For persistent configuration, add environment variables to your system settings or shell profile.
 
 ### Getting API Keys
 
-- Europeana: Register at [Europeana Pro](https://pro.europeana.eu/page/get-api)
-- DPLA: Request at [DPLA API](https://pro.dp.la/developers/api-codex)
-- DDB: Apply at [Deutsche Digitale Bibliothek](https://www.deutsche-digitale-bibliothek.de/content/api)
-- Google Books: Get from [Google Cloud Console](https://console.cloud.google.com/apis/library/books.googleapis.com)
+- **Europeana**: Register at [Europeana Pro](https://pro.europeana.eu/page/get-api)
+- **DPLA**: Request at [DPLA API](https://pro.dp.la/developers/api-codex)
+- **DDB**: Apply at [Deutsche Digitale Bibliothek](https://www.deutsche-digitale-bibliothek.de/content/api)
+- **Google Books**: Get from [Google Cloud Console](https://console.cloud.google.com/apis/library/books.googleapis.com)
+- **Anna's Archive** (Optional): Become a member at [Anna's Archive](https://annas-archive.org) for fast download access. Without an API key, the provider will use slower public download links.
 
 ### Verify Installation
 

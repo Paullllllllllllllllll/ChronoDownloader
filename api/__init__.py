@@ -26,6 +26,7 @@ Provider connectors:
 - google_books_api: Google Books
 - hathitrust_api: HathiTrust Digital Library
 - wellcome_api: Wellcome Collection (UK)
+- annas_archive_api: Anna's Archive (shadow library aggregator)
 
 Usage:
     from api import utils

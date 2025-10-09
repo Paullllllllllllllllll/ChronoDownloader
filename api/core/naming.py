@@ -24,6 +24,7 @@ PROVIDER_SLUGS = {
     "internet_archive": "ia",
     "google_books": "gb",
     "hathitrust": "hathi",
+    "annas_archive": "annas",
 }
 
 # Provider abbreviations for display/logging
@@ -44,6 +45,7 @@ PROVIDER_ABBREV = {
     # Provider registry keys (may differ from host-map keys)
     "bnf_gallica": "GAL",
     "hathitrust": "HATHI",
+    "annas_archive": "ANNAS",
 }
 
 

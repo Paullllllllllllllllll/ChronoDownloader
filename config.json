@@ -12,7 +12,8 @@
     "bne": false,
     "google_books": true,
     "hathitrust": true,
-    "wellcome": true
+    "wellcome": true,
+    "annas_archive": true
   },
   "provider_settings": {
     "mdz": {
@@ -119,6 +120,17 @@
         "backoff_multiplier": 1.5,
         "timeout_s": 30
       }
+    },
+    "annas_archive": {
+      "max_pages": 0,
+      "network": {
+        "delay_ms": 800,
+        "jitter_ms": 300,
+        "max_attempts": 5,
+        "base_backoff_s": 2.0,
+        "backoff_multiplier": 2.0,
+        "timeout_s": 45
+      }
     }
   },
   "download": {
@@ -142,9 +154,10 @@
       "dpla",
       "ddb",
       "polona",
-      "hathitrust"
+      "hathitrust",
+      "annas_archive"
     ],
-    "min_title_score": 85,
+    "min_title_score": 50,
     "creator_weight": 0.2,
     "year_tolerance": 2,
     "max_candidates_per_provider": 5,
