@@ -25,8 +25,9 @@ Note:
 
 import logging
 import os
+import re
 import urllib.parse
-from typing import List, Union, Optional
+from typing import Dict, List, Tuple, Union, Optional
 
 from bs4 import BeautifulSoup
 
@@ -38,6 +39,7 @@ from .utils import (
     prefer_pdf_over_images,
     get_provider_setting,
 )
+from .matching import title_score, normalize_text
 from .model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,145 @@ MIRRORS = [
     "https://annas-archive.se",
     "https://annas-archive.li",
 ]
+
+
+def _clean_title_candidate(text: str) -> str:
+    """Normalize spacing and trim overly long or concatenated titles."""
+    if not text:
+        return ""
+
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if not cleaned:
+        return ""
+
+    # If we see multiple year patterns, keep text up to the second year
+    year_pattern = r"\b(19|20)\d{2}\b"
+    years = list(re.finditer(year_pattern, cleaned))
+    if len(years) >= 2:
+        second_year_pos = years[1].start()
+        if second_year_pos > 20:
+            cleaned = cleaned[:second_year_pos].strip()
+
+    # Remove trailing edition info in parentheses when repeated
+    if cleaned.count("(") > 1 and cleaned.endswith(")"):
+        last_paren = cleaned.rfind("(")
+        if last_paren > 20:
+            potential = cleaned[:last_paren].strip()
+            if len(potential) > 15:
+                cleaned = potential
+
+    # Trim trailing punctuation and separators
+    cleaned = cleaned.rstrip(" -:;|/")
+
+    if len(cleaned) > 100:
+        truncated = cleaned[:100].strip()
+        last_space = truncated.rfind(" ")
+        if last_space > 40:
+            truncated = truncated[:last_space].strip()
+        cleaned = truncated
+
+    return cleaned
+
+
+def _collect_title_candidates(texts: List[str]) -> List[str]:
+    """Collect unique, cleaned title candidates from raw text snippets."""
+    candidates: List[str] = []
+    seen_norm = set()
+
+    for raw_text in texts:
+        if not raw_text:
+            continue
+        cleaned_raw = re.sub(r"\s+", " ", raw_text).strip()
+        if not cleaned_raw:
+            continue
+
+        norm = normalize_text(cleaned_raw)
+        if not norm or len(norm) < 3:
+            continue
+
+        # Skip MD5 hashes or obvious non-title tokens
+        if len(norm) == 32 and all(c in "0123456789abcdef" for c in norm):
+            continue
+        if norm in {"download", "download options", "download mirror"}:
+            continue
+
+        if norm in seen_norm:
+            continue
+        seen_norm.add(norm)
+
+        candidate = _clean_title_candidate(cleaned_raw)
+        if candidate:
+            candidates.append(candidate)
+
+    return candidates
+
+
+def _extract_title_candidates(title_cell) -> List[str]:
+    """Extract potential title strings from the table title cell."""
+    if not title_cell:
+        return []
+
+    snippets: List[str] = []
+
+    # Anchor texts pointing to MD5 pages are strong signals
+    for link in title_cell.find_all("a", href=lambda x: x and "/md5/" in x):
+        snippets.append(link.get_text(" ", strip=True))
+
+    # Full cell text with various separators
+    full_text = title_cell.get_text(separator="\n", strip=True)
+    if full_text:
+        snippets.append(full_text)
+        for part in re.split(r"[\n\r]+", full_text):
+            snippets.append(part)
+            for sub in re.split(r"\s*[\|•·;︰：/]+\s*", part):
+                snippets.append(sub)
+
+    # Some pages use custom delimiters like '|||'
+    if full_text and "|||" in full_text:
+        snippets.extend(full_text.split("|||"))
+
+    return _collect_title_candidates(snippets)
+
+
+def _extract_creators_from_cell(creator_cell) -> List[str]:
+    """Extract creator names from the creators cell."""
+    if not creator_cell:
+        return []
+
+    raw_text = creator_cell.get_text(separator=";", strip=True)
+    if not raw_text:
+        return []
+
+    creators: List[str] = []
+    seen_norm = set()
+    for part in re.split(r"[,;/\|]+", raw_text):
+        candidate = re.sub(r"\s+", " ", part).strip()
+        if not candidate or len(candidate) < 2:
+            continue
+        norm = normalize_text(candidate)
+        if not norm or norm in seen_norm:
+            continue
+        seen_norm.add(norm)
+        creators.append(candidate)
+
+    return creators
+
+
+def _select_best_title(query_title: str, candidates: List[str]) -> Tuple[Optional[str], Dict[str, int]]:
+    """Select the best-matching title candidate and return detailed scores."""
+    best_title: Optional[str] = None
+    best_scores = {"token": 0, "simple": 0, "combined": 0}
+
+    for candidate in candidates:
+        token_score = title_score(query_title, candidate, method="token_set")
+        simple_score = title_score(query_title, candidate, method="simple")
+        combined = max(token_score, simple_score)
+
+        if combined > best_scores["combined"]:
+            best_title = candidate
+            best_scores = {"token": token_score, "simple": simple_score, "combined": combined}
+
+    return best_title, best_scores
 
 
 def _get_api_key() -> Optional[str]:
@@ -145,76 +286,43 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
                     # Extract metadata from table cells
                     # Table structure: [icons, title, authors, publisher, year, filename]
                     cells = row.find_all(['td', 'th'])
-                    
-                    # Title is in cell index 1 (second cell)
-                    title_text = None
+
+                    title_candidates: List[str] = []
+                    extracted_creators: List[str] = []
+                    title_scores = {"token": 0, "simple": 0, "combined": 0}
+
                     if len(cells) > 1:
-                        title_cell = cells[1]
-                        # Get title from first MD5 link within the cell (primary title)
-                        title_links = title_cell.find_all('a', href=lambda x: x and '/md5/' in x)
-                        if title_links:
-                            # Use the first link's text as primary title
-                            # Get only direct text, not from nested elements
-                            first_link = title_links[0]
-                            # Try to get cleaner text by looking at direct string children
-                            if first_link.string:
-                                title_text = first_link.string.strip()
-                            else:
-                                title_text = first_link.get_text(separator=' ', strip=True)
-                        
-                        # If still empty or looks bad, try cell text but split on common delimiters
-                        if not title_text or len(title_text) < 5:
-                            full_text = title_cell.get_text(separator='|||', strip=True)
-                            # Split on delimiter and take first part
-                            parts = full_text.split('|||')
-                            if parts:
-                                title_text = parts[0].strip()
-                    
-                    # Clean up title - Anna's Archive often concatenates multiple title variants
-                    if title_text and len(title_text) > 3:
-                        # Strategy: Take first title variant before repetition or unreasonable length
-                        # Look for signs of concatenation: year patterns, repeated words
-                        
-                        # If we see year patterns like "2016" appearing multiple times, split there
-                        import re
-                        year_pattern = r'\b(19|20)\d{2}\b'
-                        years = list(re.finditer(year_pattern, title_text))
-                        if len(years) >= 2:
-                            # Multiple years suggest multiple editions concatenated
-                            # Take text up to second year
-                            second_year_pos = years[1].start()
-                            if second_year_pos > 20:  # Ensure we keep reasonable amount
-                                title_text = title_text[:second_year_pos].strip()
-                        
-                        # Remove trailing edition info in parentheses
-                        if title_text.count('(') > 1 and title_text.endswith(')'):
-                            last_paren = title_text.rfind('(')
-                            if last_paren > 20:
-                                potential = title_text[:last_paren].strip()
-                                if len(potential) > 15:
-                                    title_text = potential
-                        
-                        # Hard limit at 100 characters for clean display
-                        if len(title_text) > 100:
-                            title_text = title_text[:100].strip()
-                            # Try to end at a word boundary
-                            if ' ' in title_text[80:]:
-                                last_space = title_text.rfind(' ', 80)
-                                if last_space > 40:
-                                    title_text = title_text[:last_space].strip()
-                    
-                    if not title_text or len(title_text) < 3:
-                        title_text = f"Book {md5[:8]}"
-                    
+                        title_candidates = _extract_title_candidates(cells[1])
+
+                    if len(cells) > 2:
+                        extracted_creators = _extract_creators_from_cell(cells[2])
+
+                    best_title, title_scores = _select_best_title(title, title_candidates)
+
+                    if not best_title and title_candidates:
+                        best_title = title_candidates[0]
+
+                    if not best_title or len(best_title) < 3:
+                        best_title = f"Book {md5[:8]}"
+
                     raw = {
-                        "title": title_text,
+                        "title": best_title,
+                        "creators": extracted_creators,
                         "creator": creator or "N/A",
                         "md5": md5,
                         "id": md5,
                         "item_url": f"https://annas-archive.org/md5/{md5}",
+                        "title_candidates": title_candidates,
+                        "title_scores": title_scores,
                     }
                     
                     sr = convert_to_searchresult("Anna's Archive", raw)
+                    sr.raw.setdefault("__matching__", {}).update({
+                        "title_token_score": title_scores.get("token", 0),
+                        "title_simple_score": title_scores.get("simple", 0),
+                    })
+                    if extracted_creators:
+                        sr.creators = extracted_creators
                     results.append(sr)
                     
                 except Exception as e:
@@ -226,9 +334,9 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
             for link in soup.find_all("a", href=True):
                 if len(results) >= max_results:
                     break
-                    
+
                 href = link.get("href", "")
-                
+
                 # Match MD5 links: /md5/<32-char-hex>
                 if "/md5/" in href:
                     try:
@@ -239,41 +347,46 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
                             # Validate MD5 format (32 hex characters)
                             if len(md5_part) == 32 and all(c in "0123456789abcdefABCDEF" for c in md5_part):
                                 md5 = md5_part.lower()
-                                
+
                                 if md5 in seen_md5s:
                                     continue
                                 seen_md5s.add(md5)
-                                
-                                # Extract title - try multiple approaches
-                                title_text = link.get_text(strip=True)
-                                
-                                # Don't use MD5 as title
-                                if not title_text or title_text == md5 or len(title_text) < 3:
-                                    # Look in parent for better title
-                                    parent = link.find_parent()
-                                    if parent:
-                                        # Try to find any text element that looks like a title
-                                        for elem in parent.find_all(['div', 'span', 'h1', 'h2', 'h3', 'h4', 'p']):
-                                            text = elem.get_text(strip=True)
-                                            if text and text != md5 and len(text) > 3 and text != title_text:
-                                                title_text = text
-                                                break
-                                
-                                # Final fallback
-                                if not title_text or title_text == md5:
-                                    title_text = f"Book {md5[:8]}"
-                                
+
+                                snippets = [link.get_text(" ", strip=True), link.get("title", "")]
+
+                                parent = link.find_parent()
+                                if parent:
+                                    snippets.append(parent.get_text(" ", strip=True))
+                                    for elem in parent.find_all(['div', 'span', 'h1', 'h2', 'h3', 'h4', 'p']):
+                                        snippets.append(elem.get_text(" ", strip=True))
+
+                                title_candidates = _collect_title_candidates(snippets)
+                                best_title, title_scores = _select_best_title(title, title_candidates)
+
+                                if not best_title and title_candidates:
+                                    best_title = title_candidates[0]
+
+                                if not best_title or best_title == md5 or len(best_title) < 3:
+                                    best_title = f"Book {md5[:8]}"
+
                                 raw = {
-                                    "title": title_text,
+                                    "title": best_title,
                                     "creator": creator or "N/A",
+                                    "creators": [],
                                     "md5": md5,
                                     "id": md5,
                                     "item_url": f"https://annas-archive.org/md5/{md5}",
+                                    "title_candidates": title_candidates,
+                                    "title_scores": title_scores,
                                 }
-                                
+
                                 sr = convert_to_searchresult("Anna's Archive", raw)
+                                sr.raw.setdefault("__matching__", {}).update({
+                                    "title_token_score": title_scores.get("token", 0),
+                                    "title_simple_score": title_scores.get("simple", 0),
+                                })
                                 results.append(sr)
-                                
+
                     except Exception as e:
                         logger.debug("Error parsing Anna's Archive link %s: %s", href, e)
                         continue
