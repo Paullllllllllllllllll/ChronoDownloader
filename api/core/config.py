@@ -1,7 +1,14 @@
 """Configuration management for ChronoDownloader.
 
-Handles loading and caching of the JSON configuration file,
-with environment variable support and provider-specific settings.
+Handles loading and caching of the JSON configuration file with environment
+variable support (CHRONO_CONFIG_PATH) and provider-specific settings.
+
+The configuration system provides:
+- Centralized config loading with caching
+- Provider-specific settings (network, limits, preferences)
+- Download preferences (PDF vs images, metadata, overwrite)
+- Budget limits (per-work and global)
+- Selection strategy and matching thresholds
 """
 from __future__ import annotations
 

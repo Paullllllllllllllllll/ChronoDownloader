@@ -159,3 +159,28 @@ def get_provider_abbrev(provider_key: str) -> str:
         Display abbreviation (uppercase)
     """
     return PROVIDER_ABBREV.get(provider_key, provider_key.upper())
+
+
+def build_work_directory_name(
+    entry_id: Optional[str],
+    title: str,
+    max_len: int = 80
+) -> str:
+    """Build a standardized work directory name.
+    
+    Combines entry_id and title into a snake_case directory name following
+    the pattern: <entry_id>_<title_slug> or just <title_slug> if no entry_id.
+    
+    Args:
+        entry_id: Optional entry identifier
+        title: Work title
+        max_len: Maximum length for title component
+        
+    Returns:
+        Directory name in snake_case format
+    """
+    entry_slug = to_snake_case(str(entry_id)) if entry_id else None
+    title_slug = to_snake_case(str(title))[:max_len] if title else "untitled"
+    
+    parts = [p for p in [entry_slug, title_slug] if p]
+    return "_".join(parts) if parts else "untitled"

@@ -28,8 +28,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pandas as pd
 
 from api import utils
-from api.core.config import get_config, get_provider_setting
+from api.core.config import get_config
 from api.core.context import (
+    clear_current_entry,
+    clear_current_name_stem,
     clear_current_provider,
     clear_current_work,
     reset_counters,
@@ -38,10 +40,15 @@ from api.core.context import (
     set_current_provider,
     set_current_work,
 )
-from api.core.naming import to_snake_case
-from api.matching import combined_match_score, normalize_text
-from api.model import SearchResult, convert_to_searchresult
+from api.core.naming import build_work_directory_name, to_snake_case
+from api.matching import normalize_text
+from api.model import SearchResult
 from api.providers import PROVIDERS
+from main.selection import (
+    collect_candidates_all,
+    collect_candidates_sequential,
+    select_best_candidate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +163,11 @@ def filter_enabled_providers_for_keys(
 
 
 def _get_selection_config() -> Dict[str, Any]:
-    """Get selection configuration with defaults."""
+    """Get selection configuration with defaults.
+    
+    Returns:
+        Dictionary with selection strategy, thresholds, and download preferences
+    """
     cfg = get_config()
     sel = dict(cfg.get("selection", {}) or {})
     
@@ -174,7 +185,15 @@ def _get_selection_config() -> Dict[str, Any]:
 
 
 def _title_slug(title: str, max_len: int = 80) -> str:
-    """Generate a URL-safe slug from a title."""
+    """Generate a URL-safe slug from a title.
+    
+    Args:
+        title: Work title to slugify
+        max_len: Maximum length of slug
+        
+    Returns:
+        Sanitized filename-safe slug
+    """
     base = "_".join([t for t in normalize_text(title).split() if t])
     if not base:
         base = "untitled"
@@ -183,7 +202,15 @@ def _title_slug(title: str, max_len: int = 80) -> str:
 
 
 def _compute_work_id(title: str, creator: Optional[str]) -> str:
-    """Generate a stable hash-based work ID from title and creator."""
+    """Generate a stable hash-based work ID from title and creator.
+    
+    Args:
+        title: Work title
+        creator: Optional creator name
+        
+    Returns:
+        10-character hex hash identifier
+    """
     norm = f"{normalize_text(title)}|{normalize_text(creator) if creator else ''}"
     h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:10]
     return h
@@ -192,7 +219,15 @@ def _compute_work_id(title: str, creator: Optional[str]) -> str:
 def _provider_order(
     enabled: List[ProviderTuple], hierarchy: List[str]
 ) -> List[ProviderTuple]:
-    """Reorder providers according to hierarchy preference."""
+    """Reorder providers according to hierarchy preference.
+    
+    Args:
+        enabled: List of enabled provider tuples
+        hierarchy: Ordered list of preferred provider keys
+        
+    Returns:
+        Reordered provider list with hierarchy-specified providers first
+    """
     if not hierarchy:
         return enabled
     
@@ -208,7 +243,11 @@ def _provider_order(
 
 
 def _get_naming_config() -> Dict[str, Any]:
-    """Get naming configuration with defaults."""
+    """Get naming configuration with defaults.
+    
+    Returns:
+        Dictionary with naming preferences for work directories and files
+    """
     cfg = get_config()
     nm = dict(cfg.get("naming", {}) or {})
     
@@ -231,6 +270,13 @@ def process_work(
     This function orchestrates provider searches and the download phase for a
     single input work (title/creator), writing a per-work folder under
     `base_output_dir` and adding an entry to `index.csv`.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        entry_id: Optional unique identifier for this work
+        base_output_dir: Base directory for downloaded works
+        dry_run: If True, skip actual downloads
     """
     logger = logging.getLogger(__name__)
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
@@ -241,139 +287,39 @@ def process_work(
     # Build a quick map of provider_key -> (search_func, download_func, provider_name)
     provider_map: Dict[str, Tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
 
-    # Helper to call search functions with varying signatures robustly
-    def _call_search(search_func, title: str, creator: Optional[str], max_results: int):
-        try:
-            return search_func(title, creator=creator, max_results=max_results)
-        except TypeError:
-            try:
-                return search_func(title, max_results=max_results)
-            except TypeError:
-                try:
-                    if creator is not None:
-                        return search_func(title, creator=creator)
-                except TypeError:
-                    return search_func(title)
-        except Exception:
-            # Let the outer try/except handle logging
-            raise
-
     # Gather candidates depending on strategy
     all_candidates: List[SearchResult] = []
     selected: Optional[SearchResult] = None
     selected_provider_tuple: Optional[ProviderTuple] = None
 
-    def _score_item(sr: SearchResult) -> Dict[str, Any]:
-        score = combined_match_score(
-            query_title=title,
-            item_title=sr.title,
-            query_creator=creator,
-            creators=sr.creators,
-            creator_weight=float(sel_cfg.get("creator_weight", 0.2)),
-            method="token_set",
-        )
-        # Simple quality signals
-        boost = 0.0
-        if sr.iiif_manifest:
-            boost += 3.0
-        if sr.item_url:
-            boost += 0.5
-        total = score + boost
-        return {"score": score, "boost": boost, "total": total}
-
-    def _max_results_for_provider(pkey: str) -> int:
-        val = get_provider_setting(pkey, "max_results", None)
-        try:
-            return int(val) if val is not None else int(sel_cfg.get("max_candidates_per_provider", 5))
-        except Exception:
-            return int(sel_cfg.get("max_candidates_per_provider", 5))
-
     min_title_score = float(sel_cfg.get("min_title_score", 85))
-
-    def _prepare_sr(provider_key: str, provider_name: str, item: Any) -> SearchResult:
-        if isinstance(item, SearchResult):
-            sr = item
-        else:
-            # Convert legacy dicts to SearchResult for uniform handling
-            sr = convert_to_searchresult(provider_name, item if isinstance(item, dict) else {})
-        sr.provider_key = provider_key
-        if not sr.provider:
-            sr.provider = provider_name
-        return sr
-
-    def _consider(sr: SearchResult):
-        # Compute and attach scores for later JSON export
-        sc = _score_item(sr)
-        sr.raw.setdefault("__matching__", {}).update(sc)
-        all_candidates.append(sr)
+    creator_weight = float(sel_cfg.get("creator_weight", 0.2))
+    max_candidates_per_provider = int(sel_cfg.get("max_candidates_per_provider", 5))
 
     strategy = (sel_cfg.get("strategy") or "collect_and_select").lower()
     if strategy == "sequential_first_hit":
-        for pkey, search_func, download_func, pname in provider_list:
-            logger.info("--- Searching on %s for '%s' ---", pname, title)
-            try:
-                max_results = _max_results_for_provider(pkey)
-                results = _call_search(search_func, title, creator, max_results)
-                if not results:
-                    logger.info("No items found for '%s' on %s.", title, pname)
-                    continue
-                logger.info("Found %d item(s) on %s", len(results), pname)
-                # evaluate and pick best acceptable result from this provider
-                temp: List[Tuple[float, SearchResult]] = []
-                for it in results:
-                    sr = _prepare_sr(pkey, pname, it)
-                    _consider(sr)
-                    sc = sr.raw.get("__matching__", {})
-                    if sc.get("score", 0) >= min_title_score:
-                        temp.append((sc.get("total", 0.0), sr))
-                if temp:
-                    temp.sort(key=lambda x: x[0], reverse=True)
-                    selected = temp[0][1]
-                    selected_provider_tuple = (pkey, search_func, download_func, pname)
-                    break
-            except Exception:
-                logger.exception("Error during search with %s for '%s'", pname, title)
+        all_candidates, selected, selected_provider_tuple = collect_candidates_sequential(
+            provider_list,
+            title,
+            creator,
+            min_title_score,
+            creator_weight,
+            max_candidates_per_provider,
+        )
     else:
-        # collect_and_select: search all providers, then choose best according to hierarchy and scores
-        for pkey, search_func, download_func, pname in provider_list:
-            logger.info("--- Searching on %s for '%s' ---", pname, title)
-            try:
-                max_results = _max_results_for_provider(pkey)
-                if creator:
-                    try:
-                        results = search_func(title, creator=creator, max_results=max_results)
-                    except TypeError:
-                        results = search_func(title, max_results=max_results)
-                else:
-                    results = search_func(title, max_results=max_results)
-                if not results:
-                    logger.info("No items found for '%s' on %s.", title, pname)
-                    continue
-                logger.info("Found %d item(s) on %s", len(results), pname)
-                for it in results:
-                    sr = _prepare_sr(pkey, pname, it)
-                    _consider(sr)
-            except Exception:
-                logger.exception("Error during search with %s for '%s'", pname, title)
-
-        # After collection, filter and rank
-        # Rank by provider priority then by total matching score
-        prov_priority = {pkey: idx for idx, (pkey, *_rest) in enumerate(provider_list)}
-        ranked: List[Tuple[int, float, SearchResult]] = []
-        for sr in all_candidates:
-            sc = sr.raw.get("__matching__", {})
-            if sc.get("score", 0) < min_title_score:
-                continue
-            pprio = prov_priority.get(sr.provider_key or "", 9999)
-            ranked.append((pprio, float(sc.get("total", 0.0)), sr))
-        ranked.sort(key=lambda x: (x[0], -x[1]))
-        if ranked:
-            selected = ranked[0][2]
-            # find its provider tuple
-            for tup in provider_list:
-                if tup[0] == (selected.provider_key or ""):
-                    selected_provider_tuple = tup
-                    break
+        # collect_and_select: search all providers, then choose best
+        all_candidates = collect_candidates_all(
+            provider_list,
+            title,
+            creator,
+            creator_weight,
+            max_candidates_per_provider,
+        )
+        selected, selected_provider_tuple = select_best_candidate(
+            all_candidates,
+            provider_list,
+            min_title_score,
+        )
 
     if not all_candidates:
         logger.info("No items found for '%s' across all enabled APIs.", title)
@@ -386,13 +332,18 @@ def process_work(
     # Build work directory and write metadata
     naming_cfg = _get_naming_config()
     work_id = _compute_work_id(title, creator)
-    # New folder scheme: strictly snake_case: <entry_id>_<work_name>
-    entry_slug = to_snake_case(str(entry_id)) if entry_id else None
-    title_slug_sc = to_snake_case(str(title))
-    work_stem = "_".join([p for p in [entry_slug, title_slug_sc] if p])
-    work_dir_name = work_stem or _title_slug(title, max_len=int(naming_cfg.get("title_slug_max_len", 80)))
+    
+    # Build standardized work directory name
+    work_dir_name = build_work_directory_name(
+        entry_id,
+        title,
+        max_len=int(naming_cfg.get("title_slug_max_len", 80))
+    )
     work_dir = os.path.join(base_output_dir, work_dir_name)
     os.makedirs(work_dir, exist_ok=True)
+    
+    # Use work_dir_name as the naming stem for files
+    work_stem = work_dir_name
 
     # Set per-work context for centralized download budgeting
     set_current_work(work_id)

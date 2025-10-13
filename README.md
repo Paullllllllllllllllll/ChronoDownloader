@@ -675,20 +675,22 @@ ChronoDownloader follows a modular architecture for maintainability and extensib
 ChronoDownloader/
 ├── api/                          # Provider connectors and core utilities
 │   ├── core/                     # Core infrastructure modules
-│   │   ├── config.py            # Configuration management
+│   │   ├── config.py            # Configuration management with caching
 │   │   ├── network.py           # HTTP session, rate limiting, retries
 │   │   ├── context.py           # Thread-local work/provider tracking
-│   │   ├── naming.py            # Filename sanitization
+│   │   ├── naming.py            # Filename sanitization and work directory naming
 │   │   └── budget.py            # Download budget enforcement
 │   ├── providers.py             # Provider registry
 │   ├── model.py                 # SearchResult dataclass
 │   ├── matching.py              # Fuzzy matching algorithms
-│   ├── iiif.py                  # IIIF manifest parsing
-│   ├── utils.py                 # File download and utilities
-│   ├── query_helpers.py         # Query string escaping
+│   ├── iiif.py                  # IIIF manifest parsing and image downloads
+│   ├── download_helpers.py      # Shared download patterns for providers
+│   ├── utils.py                 # File download and utilities (backward-compatible facade)
+│   ├── query_helpers.py         # Query string escaping for SRU/SPARQL
 │   └── <provider>_api.py        # Individual provider connectors
 ├── main/                         # CLI and orchestration
 │   ├── pipeline.py              # Core orchestration logic
+│   ├── selection.py             # Candidate collection, scoring, and selection
 │   └── downloader.py            # CLI entry point
 ├── config.json                   # Main configuration file
 ├── requirements.txt              # Python dependencies
@@ -705,26 +707,24 @@ ChronoDownloader/
 
 **Core Infrastructure** (`api/core/`):
 - `network.py`: Centralized HTTP with per-provider rate limiting, exponential backoff, retry logic
-- `config.py`: Configuration loading with caching and defaults
-- `budget.py`: Download budget tracking at multiple levels
-- `context.py`: Thread-local state for work/provider tracking
-- `naming.py`: Consistent filename sanitization
+- `config.py`: Configuration loading with caching, environment variable support (CHRONO_CONFIG_PATH), and defaults
+- `budget.py`: Download budget tracking at multiple levels (global, per-work, per-provider)
+- `context.py`: Thread-local state for work/provider tracking and file sequencing
+- `naming.py`: Consistent filename sanitization, snake_case conversion, and work directory naming
 
-**Orchestration** (`main/pipeline.py`):
-- Provider loading and API key validation
-- Multi-provider search coordination
-- Fuzzy matching and candidate scoring
-- Selection strategy implementation
-- Download coordination with fallback
+**Orchestration** (`main/`):
+- `pipeline.py`: Provider loading, API key validation, work directory creation, metadata persistence, download coordination with fallback
+- `selection.py`: Candidate collection strategies (sequential/collect-and-select), fuzzy matching scoring, best candidate selection
 
 **Data Models** (`api/model.py`):
-- SearchResult: Unified search result format
+- SearchResult: Unified search result format with provider metadata
 - Conversion utilities for legacy dict-based results
 
-**Utilities**:
-- `iiif.py`: IIIF Presentation v2/v3 manifest parsing, Image API URL generation
-- `matching.py`: Token-set ratio fuzzy matching, text normalization
-- `utils.py`: File download with budget checks, JSON persistence
+**Shared Utilities**:
+- `iiif.py`: IIIF Presentation v2/v3 manifest parsing, Image API URL generation, image download helpers
+- `download_helpers.py`: Common download patterns (PDF-first strategies, IIIF manifest + images)
+- `matching.py`: Token-set ratio fuzzy matching, text normalization, combined scoring
+- `utils.py`: Backward-compatible facade re-exporting core functionality, file download with budget checks, JSON persistence
 
 ### Workflow
 

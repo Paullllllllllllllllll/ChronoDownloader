@@ -1,18 +1,23 @@
+"""Internet Archive API connector.
+
+This provider prioritizes PDF downloads over IIIF images for better availability
+and faster downloads, as configured in the download preferences.
+"""
 import logging
 import urllib.parse
 from typing import List, Union
 
-from .utils import (
-    save_json,
-    download_file,
-    make_request,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-    get_max_pages,
-    budget_exhausted,
-)
+from .download_helpers import download_iiif_manifest_and_images
 from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult
+from .utils import (
+    budget_exhausted,
+    download_file,
+    get_max_pages,
+    make_request,
+    prefer_pdf_over_images,
+    save_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +25,12 @@ SEARCH_API_URL = "https://archive.org/advancedsearch.php"
 METADATA_API_URL = "https://archive.org/metadata/{identifier}"
 
 
-def search_internet_archive(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
-    """Search Internet Archive using the Advanced Search API and return SearchResult list.
+def search_internet_archive(
+    title: str,
+    creator: str | None = None,
+    max_results: int = 3
+) -> List[SearchResult]:
+    """Search Internet Archive using the Advanced Search API.
     
     Args:
         title: Work title to search for
@@ -63,10 +72,10 @@ def search_internet_archive(title: str, creator: str | None = None, max_results:
 def download_ia_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
     """Download available objects for an Internet Archive item.
 
-    Order of preference:
-      1) Manifest-level renderings (PDF/EPUB) when present in IIIF manifest
-      2) Direct files listed in metadata (PDF first, then EPUB, then DjVu)
-      3) Page images via IIIF Image API (subject to max_pages)
+    Download strategy prioritizes PDFs over IIIF images for better availability:
+      1) Direct PDF/EPUB/DjVu files from metadata (PDF prioritized)
+      2) Manifest-level renderings (PDF/EPUB) from IIIF manifest if available
+      3) Page images via IIIF Image API (only if no PDF obtained or config allows)
       4) Cover/thumbnail images from metadata
       
     Args:
