@@ -1,6 +1,7 @@
 """Connector for the Polona.pl API."""
 
 import logging
+import urllib.parse
 from typing import List, Union
 
 from .utils import (

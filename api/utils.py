@@ -266,13 +266,43 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                 
                 response.raise_for_status()
                 
+                # Validate Content-Type to prevent saving HTML error pages as PDFs/EPUBs
+                content_type = response.headers.get("Content-Type", "").lower()
+                from urllib.parse import urlparse
+                parsed_url = urlparse(url)
+                url_suggests_pdf = ".pdf" in parsed_url.path.lower() or "output=pdf" in url.lower() or "download" in url.lower()
+                url_suggests_epub = ".epub" in parsed_url.path.lower() or "output=epub" in url.lower()
+                is_annas_archive = "annas-archive" in url.lower()
+                
+                # Reject HTML when expecting PDF/EPUB
+                if "text/html" in content_type:
+                    if url_suggests_pdf or url_suggests_epub:
+                        logger.warning(
+                            "Rejecting download: URL suggests PDF/EPUB but server returned HTML (likely error page): %s",
+                            url
+                        )
+                        return None
+                    # Also reject Anna's Archive HTML pages (likely login/error pages) unless explicitly allowed
+                    if is_annas_archive:
+                        # Check if this is a very small HTML page (likely error/login page)
+                        cl_header_check = response.headers.get("Content-Length")
+                        try:
+                            content_len_check = int(cl_header_check) if cl_header_check else 0
+                            # Anna's Archive login/error pages are typically ~180KB
+                            if 170000 < content_len_check < 185000:
+                                logger.warning(
+                                    "Rejecting download: Anna's Archive HTML page likely login/error page (~180KB): %s",
+                                    url
+                                )
+                                return None
+                        except Exception:
+                            pass
+                
                 cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
                 
                 # Determine extension and type up front
                 def _infer_ext() -> str:
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
-                    suffix = Path(parsed.path).suffix
+                    suffix = Path(parsed_url.path).suffix
                     if suffix:
                         return suffix
                     ct = response.headers.get("Content-Type", "").lower()
@@ -309,8 +339,25 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                 else:
                     type_key = ext.lstrip(".") or "bin"
 
-                # Determine target directory
-                target_dir = os.path.join(folder_path, "objects")
+                # Check if extension is allowed in objects folder
+                dl_cfg = get_download_config()
+                allowed_exts = dl_cfg.get("allowed_object_extensions", [])
+                save_disallowed_to_metadata = dl_cfg.get("save_disallowed_to_metadata", True)
+                
+                # Determine target directory based on extension whitelist
+                if allowed_exts and ext not in allowed_exts:
+                    if save_disallowed_to_metadata:
+                        # Save non-content files (HTML, TXT, etc.) to metadata folder
+                        target_dir = os.path.join(folder_path, "metadata")
+                        logger.info("Extension %s not in allowed list; saving to metadata folder", ext)
+                    else:
+                        # Skip download if not allowed and not saving to metadata
+                        logger.info("Extension %s not in allowed list; skipping download", ext)
+                        return None
+                else:
+                    # Allowed extension or no whitelist configured - save to objects
+                    target_dir = os.path.join(folder_path, "objects")
+                
                 os.makedirs(target_dir, exist_ok=True)
 
                 # Resolve sequence number using context
@@ -377,6 +424,57 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                         pass
                     return None
                 
+                # Validate file content for PDF/EPUB files to catch misnamed HTML pages
+                if ext.lower() in [".pdf", ".epub"]:
+                    try:
+                        with open(filepath, "rb") as check_f:
+                            first_bytes = check_f.read(512)
+                            # Check for PDF magic bytes
+                            if ext.lower() == ".pdf" and not first_bytes.startswith(b"%PDF-"):
+                                # Check if it's HTML instead
+                                if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
+                                    logger.warning(
+                                        "Downloaded file claims to be PDF but contains HTML; removing: %s",
+                                        filepath
+                                    )
+                                    os.remove(filepath)
+                                    return None
+                            # Check for EPUB (ZIP) magic bytes
+                            elif ext.lower() == ".epub" and not first_bytes.startswith(b"PK\x03\x04"):
+                                # Check if it's HTML instead
+                                if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
+                                    logger.warning(
+                                        "Downloaded file claims to be EPUB but contains HTML; removing: %s",
+                                        filepath
+                                    )
+                                    os.remove(filepath)
+                                    return None
+                    except Exception as ve:
+                        logger.warning("Error validating downloaded file %s: %s", filepath, ve)
+                
+                # Validate HTML files to ensure they're not login/error pages
+                if ext.lower() == ".html":
+                    try:
+                        with open(filepath, "r", encoding="utf-8", errors="ignore") as check_f:
+                            html_content = check_f.read(2048)  # Read first 2KB
+                            # Check for Anna's Archive login/register pages
+                            if "annas-archive" in url.lower() or "annas-archive" in provider.lower():
+                                if any(marker in html_content.lower() for marker in [
+                                    "<title>log in / register",
+                                    "<title>login",
+                                    "member login",
+                                    "please log in",
+                                    "__darkreader__",  # Anna's Archive specific JS
+                                ]):
+                                    logger.warning(
+                                        "Downloaded HTML file appears to be Anna's Archive login/error page; removing: %s",
+                                        filepath
+                                    )
+                                    os.remove(filepath)
+                                    return None
+                    except Exception as ve:
+                        logger.warning("Error validating HTML file %s: %s", filepath, ve)
+                
                 logger.info("Downloaded %s -> %s", url, filepath)
                 # Count file after successful write
                 _BUDGET.add_file(provider, work_id)
@@ -393,12 +491,57 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
             try:
                 with session.get(url, stream=True, timeout=timeout, verify=False, headers=req_headers or None) as response:
                     response.raise_for_status()
+                    
+                    # Validate Content-Type (same as main path)
+                    content_type_ssl = response.headers.get("Content-Type", "").lower()
+                    from urllib.parse import urlparse
+                    parsed_url_ssl = urlparse(url)
+                    url_suggests_pdf_ssl = ".pdf" in parsed_url_ssl.path.lower() or "output=pdf" in url.lower()
+                    url_suggests_epub_ssl = ".epub" in parsed_url_ssl.path.lower() or "output=epub" in url.lower()
+                    is_annas_archive_ssl = "annas-archive" in url.lower()
+                    
+                    if "text/html" in content_type_ssl:
+                        if url_suggests_pdf_ssl or url_suggests_epub_ssl:
+                            logger.warning(
+                                "Rejecting download (insecure retry): URL suggests PDF/EPUB but server returned HTML: %s",
+                                url
+                            )
+                            return None
+                        if is_annas_archive_ssl:
+                            cl_header_ssl = response.headers.get("Content-Length")
+                            try:
+                                content_len_ssl = int(cl_header_ssl) if cl_header_ssl else 0
+                                if 170000 < content_len_ssl < 185000:
+                                    logger.warning(
+                                        "Rejecting download (insecure retry): Anna's Archive HTML page likely login/error page: %s",
+                                        url
+                                    )
+                                    return None
+                            except Exception:
+                                pass
+                    
                     # Fallback to generic name if needed
                     cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
                     inferred_ext = Path(cd_name or "").suffix or ".bin"
+                    inferred_ext = inferred_ext.lower()
                     stem = _current_name_stem() or to_snake_case(filename) or "object"
                     prov_slug = _provider_slug(_current_provider_key(), provider)
-                    target_dir = os.path.join(folder_path, "objects")
+                    
+                    # Check extension whitelist (same as main path)
+                    dl_cfg_ssl = get_download_config()
+                    allowed_exts_ssl = dl_cfg_ssl.get("allowed_object_extensions", [])
+                    save_disallowed_ssl = dl_cfg_ssl.get("save_disallowed_to_metadata", True)
+                    
+                    if allowed_exts_ssl and inferred_ext not in allowed_exts_ssl:
+                        if save_disallowed_ssl:
+                            target_dir = os.path.join(folder_path, "metadata")
+                            logger.info("Extension %s not in allowed list; saving to metadata folder (SSL retry)", inferred_ext)
+                        else:
+                            logger.info("Extension %s not in allowed list; skipping download (SSL retry)", inferred_ext)
+                            return None
+                    else:
+                        target_dir = os.path.join(folder_path, "objects")
+                    
                     os.makedirs(target_dir, exist_ok=True)
                     safe_name = sanitize_filename(f"{stem}_{prov_slug}{inferred_ext}")
                     filepath = os.path.join(target_dir, safe_name)
@@ -406,6 +549,53 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                         for chunk in response.iter_content(chunk_size=8192):
                             if chunk:
                                 f.write(chunk)
+                    
+                    # Validate file content (same as main path)
+                    if inferred_ext.lower() in [".pdf", ".epub"]:
+                        try:
+                            with open(filepath, "rb") as check_f:
+                                first_bytes = check_f.read(512)
+                                if inferred_ext.lower() == ".pdf" and not first_bytes.startswith(b"%PDF-"):
+                                    if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
+                                        logger.warning(
+                                            "Downloaded file claims to be PDF but contains HTML; removing: %s",
+                                            filepath
+                                        )
+                                        os.remove(filepath)
+                                        return None
+                                elif inferred_ext.lower() == ".epub" and not first_bytes.startswith(b"PK\x03\x04"):
+                                    if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
+                                        logger.warning(
+                                            "Downloaded file claims to be EPUB but contains HTML; removing: %s",
+                                            filepath
+                                        )
+                                        os.remove(filepath)
+                                        return None
+                        except Exception as ve:
+                            logger.warning("Error validating downloaded file %s: %s", filepath, ve)
+                    
+                    # Validate HTML files
+                    if inferred_ext.lower() == ".html":
+                        try:
+                            with open(filepath, "r", encoding="utf-8", errors="ignore") as check_f:
+                                html_content = check_f.read(2048)
+                                if "annas-archive" in url.lower() or "annas-archive" in provider.lower():
+                                    if any(marker in html_content.lower() for marker in [
+                                        "<title>log in / register",
+                                        "<title>login",
+                                        "member login",
+                                        "please log in",
+                                        "__darkreader__",
+                                    ]):
+                                        logger.warning(
+                                            "Downloaded HTML file appears to be Anna's Archive login/error page; removing: %s",
+                                            filepath
+                                        )
+                                        os.remove(filepath)
+                                        return None
+                        except Exception as ve:
+                            logger.warning("Error validating HTML file %s: %s", filepath, ve)
+                    
                     logger.info("Downloaded %s -> %s (insecure)", url, filepath)
                     _BUDGET.add_file(provider, work_id)
                     return filepath

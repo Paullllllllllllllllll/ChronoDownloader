@@ -2,16 +2,16 @@
   "providers": {
     "internet_archive": true,
     "bnf_gallica": true,
-    "loc": true,
+    "loc": false,
     "europeana": true,
-    "dpla": true,
+    "dpla": false,
     "ddb": true,
     "british_library": false,
     "mdz": true,
     "polona": true,
     "bne": false,
     "google_books": true,
-    "hathitrust": true,
+    "hathitrust": false,
     "wellcome": true,
     "annas_archive": true
   },
@@ -134,12 +134,14 @@
     }
   },
   "download": {
-    "prefer_pdf_over_images": false,
+    "prefer_pdf_over_images": true,
     "download_manifest_renderings": true,
     "max_renderings_per_manifest": 5,
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
     "overwrite_existing": false,
-    "include_metadata": true
+    "include_metadata": true,
+    "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp", ".bmp", ".gif"],
+    "save_disallowed_to_metadata": true
   },
   "selection": {
     "strategy": "collect_and_select",
@@ -181,5 +183,10 @@
       "metadata_mb": 10
     },
     "on_exceed": "stop"
+  },
+  "csv_column_mapping": {
+    "title": ["Title", "short_title", "full_title"],
+    "creator": ["Creator", "main_author", "author"],
+    "entry_id": ["entry_id", "id", "work_id"]
   }
 }

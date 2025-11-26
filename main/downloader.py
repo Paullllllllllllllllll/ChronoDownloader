@@ -21,6 +21,56 @@ from main import pipeline
 from api import utils
 
 
+def _normalize_csv_columns(df: pd.DataFrame, config_path: str, logger: logging.Logger) -> pd.DataFrame:
+    """Normalize CSV column names based on configured mappings.
+    
+    Args:
+        df: Input DataFrame
+        config_path: Path to configuration JSON file
+        logger: Logger instance
+        
+    Returns:
+        DataFrame with normalized column names
+    """
+    import json
+    
+    # Try to load column mappings from config
+    mappings = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                mappings = cfg.get("csv_column_mapping", {})
+        except Exception as e:
+            logger.warning("Could not load csv_column_mapping from config: %s", e)
+    
+    # Apply mappings: for each target column, find first matching source column
+    for target_col, source_candidates in mappings.items():
+        if not isinstance(source_candidates, list):
+            source_candidates = [source_candidates]
+        
+        # Check if target already exists
+        if target_col.capitalize() in df.columns:
+            continue
+            
+        # Find first matching source column
+        for source_col in source_candidates:
+            if source_col in df.columns:
+                # Rename to standard format (Title, Creator, entry_id)
+                if target_col == "title":
+                    df.rename(columns={source_col: "Title"}, inplace=True)
+                    logger.info("Mapped column '%s' to 'Title'", source_col)
+                elif target_col == "creator":
+                    df.rename(columns={source_col: "Creator"}, inplace=True)
+                    logger.info("Mapped column '%s' to 'Creator'", source_col)
+                elif target_col == "entry_id":
+                    df.rename(columns={source_col: "entry_id"}, inplace=True)
+                    logger.info("Mapped column '%s' to 'entry_id'", source_col)
+                break
+    
+    return df
+
+
 def main() -> None:
     """Parse CLI arguments and run the downloader pipeline."""
     parser = argparse.ArgumentParser(
@@ -95,8 +145,11 @@ def main() -> None:
         logger.error("Error reading CSV file: %s", e)
         return
     
+    # Apply column mappings from config
+    works_df = _normalize_csv_columns(works_df, args.config, logger)
+    
     if "Title" not in works_df.columns:
-        logger.error("CSV file must contain a 'Title' column.")
+        logger.error("CSV file must contain a 'Title' column or a mapped equivalent.")
         return
 
     logger.info("Starting downloader. Output directory: %s", args.output_dir)
