@@ -146,6 +146,75 @@ def extract_image_service_bases(manifest: Dict[str, Any]) -> List[str]:
     return unique
 
 
+def extract_direct_image_urls(manifest: Dict[str, Any]) -> List[str]:
+    """Extract direct image URLs from a Presentation manifest.
+    
+    Some manifests (especially simplified IIIF v3) provide direct image URLs
+    without IIIF Image API services. This function extracts those URLs.
+    
+    Args:
+        manifest: IIIF Presentation manifest dictionary
+        
+    Returns:
+        List of direct image URLs
+    """
+    urls: List[str] = []
+    
+    # IIIF v2: sequences[0].canvases[].images[0].resource['@id'|'id']
+    try:
+        sequences = manifest.get("sequences") or []
+        if sequences:
+            canvases = sequences[0].get("canvases", [])
+            for canvas in canvases:
+                try:
+                    images = canvas.get("images", [])
+                    if not images:
+                        continue
+                    res = images[0].get("resource", {})
+                    img_url = res.get("@id") or res.get("id")
+                    if img_url and isinstance(img_url, str):
+                        urls.append(img_url)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    
+    # IIIF v3: items[].items[0].items[0].body.id
+    try:
+        if manifest.get("items"):
+            for canvas in manifest.get("items", []):
+                try:
+                    anno_pages = canvas.get("items", [])
+                    if not anno_pages:
+                        continue
+                    
+                    annos = anno_pages[0].get("items", [])
+                    if not annos:
+                        continue
+                    
+                    body = annos[0].get("body", {})
+                    if isinstance(body, list) and body:
+                        body = body[0]
+                    
+                    img_url = body.get("id")
+                    if img_url and isinstance(img_url, str):
+                        urls.append(img_url)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: List[str] = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            unique.append(u)
+    
+    return unique
+
+
 def image_url_candidates(
     service_base: str, info: Optional[Dict[str, Any]] = None
 ) -> List[str]:
