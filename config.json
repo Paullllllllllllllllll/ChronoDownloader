@@ -123,6 +123,9 @@
     },
     "annas_archive": {
       "max_pages": 0,
+      "daily_fast_download_limit": 10,
+      "wait_for_quota_reset": true,
+      "quota_reset_wait_hours": 24,
       "network": {
         "delay_ms": 800,
         "jitter_ms": 300,
@@ -148,16 +151,16 @@
     "provider_hierarchy": [
       "mdz",
       "bnf_gallica",
-      "google_books",
       "internet_archive",
+      "annas_archive",
+      "google_books",
       "wellcome",
       "loc",
       "europeana",
       "dpla",
       "ddb",
       "polona",
-      "hathitrust",
-      "annas_archive"
+      "hathitrust"
     ],
     "min_title_score": 50,
     "creator_weight": 0.2,

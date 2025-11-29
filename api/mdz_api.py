@@ -21,12 +21,11 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 
-# MDZ switched Solr endpoints; try the current generic select first, then fallback to the old core path
-SEARCH_PRIMARY_URL = "https://api.digitale-sammlungen.de/solr/select"
-SEARCH_FALLBACK_URL = "https://api.digitale-sammlungen.de/solr/mdzsearch/select"
+# MDZ API endpoints (Solr endpoints deprecated as of 2024/2025)
+# Primary search endpoint is the web API which returns JSON
+MDZ_WEB_SEARCH_URL = "https://www.digitale-sammlungen.de/api/search"
 IIIF_MANIFEST_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v2/{object_id}/manifest"
 IIIF_MANIFEST_V3_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v3/{object_id}/manifest"
-MDZ_WEB_SEARCH_URL = "https://www.digitale-sammlungen.de/api/search"
 
 def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
     """Search MDZ using the public JSON search endpoint, with HTML/Solr fallbacks.
@@ -85,25 +84,8 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
             results.append(convert_to_searchresult("MDZ", raw))
             if len(results) >= max_results:
                 break
-    if results:
-        return results
-
-    # Fallback: legacy Solr search (may be disabled)
-    query = f'title:"{title}"'
-    if creator:
-        query += f' AND creator:"{creator}"'
-    params = {"q": query, "rows": max_results, "wt": "json"}
-    data = make_request(SEARCH_PRIMARY_URL, params=params)
-    if not data or not data.get("response"):
-        data = make_request(SEARCH_FALLBACK_URL, params=params)
-    if data and data.get("response") and data["response"].get("docs"):
-        for doc in data["response"]["docs"]:
-            raw = {
-                "title": doc.get("title") or doc.get("title_t", "N/A"),
-                "creator": ", ".join(doc.get("creator", [])) if isinstance(doc.get("creator"), list) else (doc.get("creator") or "N/A"),
-                "id": doc.get("id") or doc.get("pi") or doc.get("recordId"),
-            }
-            results.append(convert_to_searchresult("MDZ", raw))
+    # Return results from primary API or HTML fallback
+    # Legacy Solr endpoints are deprecated and removed as of 2024/2025
     return results
 
 

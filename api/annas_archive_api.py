@@ -13,20 +13,30 @@ Download:
     * Handles HTTP 200 (success), 204 (no fast download), and errors
     * Logs quota information and remaining downloads
     * Provides specific error messages (quota, invalid key, invalid MD5)
+    * Rate limited to 10 fast downloads per day - waits if limit reached
   - Without API key: Scrapes download links from MD5 page
 
 API Key Configuration:
   Set ANNAS_ARCHIVE_API_KEY environment variable for member fast downloads.
+
+Rate Limiting Configuration (provider_settings.annas_archive):
+  - daily_fast_download_limit: Max fast downloads per day (default: 10)
+  - wait_for_quota_reset: If true, wait for quota reset; if false, fall back to scraping (default: true)
+  - quota_reset_wait_hours: Hours to wait for quota reset (default: 24)
   
 Note:
   Title extraction from search results may be limited due to HTML structure.
   MD5 hashes serve as reliable identifiers even when titles are incomplete.
 """
 
+import json
 import logging
 import os
 import re
+import time
 import urllib.parse
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Tuple, Union, Optional
 
 from bs4 import BeautifulSoup
@@ -54,6 +64,119 @@ MIRRORS = [
     "https://annas-archive.se",
     "https://annas-archive.li",
 ]
+
+# Rate limiting state file
+QUOTA_STATE_FILE = Path(os.getenv("ANNAS_QUOTA_STATE_FILE", ".annas_archive_quota.json"))
+
+
+def _get_quota_config() -> dict:
+    """Get Anna's Archive quota configuration."""
+    return {
+        "daily_limit": get_provider_setting("annas_archive", "daily_fast_download_limit", 10),
+        "wait_for_reset": get_provider_setting("annas_archive", "wait_for_quota_reset", True),
+        "reset_wait_hours": get_provider_setting("annas_archive", "quota_reset_wait_hours", 24),
+    }
+
+
+def _load_quota_state() -> dict:
+    """Load quota tracking state from file."""
+    try:
+        if QUOTA_STATE_FILE.exists():
+            with open(QUOTA_STATE_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.debug("Could not load quota state: %s", e)
+    return {"downloads_today": 0, "last_reset": None, "quota_exhausted_at": None}
+
+
+def _save_quota_state(state: dict) -> None:
+    """Save quota tracking state to file."""
+    try:
+        with open(QUOTA_STATE_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.warning("Could not save quota state: %s", e)
+
+
+def _check_and_update_quota() -> Tuple[bool, Optional[float]]:
+    """Check if we can use fast download and update quota.
+    
+    Returns:
+        Tuple of (can_download, wait_seconds_if_not)
+        - can_download: True if quota allows fast download
+        - wait_seconds_if_not: Seconds to wait for reset, or None if should fallback
+    """
+    config = _get_quota_config()
+    state = _load_quota_state()
+    now = datetime.utcnow()
+    
+    # Check if we need to reset the daily counter
+    last_reset_str = state.get("last_reset")
+    if last_reset_str:
+        try:
+            last_reset = datetime.fromisoformat(last_reset_str)
+            hours_since_reset = (now - last_reset).total_seconds() / 3600
+            if hours_since_reset >= 24:
+                # Reset the counter
+                state = {"downloads_today": 0, "last_reset": now.isoformat(), "quota_exhausted_at": None}
+                _save_quota_state(state)
+                logger.info("Anna's Archive: Daily quota reset (24+ hours since last reset)")
+        except Exception:
+            pass
+    else:
+        # First run, initialize
+        state["last_reset"] = now.isoformat()
+        _save_quota_state(state)
+    
+    # Check if quota exhausted
+    downloads_today = state.get("downloads_today", 0)
+    daily_limit = config["daily_limit"]
+    
+    if downloads_today >= daily_limit:
+        # Quota exhausted
+        quota_exhausted_at = state.get("quota_exhausted_at")
+        if quota_exhausted_at:
+            try:
+                exhausted_time = datetime.fromisoformat(quota_exhausted_at)
+                wait_hours = config["reset_wait_hours"]
+                reset_time = exhausted_time + timedelta(hours=wait_hours)
+                if now >= reset_time:
+                    # Time to reset
+                    state = {"downloads_today": 0, "last_reset": now.isoformat(), "quota_exhausted_at": None}
+                    _save_quota_state(state)
+                    logger.info("Anna's Archive: Quota wait period complete, resetting counter")
+                    return True, None
+                else:
+                    # Still waiting
+                    wait_seconds = (reset_time - now).total_seconds()
+                    if config["wait_for_reset"]:
+                        return False, wait_seconds
+                    else:
+                        return False, None  # Signal to fallback to scraping
+            except Exception:
+                pass
+        else:
+            # Just hit the limit
+            state["quota_exhausted_at"] = now.isoformat()
+            _save_quota_state(state)
+            if config["wait_for_reset"]:
+                return False, config["reset_wait_hours"] * 3600
+            else:
+                return False, None
+    
+    return True, None
+
+
+def _record_fast_download() -> None:
+    """Record that a fast download was used."""
+    state = _load_quota_state()
+    state["downloads_today"] = state.get("downloads_today", 0) + 1
+    if not state.get("last_reset"):
+        state["last_reset"] = datetime.utcnow().isoformat()
+    _save_quota_state(state)
+    config = _get_quota_config()
+    remaining = config["daily_limit"] - state["downloads_today"]
+    logger.info("Anna's Archive: Fast download used. %d/%d remaining today.", remaining, config["daily_limit"])
 
 
 def _clean_title_candidate(text: str) -> str:
@@ -400,6 +523,9 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
     
     Anna's Archive aggregates files from multiple sources. This function:
     1. If API key is available: Uses fast download API for direct downloads (member feature)
+       - Rate limited to 10 downloads/day (configurable)
+       - Will wait for quota reset if configured (default: wait 24 hours)
+       - Falls back to scraping if wait_for_quota_reset is False
     2. Otherwise: Fetches the MD5 page to scrape download links
     3. Attempts to download from available mirrors
     4. Saves metadata about the file
@@ -427,8 +553,38 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
     api_key = _get_api_key()
     
     if api_key:
-        logger.info("Anna's Archive: Using fast download API (member)")
-        return _download_with_api(md5, api_key, output_folder)
+        # Check quota before attempting fast download
+        can_download, wait_seconds = _check_and_update_quota()
+        
+        if can_download:
+            logger.info("Anna's Archive: Using fast download API (member)")
+            result = _download_with_api(md5, api_key, output_folder)
+            if result:
+                _record_fast_download()
+            return result
+        elif wait_seconds is not None:
+            # Need to wait for quota reset
+            wait_hours = wait_seconds / 3600
+            logger.info("Anna's Archive: Daily fast download limit reached. Waiting %.1f hours for reset...", wait_hours)
+            
+            # Log progress every hour for long waits
+            remaining = wait_seconds
+            while remaining > 0:
+                sleep_time = min(remaining, 3600)  # Sleep max 1 hour at a time
+                logger.info("Anna's Archive: Waiting for quota reset... %.1f hours remaining", remaining / 3600)
+                time.sleep(sleep_time)
+                remaining -= sleep_time
+            
+            # After waiting, try again
+            logger.info("Anna's Archive: Quota reset wait complete, resuming fast download")
+            result = _download_with_api(md5, api_key, output_folder)
+            if result:
+                _record_fast_download()
+            return result
+        else:
+            # Configured to fallback to scraping instead of waiting
+            logger.info("Anna's Archive: Fast download quota exhausted, falling back to public scraping")
+            return _download_via_scraping(md5, output_folder)
     else:
         logger.info("Anna's Archive: Using public download scraping (no API key)")
         return _download_via_scraping(md5, output_folder)
@@ -518,6 +674,11 @@ def _download_with_api(md5: str, api_key: str, output_folder: str) -> bool:
 def _download_via_scraping(md5: str, output_folder: str) -> bool:
     """Download by scraping the MD5 page for download links.
     
+    Anna's Archive provides multiple download options:
+    - Direct file links (best - end in .pdf, .epub, etc.)
+    - Mirror page links (require additional navigation)
+    - Slow download links (rate-limited but usually work)
+    
     Args:
         md5: MD5 hash of the file
         output_folder: Target directory for downloads
@@ -552,78 +713,113 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
     if title_elem:
         metadata["title"] = title_elem.get_text(strip=True)
     
-    # Look for metadata fields (these vary on Anna's Archive pages)
-    for dt in soup.find_all("dt"):
-        dd = dt.find_next_sibling("dd")
-        if dd:
-            key = dt.get_text(strip=True).lower().replace(":", "")
-            value = dd.get_text(strip=True)
-            metadata[key] = value
+    # Look for file extension from page
+    file_ext = ".pdf"  # Default
+    for text_elem in soup.find_all(text=True):
+        text_lower = str(text_elem).lower()
+        if ".epub" in text_lower:
+            file_ext = ".epub"
+            break
+        elif ".djvu" in text_lower:
+            file_ext = ".djvu"
+            break
     
     # Save metadata
     save_json(metadata, output_folder, f"annas_{md5}_metadata")
     
-    # Look for download links
-    # Anna's Archive typically has multiple download options from different sources
-    download_links = []
+    # Categorize download links by priority
+    direct_file_links = []  # Links that end in file extensions
+    slow_download_links = []  # Anna's Archive slow download
+    mirror_links = []  # External mirror pages
     
-    # Find all links that might be downloads
+    # File extensions to look for in URLs
+    file_extensions = ('.pdf', '.epub', '.djvu', '.mobi', '.azw', '.azw3', '.fb2')
+    
+    # Find all links
     for link in soup.find_all("a", href=True):
-        href = link.get("href", "")
+        href = link.get("href", "").strip()
         text = link.get_text(strip=True).lower()
         
-        # Look for download-related links
-        # Common patterns: "download", "fast download", mirror links
-        if any(keyword in text for keyword in ["download", "mirror", "libgen", "z-library", "zlibrary"]):
-            # Skip member-only fast downloads (requires API key)
-            if "fast_download" in href and "member" in text.lower():
-                logger.info("Skipping member-only fast download (requires API key)")
-                continue
-            
-            # Collect potential download URLs
-            if href.startswith("http"):
-                download_links.append({
-                    "url": href,
-                    "source": text,
-                })
-            elif href.startswith("/"):
-                download_links.append({
-                    "url": f"https://annas-archive.org{href}",
-                    "source": text,
-                })
+        if not href:
+            continue
+        
+        # Skip member-only fast downloads
+        if "fast_download" in href or "member" in text:
+            continue
+        
+        # Skip non-download links
+        if any(skip in href.lower() for skip in [
+            "account", "login", "register", "donate", "torrents", 
+            "datasets", "blog", "about", "faq", "#"
+        ]):
+            continue
+        
+        # Build full URL
+        full_url = href
+        if href.startswith("/"):
+            full_url = f"https://annas-archive.org{href}"
+        elif not href.startswith("http"):
+            continue
+        
+        # Check if this is a direct file link
+        url_lower = full_url.lower()
+        is_direct_file = any(url_lower.endswith(ext) or f"{ext}?" in url_lower for ext in file_extensions)
+        
+        # Check if this is the slow download link
+        if "slow_download" in href or "slow download" in text:
+            slow_download_links.append({"url": full_url, "source": text or "slow download"})
+        elif is_direct_file:
+            direct_file_links.append({"url": full_url, "source": text or "direct file"})
+        elif any(mirror in url_lower for mirror in ["libgen", "library.lol", "z-lib", "zlibrary", "ipfs"]):
+            # These are mirror page links - deprioritize
+            mirror_links.append({"url": full_url, "source": text or "mirror"})
     
-    # Try to download from available links
-    # Prioritize direct file links over page links
-    max_downloads = 1 if prefer_pdf_over_images() else 3
-    downloaded_count = 0
+    # Also look for download links in JavaScript or data attributes
+    for script in soup.find_all("script"):
+        script_text = script.string or ""
+        # Look for direct CDN/file URLs in scripts
+        for match in re.finditer(r'https?://[^"\s<>]+(?:\.pdf|\.epub|\.djvu|\.mobi)[^"\s<>]*', script_text):
+            url = match.group(0).rstrip(',\"\');')
+            if url not in [l["url"] for l in direct_file_links]:
+                direct_file_links.append({"url": url, "source": "script"})
     
-    for idx, link_info in enumerate(download_links):
-        if downloaded_count >= max_downloads:
+    # Prioritized download attempts
+    all_links = direct_file_links + slow_download_links + mirror_links
+    
+    if not all_links:
+        logger.warning("No download links found on Anna's Archive page for %s", md5)
+        logger.info("You may need to visit the page manually: %s", md5_page_url)
+        return False
+    
+    logger.info("Anna's Archive: Found %d direct, %d slow, %d mirror links for %s",
+                len(direct_file_links), len(slow_download_links), len(mirror_links), md5)
+    
+    max_attempts = 5  # Try up to 5 different links
+    attempts = 0
+    
+    for link_info in all_links:
+        if any_downloaded or attempts >= max_attempts:
             break
         
+        attempts += 1
         url = link_info["url"]
         source = link_info["source"]
         
         logger.info("Attempting download from Anna's Archive source: %s", source)
         
-        # Try to download the file
-        # Note: Some links may redirect to external mirrors
         try:
-            filename = f"annas_{md5}_content_{idx+1}"
-            if download_file(url, output_folder, filename):
+            filename = f"annas_{md5}_content"
+            result = download_file(url, output_folder, filename)
+            if result:
                 any_downloaded = True
-                downloaded_count += 1
-                logger.info("Successfully downloaded from source: %s", source)
-                
-                # If we prefer PDFs and got one, stop here
-                if prefer_pdf_over_images() and downloaded_count >= 1:
-                    break
+                logger.info("Successfully downloaded from Anna's Archive source: %s", source)
+                break
         except Exception as e:
             logger.debug("Failed to download from %s: %s", url, e)
             continue
     
     if not any_downloaded:
         logger.warning("No files could be downloaded for Anna's Archive MD5: %s", md5)
-        logger.info("You may need to visit the page manually: %s", md5_page_url)
+        logger.info("Available mirrors may require manual access: %s", md5_page_url)
     
     return any_downloaded
