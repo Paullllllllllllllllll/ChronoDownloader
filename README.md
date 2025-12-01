@@ -90,18 +90,20 @@ For large-scale downloads (50+ items), see WORKFLOW_GUIDE.md for batch processin
 
 ### Software Dependencies
 
-- Python: 3.8 or higher (recommended: 3.9+)
+- Python: 3.10 or higher (recommended: 3.11+)
 - pip package manager
 - Internet connection for API access
 
 ### Python Packages
 
-All Python dependencies are listed in `requirements.txt`. Key packages include:
+All Python dependencies are listed in `requirements.txt` with pinned versions:
 
 - `requests`: HTTP library for API calls
 - `pandas`: CSV processing and data handling
 - `beautifulsoup4`: HTML/XML parsing
 - `urllib3`: HTTP client with retry support
+
+Install all dependencies with `pip install -r requirements.txt`. The requirements file specifies exact versions to ensure reproducible environments.
 
 ## Installation
 
