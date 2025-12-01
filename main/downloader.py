@@ -188,6 +188,18 @@ def main() -> None:
             pass
     
     logger.info("All works processed.")
+    
+    # Process any deferred downloads (e.g., Anna's Archive quota-limited items)
+    deferred = pipeline.get_deferred_downloads()
+    if deferred:
+        logger.info(
+            "%d download(s) were deferred due to quota limits. "
+            "Processing deferred downloads after quota reset...",
+            len(deferred)
+        )
+        pipeline.process_deferred_downloads(wait_for_reset=True)
+    
+    logger.info("Downloader finished.")
 
 
 if __name__ == "__main__":

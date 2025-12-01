@@ -13,7 +13,8 @@ Download:
     * Handles HTTP 200 (success), 204 (no fast download), and errors
     * Logs quota information and remaining downloads
     * Provides specific error messages (quota, invalid key, invalid MD5)
-    * Rate limited to 10 fast downloads per day - waits if limit reached
+    * Rate limited to 10 fast downloads per day (configurable)
+    * Raises QuotaDeferredException when quota exhausted (allows pipeline to continue)
   - Without API key: Scrapes download links from MD5 page
 
 API Key Configuration:
@@ -21,8 +22,19 @@ API Key Configuration:
 
 Rate Limiting Configuration (provider_settings.annas_archive):
   - daily_fast_download_limit: Max fast downloads per day (default: 10)
-  - wait_for_quota_reset: If true, wait for quota reset; if false, fall back to scraping (default: true)
-  - quota_reset_wait_hours: Hours to wait for quota reset (default: 24)
+  - wait_for_quota_reset: If true, raises QuotaDeferredException; if false, fall back to scraping (default: true)
+  - quota_reset_wait_hours: Hours until quota resets (default: 24)
+
+Quota Deferral:
+  When the daily quota is exhausted and wait_for_quota_reset is True, the download function
+  raises QuotaDeferredException instead of blocking. This allows the pipeline to:
+  1. Continue processing other works with other providers
+  2. Track deferred downloads for later retry
+  3. Retry deferred downloads after the quota resets
+  
+  Helper functions:
+  - is_quota_available(): Check if fast downloads are available
+  - get_quota_reset_time(): Get when quota will reset
   
 Note:
   Title extraction from search results may be limited due to HTML structure.
@@ -50,7 +62,7 @@ from .utils import (
     get_provider_setting,
 )
 from .matching import title_score, normalize_text
-from .model import SearchResult, convert_to_searchresult
+from .model import QuotaDeferredException, SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +189,56 @@ def _record_fast_download() -> None:
     config = _get_quota_config()
     remaining = config["daily_limit"] - state["downloads_today"]
     logger.info("Anna's Archive: Fast download used. %d/%d remaining today.", remaining, config["daily_limit"])
+
+
+def is_quota_available() -> bool:
+    """Check if Anna's Archive fast download quota is available.
+    
+    This can be called before attempting downloads to decide whether to
+    include Anna's Archive in the provider list for a given work.
+    
+    Returns:
+        True if quota is available for fast downloads, False if exhausted
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return True  # No API key means scraping mode, always "available"
+    
+    can_download, _wait_seconds = _check_and_update_quota()
+    return can_download
+
+
+def get_quota_reset_time() -> Optional[datetime]:
+    """Get the expected time when the Anna's Archive quota will reset.
+    
+    Returns:
+        UTC datetime when quota should reset, or None if quota is available
+        or cannot be determined
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return None  # No API key means scraping mode
+    
+    config = _get_quota_config()
+    state = _load_quota_state()
+    now = datetime.utcnow()
+    
+    downloads_today = state.get("downloads_today", 0)
+    if downloads_today < config["daily_limit"]:
+        return None  # Quota not exhausted
+    
+    quota_exhausted_at = state.get("quota_exhausted_at")
+    if quota_exhausted_at:
+        try:
+            exhausted_time = datetime.fromisoformat(quota_exhausted_at)
+            reset_time = exhausted_time + timedelta(hours=config["reset_wait_hours"])
+            if now < reset_time:
+                return reset_time
+        except Exception:
+            pass
+    
+    # Fallback: reset time is reset_wait_hours from now
+    return now + timedelta(hours=config["reset_wait_hours"])
 
 
 def _clean_title_candidate(text: str) -> str:
@@ -524,7 +586,7 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
     Anna's Archive aggregates files from multiple sources. This function:
     1. If API key is available: Uses fast download API for direct downloads (member feature)
        - Rate limited to 10 downloads/day (configurable)
-       - Will wait for quota reset if configured (default: wait 24 hours)
+       - Raises QuotaDeferredException when quota exhausted (allows pipeline to continue)
        - Falls back to scraping if wait_for_quota_reset is False
     2. Otherwise: Fetches the MD5 page to scrape download links
     3. Attempts to download from available mirrors
@@ -538,6 +600,10 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
         
     Returns:
         True if any content was downloaded, False otherwise
+        
+    Raises:
+        QuotaDeferredException: When quota is exhausted and wait_for_quota_reset is True.
+            The caller should catch this and retry later.
     """
     md5 = None
     if isinstance(item_data, SearchResult):
@@ -563,24 +629,19 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
                 _record_fast_download()
             return result
         elif wait_seconds is not None:
-            # Need to wait for quota reset
+            # Quota exhausted - raise exception to allow pipeline to continue with other providers
+            reset_time = get_quota_reset_time()
             wait_hours = wait_seconds / 3600
-            logger.info("Anna's Archive: Daily fast download limit reached. Waiting %.1f hours for reset...", wait_hours)
-            
-            # Log progress every hour for long waits
-            remaining = wait_seconds
-            while remaining > 0:
-                sleep_time = min(remaining, 3600)  # Sleep max 1 hour at a time
-                logger.info("Anna's Archive: Waiting for quota reset... %.1f hours remaining", remaining / 3600)
-                time.sleep(sleep_time)
-                remaining -= sleep_time
-            
-            # After waiting, try again
-            logger.info("Anna's Archive: Quota reset wait complete, resuming fast download")
-            result = _download_with_api(md5, api_key, output_folder)
-            if result:
-                _record_fast_download()
-            return result
+            logger.info(
+                "Anna's Archive: Daily fast download limit reached. "
+                "Deferring download (quota resets in %.1f hours).",
+                wait_hours
+            )
+            raise QuotaDeferredException(
+                provider="Anna's Archive",
+                reset_time=reset_time,
+                message=f"Anna's Archive: Daily quota exhausted. Resets in {wait_hours:.1f} hours.",
+            )
         else:
             # Configured to fallback to scraping instead of waiting
             logger.info("Anna's Archive: Fast download quota exhausted, falling back to public scraping")

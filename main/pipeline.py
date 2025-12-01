@@ -42,7 +42,7 @@ from api.core.context import (
 )
 from api.core.naming import build_work_directory_name, to_snake_case
 from api.matching import normalize_text
-from api.model import SearchResult
+from api.model import QuotaDeferredException, SearchResult
 from api.providers import PROVIDERS
 from main.selection import (
     collect_candidates_all,
@@ -54,6 +54,10 @@ logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
 ProviderTuple = Tuple[str, Callable, Callable, str]
+
+# Deferred downloads tracking (works that need retry when quota resets)
+# Structure: List of dicts with keys: title, creator, entry_id, base_output_dir, selected, provider_tuple, work_dir, reset_time
+_deferred_downloads: List[dict] = []
 
 
 def load_enabled_apis(config_path: str) -> List[ProviderTuple]:
@@ -422,6 +426,7 @@ def process_work(
 
     # Download according to strategy
     download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
+    download_deferred = False  # Track if download was deferred due to quota
     if not dry_run and selected and selected_provider_tuple and selected_dir:
         pkey, _search_func, download_func, pname = selected_provider_tuple
         try:
@@ -467,6 +472,11 @@ def process_work(
                             if dfunc(sr, selected_dir):
                                 logger.info("Fallback download from %s succeeded.", _pname)
                                 break
+                        except QuotaDeferredException as qde:
+                            logger.info(
+                                "Fallback provider %s quota exhausted: %s", _pname, qde.message
+                            )
+                            continue  # Try next fallback provider
                         except Exception:
                             logger.exception(
                                 "Fallback download error for %s:%s", prov_key, sr.source_id
@@ -478,6 +488,21 @@ def process_work(
                                 pass
                 except Exception:
                     logger.exception("Error while attempting fallback download candidates.")
+        except QuotaDeferredException as qde:
+            # Quota exhausted for selected provider - defer for later retry
+            download_deferred = True
+            logger.info("Download deferred for '%s': %s", title, qde.message)
+            _deferred_downloads.append({
+                "title": title,
+                "creator": creator,
+                "entry_id": entry_id,
+                "base_output_dir": base_output_dir,
+                "selected": selected,
+                "provider_tuple": selected_provider_tuple,
+                "work_dir": work_dir,
+                "reset_time": qde.reset_time,
+                "provider": qde.provider,
+            })
         except Exception:
             logger.exception("Error during download for %s:%s", pkey, selected.source_id)
         # If 'all', also download other candidates into sources/ subfolders
@@ -548,3 +573,124 @@ def process_work(
         except Exception:
             pass
     logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
+
+
+def get_deferred_downloads() -> List[dict]:
+    """Get the list of deferred downloads waiting for quota reset.
+    
+    Returns:
+        List of deferred download info dicts
+    """
+    return list(_deferred_downloads)
+
+
+def clear_deferred_downloads() -> None:
+    """Clear the deferred downloads list."""
+    _deferred_downloads.clear()
+
+
+def process_deferred_downloads(wait_for_reset: bool = True) -> int:
+    """Process downloads that were deferred due to quota exhaustion.
+    
+    This function should be called after processing all works to retry
+    downloads that were deferred because a provider's quota was exhausted.
+    
+    Args:
+        wait_for_reset: If True, wait for the quota reset time before retrying.
+                       If False, only retry items whose reset time has passed.
+    
+    Returns:
+        Number of successfully processed deferred downloads
+    """
+    import time
+    
+    if not _deferred_downloads:
+        logger.info("No deferred downloads to process.")
+        return 0
+    
+    logger.info("Processing %d deferred download(s)...", len(_deferred_downloads))
+    
+    # Find the earliest reset time
+    earliest_reset = None
+    for item in _deferred_downloads:
+        reset_time = item.get("reset_time")
+        if reset_time and (earliest_reset is None or reset_time < earliest_reset):
+            earliest_reset = reset_time
+    
+    # Wait for quota reset if needed
+    if wait_for_reset and earliest_reset:
+        now = datetime.now(timezone.utc)
+        # Handle naive datetime from Anna's Archive
+        if earliest_reset.tzinfo is None:
+            from datetime import timezone as tz
+            earliest_reset = earliest_reset.replace(tzinfo=tz.utc)
+        
+        wait_seconds = (earliest_reset - now).total_seconds()
+        if wait_seconds > 0:
+            wait_hours = wait_seconds / 3600
+            logger.info(
+                "Waiting %.1f hours for quota reset before processing deferred downloads...",
+                wait_hours
+            )
+            # Sleep in chunks and log progress
+            remaining = wait_seconds
+            while remaining > 0:
+                sleep_time = min(remaining, 3600)  # Sleep max 1 hour at a time
+                logger.info("Deferred downloads: %.1f hours remaining until quota reset...", remaining / 3600)
+                time.sleep(sleep_time)
+                remaining -= sleep_time
+            logger.info("Quota reset time reached. Retrying deferred downloads...")
+    
+    # Process deferred items
+    processed = 0
+    failed = []
+    
+    for item in list(_deferred_downloads):
+        title = item.get("title")
+        selected = item.get("selected")
+        provider_tuple = item.get("provider_tuple")
+        work_dir = item.get("work_dir")
+        
+        if not selected or not provider_tuple or not work_dir:
+            logger.warning("Incomplete deferred download info for '%s', skipping.", title)
+            continue
+        
+        pkey, _search_func, download_func, pname = provider_tuple
+        logger.info("Retrying deferred download for '%s' from %s", title, pname)
+        
+        try:
+            set_current_provider(pkey)
+            ok = download_func(selected, work_dir)
+            if ok:
+                logger.info("Deferred download succeeded for '%s'", title)
+                processed += 1
+                _deferred_downloads.remove(item)
+            else:
+                logger.warning("Deferred download still failed for '%s'", title)
+                failed.append(item)
+        except QuotaDeferredException as qde:
+            logger.warning(
+                "Deferred download for '%s' still quota-limited: %s",
+                title, qde.message
+            )
+            # Update reset time
+            item["reset_time"] = qde.reset_time
+            failed.append(item)
+        except Exception:
+            logger.exception("Error retrying deferred download for '%s'", title)
+            failed.append(item)
+        finally:
+            try:
+                clear_current_provider()
+            except Exception:
+                pass
+    
+    if failed:
+        logger.info(
+            "Deferred downloads: %d succeeded, %d still pending.",
+            processed, len(failed)
+        )
+    else:
+        logger.info("All %d deferred downloads completed successfully.", processed)
+    
+    return processed

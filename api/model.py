@@ -6,7 +6,36 @@ and conversion utilities for legacy dict-based results.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+
+class QuotaDeferredException(Exception):
+    """Raised when a provider's quota is exhausted and download should be deferred.
+    
+    This exception signals that the download should be retried later when the quota
+    resets, rather than blocking the entire pipeline or failing permanently.
+    
+    Attributes:
+        provider: Name of the provider with exhausted quota
+        reset_time: UTC datetime when the quota is expected to reset
+        message: Human-readable description
+    """
+    
+    def __init__(
+        self,
+        provider: str,
+        reset_time: Optional[datetime] = None,
+        message: Optional[str] = None,
+    ):
+        self.provider = provider
+        self.reset_time = reset_time
+        self.message = message or f"{provider}: Quota exhausted, download deferred"
+        super().__init__(self.message)
+    
+    def __repr__(self) -> str:
+        reset_str = self.reset_time.isoformat() if self.reset_time else "unknown"
+        return f"QuotaDeferredException(provider={self.provider!r}, reset_time={reset_str})"
 
 
 @dataclass
