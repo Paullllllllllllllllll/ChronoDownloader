@@ -1,0 +1,837 @@
+"""Interactive mode workflow for ChronoDownloader.
+
+This module provides interactive prompts and workflows for users who want
+to configure and run downloads without using command-line arguments.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import pandas as pd
+
+# Ensure parent directory is in path for direct script execution
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from api.core.config import get_config, get_download_config
+from api.providers import PROVIDERS
+from main import pipeline
+from main.mode_selector import get_general_config
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Data Classes
+# =============================================================================
+
+@dataclass
+class DownloadConfiguration:
+    """User configuration for a download session."""
+    
+    # Mode: "csv", "single", "collection"
+    mode: str = "csv"
+    
+    # CSV mode settings
+    csv_path: Optional[str] = None
+    
+    # Single work mode settings
+    single_title: Optional[str] = None
+    single_creator: Optional[str] = None
+    single_entry_id: Optional[str] = None
+    
+    # Collection mode settings
+    collection_name: Optional[str] = None
+    
+    # General settings
+    output_dir: str = "downloaded_works"
+    config_path: str = "config.json"
+    dry_run: bool = False
+    log_level: str = "INFO"
+    
+    # Provider overrides (optional)
+    provider_hierarchy: List[str] = field(default_factory=list)
+    
+    # Selected items for processing
+    selected_works: List[Dict[str, Any]] = field(default_factory=list)
+
+
+# =============================================================================
+# Console UI Helpers
+# =============================================================================
+
+class ConsoleUI:
+    """Simple console UI utilities."""
+    
+    # ANSI color codes (Windows 10+ supports these)
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    CYAN = "\033[96m"
+    RED = "\033[91m"
+    
+    @staticmethod
+    def enable_ansi():
+        """Enable ANSI escape codes on Windows."""
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+            except Exception:
+                pass
+    
+    @staticmethod
+    def print_header(title: str, subtitle: str = "") -> None:
+        """Print a styled header."""
+        width = 70
+        print()
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}{'=' * width}{ConsoleUI.RESET}")
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}  {title}{ConsoleUI.RESET}")
+        if subtitle:
+            print(f"{ConsoleUI.DIM}  {subtitle}{ConsoleUI.RESET}")
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}{'=' * width}{ConsoleUI.RESET}")
+        print()
+    
+    @staticmethod
+    def print_separator(char: str = "-", width: int = 70) -> None:
+        """Print a separator line."""
+        print(f"{ConsoleUI.DIM}{char * width}{ConsoleUI.RESET}")
+    
+    @staticmethod
+    def print_info(label: str, message: str = "") -> None:
+        """Print an info message."""
+        if message:
+            print(f"{ConsoleUI.BLUE}[{label}]{ConsoleUI.RESET} {message}")
+        else:
+            print(f"{ConsoleUI.BLUE}{label}{ConsoleUI.RESET}")
+    
+    @staticmethod
+    def print_success(message: str) -> None:
+        """Print a success message."""
+        print(f"{ConsoleUI.GREEN}✓ {message}{ConsoleUI.RESET}")
+    
+    @staticmethod
+    def print_warning(message: str) -> None:
+        """Print a warning message."""
+        print(f"{ConsoleUI.YELLOW}⚠ {message}{ConsoleUI.RESET}")
+    
+    @staticmethod
+    def print_error(message: str) -> None:
+        """Print an error message."""
+        print(f"{ConsoleUI.RED}✗ {message}{ConsoleUI.RESET}")
+    
+    @staticmethod
+    def prompt_select(
+        question: str,
+        options: List[Tuple[str, str]],
+        allow_back: bool = True
+    ) -> Optional[str]:
+        """Prompt user to select from options.
+        
+        Args:
+            question: Question to display
+            options: List of (value, display_text) tuples
+            allow_back: Whether to allow going back
+            
+        Returns:
+            Selected value or None if user wants to go back/quit
+        """
+        print(f"\n{ConsoleUI.BOLD}{question}{ConsoleUI.RESET}\n")
+        
+        for i, (value, display) in enumerate(options, 1):
+            print(f"  {ConsoleUI.CYAN}[{i}]{ConsoleUI.RESET} {display}")
+        
+        if allow_back:
+            print(f"\n  {ConsoleUI.DIM}[b] Go back  [q] Quit{ConsoleUI.RESET}")
+        else:
+            print(f"\n  {ConsoleUI.DIM}[q] Quit{ConsoleUI.RESET}")
+        
+        while True:
+            try:
+                choice = input(f"\n{ConsoleUI.BOLD}Enter choice: {ConsoleUI.RESET}").strip().lower()
+                
+                if choice == "q":
+                    raise KeyboardInterrupt()
+                if choice == "b" and allow_back:
+                    return None
+                
+                try:
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(options):
+                        return options[idx][0]
+                except ValueError:
+                    pass
+                
+                print(f"{ConsoleUI.YELLOW}Invalid choice. Please try again.{ConsoleUI.RESET}")
+                
+            except EOFError:
+                raise KeyboardInterrupt()
+    
+    @staticmethod
+    def prompt_input(
+        prompt: str,
+        default: str = "",
+        required: bool = False
+    ) -> str:
+        """Prompt for text input.
+        
+        Args:
+            prompt: Prompt text
+            default: Default value if empty
+            required: Whether input is required
+            
+        Returns:
+            User input or default
+        """
+        default_hint = f" [{default}]" if default else ""
+        required_hint = " (required)" if required else ""
+        
+        while True:
+            try:
+                value = input(f"{ConsoleUI.BOLD}{prompt}{default_hint}{required_hint}: {ConsoleUI.RESET}").strip()
+                
+                if not value and default:
+                    return default
+                if not value and required:
+                    print(f"{ConsoleUI.YELLOW}This field is required.{ConsoleUI.RESET}")
+                    continue
+                return value
+                
+            except EOFError:
+                raise KeyboardInterrupt()
+    
+    @staticmethod
+    def prompt_yes_no(question: str, default: bool = True) -> bool:
+        """Prompt for yes/no confirmation.
+        
+        Args:
+            question: Question to ask
+            default: Default value
+            
+        Returns:
+            True for yes, False for no
+        """
+        hint = "[Y/n]" if default else "[y/N]"
+        
+        while True:
+            try:
+                answer = input(f"{ConsoleUI.BOLD}{question} {hint}: {ConsoleUI.RESET}").strip().lower()
+                
+                if not answer:
+                    return default
+                if answer in ("y", "yes"):
+                    return True
+                if answer in ("n", "no"):
+                    return False
+                
+                print(f"{ConsoleUI.YELLOW}Please enter 'y' or 'n'.{ConsoleUI.RESET}")
+                
+            except EOFError:
+                raise KeyboardInterrupt()
+
+
+# =============================================================================
+# Interactive Workflow
+# =============================================================================
+
+class InteractiveWorkflow:
+    """Interactive workflow for configuring and running downloads."""
+    
+    def __init__(self):
+        """Initialize the workflow."""
+        ConsoleUI.enable_ansi()
+        self.config = DownloadConfiguration()
+        self.app_config: Dict[str, Any] = {}
+    
+    def display_welcome(self) -> None:
+        """Display welcome banner."""
+        ConsoleUI.print_header(
+            "CHRONO DOWNLOADER",
+            "Historical Document Download Tool"
+        )
+        print("  Download historical sources from digital libraries including:")
+        print("  Internet Archive, BnF Gallica, MDZ, Google Books, and more.\n")
+    
+    def display_provider_status(self) -> None:
+        """Display status of available providers."""
+        ConsoleUI.print_separator()
+        ConsoleUI.print_info("ENABLED PROVIDERS")
+        ConsoleUI.print_separator()
+        
+        cfg = get_config()
+        providers_cfg = cfg.get("providers", {})
+        
+        enabled = []
+        disabled = []
+        
+        for key, (_, _, name) in PROVIDERS.items():
+            if providers_cfg.get(key, False):
+                enabled.append(name)
+            else:
+                disabled.append(name)
+        
+        if enabled:
+            print(f"  {ConsoleUI.GREEN}Enabled:{ConsoleUI.RESET} {', '.join(enabled)}")
+        if disabled:
+            print(f"  {ConsoleUI.DIM}Disabled: {', '.join(disabled)}{ConsoleUI.RESET}")
+        print()
+    
+    def get_mode_options(self) -> List[Tuple[str, str]]:
+        """Get download mode options."""
+        return [
+            ("csv", "CSV Batch — Process works from a CSV file"),
+            ("single", "Single Work — Download a specific work by title"),
+            ("collection", "Predefined Collection — Choose from sample datasets"),
+        ]
+    
+    def configure_mode(self) -> bool:
+        """Configure download mode.
+        
+        Returns:
+            True if configured, False to go back
+        """
+        result = ConsoleUI.prompt_select(
+            "How would you like to specify works to download?",
+            self.get_mode_options(),
+            allow_back=False
+        )
+        
+        if result:
+            self.config.mode = result
+            return True
+        return False
+    
+    def configure_csv_mode(self) -> bool:
+        """Configure CSV batch mode.
+        
+        Returns:
+            True if configured, False to go back
+        """
+        general = get_general_config()
+        default_csv = general.get("default_csv_path", "sample_works.csv")
+        
+        # List available CSV files
+        csv_files = list(Path(".").glob("*.csv"))
+        
+        if csv_files:
+            ConsoleUI.print_info("Available CSV files:")
+            for f in csv_files:
+                print(f"    • {f.name}")
+            print()
+        
+        csv_path = ConsoleUI.prompt_input(
+            "Enter path to CSV file",
+            default=default_csv,
+            required=True
+        )
+        
+        if not csv_path:
+            return False
+        
+        # Validate CSV exists
+        if not os.path.exists(csv_path):
+            ConsoleUI.print_error(f"CSV file not found: {csv_path}")
+            return False
+        
+        # Validate CSV has required columns
+        try:
+            df = pd.read_csv(csv_path)
+            
+            # Apply column mappings
+            cfg = get_config()
+            mappings = cfg.get("csv_column_mapping", {})
+            for target_col, source_candidates in mappings.items():
+                if not isinstance(source_candidates, list):
+                    source_candidates = [source_candidates]
+                for source_col in source_candidates:
+                    if source_col in df.columns:
+                        if target_col == "title" and "Title" not in df.columns:
+                            df.rename(columns={source_col: "Title"}, inplace=True)
+                        break
+            
+            if "Title" not in df.columns:
+                ConsoleUI.print_error("CSV must have a 'Title' column (or mapped equivalent)")
+                return False
+            
+            ConsoleUI.print_success(f"Found {len(df)} works in CSV")
+            self.config.csv_path = csv_path
+            return True
+            
+        except Exception as e:
+            ConsoleUI.print_error(f"Error reading CSV: {e}")
+            return False
+    
+    def configure_single_mode(self) -> bool:
+        """Configure single work mode.
+        
+        Returns:
+            True if configured, False to go back
+        """
+        ConsoleUI.print_info("SINGLE WORK DOWNLOAD")
+        print("  Enter details for the work you want to download.\n")
+        
+        title = ConsoleUI.prompt_input("Work title", required=True)
+        if not title:
+            return False
+        
+        creator = ConsoleUI.prompt_input("Creator/Author (optional)")
+        entry_id = ConsoleUI.prompt_input("Entry ID (optional)", default="W0001")
+        
+        self.config.single_title = title
+        self.config.single_creator = creator if creator else None
+        self.config.single_entry_id = entry_id if entry_id else "W0001"
+        
+        return True
+    
+    def configure_collection_mode(self) -> bool:
+        """Configure predefined collection mode.
+        
+        Returns:
+            True if configured, False to go back
+        """
+        # Look for predefined collections (CSV files with special names or in a collections folder)
+        collections = []
+        
+        # Check root directory for sample files
+        for csv_file in Path(".").glob("*.csv"):
+            name = csv_file.stem
+            try:
+                df = pd.read_csv(csv_file)
+                count = len(df)
+                collections.append((str(csv_file), f"{name} ({count} works)"))
+            except Exception:
+                continue
+        
+        # Check for collections directory
+        collections_dir = Path("collections")
+        if collections_dir.exists():
+            for csv_file in collections_dir.glob("*.csv"):
+                name = csv_file.stem
+                try:
+                    df = pd.read_csv(csv_file)
+                    count = len(df)
+                    collections.append((str(csv_file), f"{name} ({count} works)"))
+                except Exception:
+                    continue
+        
+        if not collections:
+            ConsoleUI.print_warning("No predefined collections found.")
+            ConsoleUI.print_info("Place CSV files in the current directory or 'collections/' folder.")
+            return False
+        
+        result = ConsoleUI.prompt_select(
+            "Select a collection to download:",
+            collections,
+            allow_back=True
+        )
+        
+        if result:
+            self.config.collection_name = result
+            self.config.csv_path = result
+            return True
+        return False
+    
+    def configure_output(self) -> bool:
+        """Configure output directory.
+        
+        Returns:
+            True if configured, False to go back
+        """
+        general = get_general_config()
+        default_output = general.get("default_output_dir", "downloaded_works")
+        
+        output_dir = ConsoleUI.prompt_input(
+            "Output directory",
+            default=default_output
+        )
+        
+        if not output_dir:
+            output_dir = default_output
+        
+        self.config.output_dir = output_dir
+        return True
+    
+    def configure_options(self) -> bool:
+        """Configure additional options.
+        
+        Returns:
+            True if configured, False to go back
+        """
+        ConsoleUI.print_info("ADDITIONAL OPTIONS")
+        print()
+        
+        # Dry run option
+        self.config.dry_run = ConsoleUI.prompt_yes_no(
+            "Dry run (search only, no downloads)?",
+            default=False
+        )
+        
+        # Log level
+        log_options = [
+            ("INFO", "INFO — Standard logging (recommended)"),
+            ("DEBUG", "DEBUG — Verbose logging for troubleshooting"),
+            ("WARNING", "WARNING — Only show warnings and errors"),
+        ]
+        
+        result = ConsoleUI.prompt_select(
+            "Select logging level:",
+            log_options,
+            allow_back=True
+        )
+        
+        if result:
+            self.config.log_level = result
+            return True
+        return False
+    
+    def display_summary(self) -> bool:
+        """Display configuration summary and confirm.
+        
+        Returns:
+            True to proceed, False to go back
+        """
+        ConsoleUI.print_header("CONFIGURATION SUMMARY", "Review your settings")
+        
+        print(f"  {ConsoleUI.BOLD}Mode:{ConsoleUI.RESET} {self.config.mode.upper()}")
+        
+        if self.config.mode == "csv":
+            print(f"  {ConsoleUI.BOLD}CSV File:{ConsoleUI.RESET} {self.config.csv_path}")
+        elif self.config.mode == "single":
+            print(f"  {ConsoleUI.BOLD}Title:{ConsoleUI.RESET} {self.config.single_title}")
+            if self.config.single_creator:
+                print(f"  {ConsoleUI.BOLD}Creator:{ConsoleUI.RESET} {self.config.single_creator}")
+        elif self.config.mode == "collection":
+            print(f"  {ConsoleUI.BOLD}Collection:{ConsoleUI.RESET} {self.config.collection_name}")
+        
+        print(f"  {ConsoleUI.BOLD}Output Directory:{ConsoleUI.RESET} {self.config.output_dir}")
+        print(f"  {ConsoleUI.BOLD}Dry Run:{ConsoleUI.RESET} {'Yes' if self.config.dry_run else 'No'}")
+        print(f"  {ConsoleUI.BOLD}Log Level:{ConsoleUI.RESET} {self.config.log_level}")
+        
+        print()
+        return ConsoleUI.prompt_yes_no("Proceed with these settings?", default=True)
+    
+    def run_workflow(self) -> Optional[DownloadConfiguration]:
+        """Run the interactive configuration workflow.
+        
+        Returns:
+            DownloadConfiguration if completed, None if cancelled
+        """
+        self.display_welcome()
+        self.display_provider_status()
+        
+        # State machine for navigation
+        current_step = "mode"
+        
+        while True:
+            try:
+                if current_step == "mode":
+                    if self.configure_mode():
+                        current_step = f"configure_{self.config.mode}"
+                    else:
+                        return None
+                
+                elif current_step == "configure_csv":
+                    if self.configure_csv_mode():
+                        current_step = "output"
+                    else:
+                        current_step = "mode"
+                
+                elif current_step == "configure_single":
+                    if self.configure_single_mode():
+                        current_step = "output"
+                    else:
+                        current_step = "mode"
+                
+                elif current_step == "configure_collection":
+                    if self.configure_collection_mode():
+                        current_step = "output"
+                    else:
+                        current_step = "mode"
+                
+                elif current_step == "output":
+                    if self.configure_output():
+                        current_step = "options"
+                    else:
+                        current_step = f"configure_{self.config.mode}"
+                
+                elif current_step == "options":
+                    if self.configure_options():
+                        current_step = "summary"
+                    else:
+                        current_step = "output"
+                
+                elif current_step == "summary":
+                    if self.display_summary():
+                        return self.config
+                    else:
+                        current_step = "options"
+                
+            except KeyboardInterrupt:
+                print(f"\n{ConsoleUI.YELLOW}Operation cancelled.{ConsoleUI.RESET}")
+                return None
+
+
+# =============================================================================
+# Processing Functions
+# =============================================================================
+
+def _normalize_csv_columns(df: pd.DataFrame, config_path: str, log: logging.Logger) -> pd.DataFrame:
+    """Normalize CSV column names based on configured mappings.
+    
+    Args:
+        df: Input DataFrame
+        config_path: Path to configuration JSON file
+        log: Logger instance
+        
+    Returns:
+        DataFrame with normalized column names
+    """
+    import json
+    
+    # Try to load column mappings from config
+    mappings = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                mappings = cfg.get("csv_column_mapping", {})
+        except Exception as e:
+            log.warning("Could not load csv_column_mapping from config: %s", e)
+    
+    # Apply mappings: for each target column, find first matching source column
+    for target_col, source_candidates in mappings.items():
+        if not isinstance(source_candidates, list):
+            source_candidates = [source_candidates]
+        
+        # Check if target already exists
+        if target_col.capitalize() in df.columns:
+            continue
+            
+        # Find first matching source column
+        for source_col in source_candidates:
+            if source_col in df.columns:
+                # Rename to standard format (Title, Creator, entry_id)
+                if target_col == "title":
+                    df.rename(columns={source_col: "Title"}, inplace=True)
+                    log.info("Mapped column '%s' to 'Title'", source_col)
+                elif target_col == "creator":
+                    df.rename(columns={source_col: "Creator"}, inplace=True)
+                    log.info("Mapped column '%s' to 'Creator'", source_col)
+                elif target_col == "entry_id":
+                    df.rename(columns={source_col: "entry_id"}, inplace=True)
+                    log.info("Mapped column '%s' to 'entry_id'", source_col)
+                break
+    
+    return df
+
+
+def process_csv_batch(
+    csv_path: str,
+    output_dir: str,
+    config_path: str,
+    dry_run: bool,
+    log: logging.Logger
+) -> int:
+    """Process works from a CSV file.
+    
+    Args:
+        csv_path: Path to CSV file
+        output_dir: Output directory
+        config_path: Path to config file
+        dry_run: Whether to skip downloads
+        log: Logger instance
+        
+    Returns:
+        Number of works processed
+    """
+    from api import utils
+    
+    # Load and validate CSV
+    if not os.path.exists(csv_path):
+        log.error("CSV file not found at %s", csv_path)
+        return 0
+    
+    try:
+        works_df = pd.read_csv(csv_path)
+    except Exception as e:
+        log.error("Error reading CSV file: %s", e)
+        return 0
+    
+    # Apply column mappings from config
+    works_df = _normalize_csv_columns(works_df, config_path, log)
+    
+    if "Title" not in works_df.columns:
+        log.error("CSV file must contain a 'Title' column or a mapped equivalent.")
+        return 0
+    
+    log.info("Starting downloader. Output directory: %s", output_dir)
+    processed = 0
+    
+    # Process each work in the CSV
+    for index, row in works_df.iterrows():
+        title = row["Title"]
+        creator = row.get("Creator")
+        entry_id = row.get("entry_id") if "entry_id" in works_df.columns else None
+        
+        # Generate fallback entry_id if missing
+        if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
+            entry_id = f"E{index + 1:04d}"
+        
+        if pd.isna(title) or not str(title).strip():
+            log.warning("Skipping row %d due to missing or empty title.", index + 1)
+            continue
+        
+        # Delegate to pipeline
+        pipeline.process_work(
+            str(title),
+            None if pd.isna(creator) else str(creator),
+            None if pd.isna(entry_id) else str(entry_id),
+            output_dir,
+            dry_run=dry_run,
+        )
+        
+        processed += 1
+        log.info("%s", "-" * 50)
+        
+        # Stop early if the global download budget has been exhausted
+        try:
+            if utils.budget_exhausted():
+                log.warning("Download budget exhausted; stopping further processing.")
+                break
+        except Exception:
+            pass
+    
+    return processed
+
+
+def process_single_work(
+    title: str,
+    creator: Optional[str],
+    entry_id: str,
+    output_dir: str,
+    dry_run: bool,
+    log: logging.Logger
+) -> bool:
+    """Process a single work.
+    
+    Args:
+        title: Work title
+        creator: Optional creator name
+        entry_id: Entry identifier
+        output_dir: Output directory
+        dry_run: Whether to skip downloads
+        log: Logger instance
+        
+    Returns:
+        True if processed successfully
+    """
+    log.info("Processing single work: '%s'%s", title, f" by '{creator}'" if creator else "")
+    
+    pipeline.process_work(
+        title,
+        creator,
+        entry_id,
+        output_dir,
+        dry_run=dry_run,
+    )
+    
+    return True
+
+
+def run_interactive_session(config: DownloadConfiguration) -> None:
+    """Execute download session based on interactive configuration.
+    
+    Args:
+        config: DownloadConfiguration from interactive workflow
+    """
+    # Configure logging
+    logging.basicConfig(
+        level=getattr(logging, config.log_level),
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
+    
+    # Reduce noisy retry logs
+    try:
+        logging.getLogger("urllib3").setLevel(logging.ERROR)
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
+    except Exception:
+        pass
+    
+    log = logging.getLogger(__name__)
+    
+    # Set config path
+    os.environ["CHRONO_CONFIG_PATH"] = config.config_path
+    
+    # Load and validate providers
+    providers = pipeline.load_enabled_apis(config.config_path)
+    providers = pipeline.filter_enabled_providers_for_keys(providers)
+    pipeline.ENABLED_APIS = providers
+    
+    if not providers:
+        log.warning("No providers are enabled. Update %s to enable providers.", config.config_path)
+        ConsoleUI.print_error("No providers are enabled. Check your configuration.")
+        return
+    
+    ConsoleUI.print_header("DOWNLOAD IN PROGRESS", "Please wait...")
+    
+    processed = 0
+    
+    if config.mode == "csv" or config.mode == "collection":
+        processed = process_csv_batch(
+            config.csv_path or "",
+            config.output_dir,
+            config.config_path,
+            config.dry_run,
+            log
+        )
+    elif config.mode == "single":
+        if process_single_work(
+            config.single_title or "",
+            config.single_creator,
+            config.single_entry_id or "W0001",
+            config.output_dir,
+            config.dry_run,
+            log
+        ):
+            processed = 1
+    
+    # Handle deferred downloads
+    deferred = pipeline.get_deferred_downloads()
+    if deferred:
+        log.info(
+            "%d download(s) were deferred due to quota limits.",
+            len(deferred)
+        )
+        if ConsoleUI.prompt_yes_no("Process deferred downloads now?", default=False):
+            pipeline.process_deferred_downloads(wait_for_reset=True)
+    
+    # Display completion summary
+    print()
+    ConsoleUI.print_separator("=")
+    ConsoleUI.print_success(f"Download session complete!")
+    print(f"  Works processed: {processed}")
+    print(f"  Output directory: {config.output_dir}")
+    if config.dry_run:
+        print(f"  {ConsoleUI.YELLOW}(Dry run - no files downloaded){ConsoleUI.RESET}")
+    ConsoleUI.print_separator("=")
+
+
+def run_interactive() -> None:
+    """Main entry point for interactive mode."""
+    workflow = InteractiveWorkflow()
+    config = workflow.run_workflow()
+    
+    if config:
+        run_interactive_session(config)
+    else:
+        print("\nDownload cancelled.")

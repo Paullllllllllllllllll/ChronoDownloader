@@ -1,4 +1,9 @@
 {
+  "general": {
+    "interactive_mode": true,
+    "default_output_dir": "downloaded_works",
+    "default_csv_path": "sample_works.csv"
+  },
   "providers": {
     "internet_archive": true,
     "bnf_gallica": true,

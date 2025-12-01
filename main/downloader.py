@@ -1,6 +1,10 @@
 """CLI entry point for ChronoDownloader.
 
-This module provides the command-line interface for the downloader tool.
+This module provides both command-line and interactive interfaces for the downloader.
+Supports two modes:
+1. Interactive mode: Guided workflow with user prompts (interactive_mode: true in config)
+2. CLI mode: Command-line arguments for automation (interactive_mode: false in config)
+
 All orchestration logic has been moved to main/pipeline.py.
 """
 from __future__ import annotations
@@ -10,6 +14,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -18,92 +23,92 @@ if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from main import pipeline
+from main.mode_selector import run_with_mode_detection
+from main.interactive import run_interactive, _normalize_csv_columns
 from api import utils
 
 
-def _normalize_csv_columns(df: pd.DataFrame, config_path: str, logger: logging.Logger) -> pd.DataFrame:
-    """Normalize CSV column names based on configured mappings.
+def create_cli_parser() -> argparse.ArgumentParser:
+    """Create argument parser for CLI mode.
     
-    Args:
-        df: Input DataFrame
-        config_path: Path to configuration JSON file
-        logger: Logger instance
-        
     Returns:
-        DataFrame with normalized column names
+        Configured ArgumentParser for download operations
     """
-    import json
-    
-    # Try to load column mappings from config
-    mappings = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                mappings = cfg.get("csv_column_mapping", {})
-        except Exception as e:
-            logger.warning("Could not load csv_column_mapping from config: %s", e)
-    
-    # Apply mappings: for each target column, find first matching source column
-    for target_col, source_candidates in mappings.items():
-        if not isinstance(source_candidates, list):
-            source_candidates = [source_candidates]
-        
-        # Check if target already exists
-        if target_col.capitalize() in df.columns:
-            continue
-            
-        # Find first matching source column
-        for source_col in source_candidates:
-            if source_col in df.columns:
-                # Rename to standard format (Title, Creator, entry_id)
-                if target_col == "title":
-                    df.rename(columns={source_col: "Title"}, inplace=True)
-                    logger.info("Mapped column '%s' to 'Title'", source_col)
-                elif target_col == "creator":
-                    df.rename(columns={source_col: "Creator"}, inplace=True)
-                    logger.info("Mapped column '%s' to 'Creator'", source_col)
-                elif target_col == "entry_id":
-                    df.rename(columns={source_col: "entry_id"}, inplace=True)
-                    logger.info("Mapped column '%s' to 'entry_id'", source_col)
-                break
-    
-    return df
-
-
-def main() -> None:
-    """Parse CLI arguments and run the downloader pipeline."""
     parser = argparse.ArgumentParser(
-        description="Download historical sources from various digital libraries."
+        description="ChronoDownloader - Historical Document Download Tool (CLI Mode)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Download works from a CSV file
+  python main/downloader.py sample_works.csv --output_dir my_downloads
+
+  # Dry run (search only, no downloads)
+  python main/downloader.py works.csv --dry-run --log-level DEBUG
+
+  # Use a different config file
+  python main/downloader.py works.csv --config config_small.json
+
+  # Force interactive mode
+  python main/downloader.py --interactive
+        """
     )
+    
+    # Positional argument (optional in interactive mode)
     parser.add_argument(
         "csv_file",
-        help="Path to the CSV file containing works to download. Must have a 'Title' column. Optional 'Creator' column."
+        nargs="?",
+        default=None,
+        help="Path to the CSV file containing works to download. Must have a 'Title' column."
     )
+    
     parser.add_argument(
         "--output_dir",
         default="downloaded_works",
         help="Directory to save downloaded files."
     )
+    
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run searches and create folders, but skip downloads."
     )
+    
     parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level"
     )
+    
     parser.add_argument(
         "--config",
         default="config.json",
         help="Path to JSON config file to enable/disable providers."
     )
     
-    args = parser.parse_args()
+    # Mode override flags
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Force interactive mode regardless of config setting."
+    )
+    
+    parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="Force CLI mode regardless of config setting."
+    )
+    
+    return parser
 
+
+def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
+    """Run the downloader in CLI mode.
+    
+    Args:
+        args: Parsed command-line arguments
+        config: Configuration dictionary
+    """
     # Configure base logging
     logging.basicConfig(
         level=getattr(logging, args.log_level),
@@ -132,6 +137,11 @@ def main() -> None:
     
     if not providers:
         logger.warning("No providers are enabled. Update %s to enable providers.", args.config)
+        return
+
+    # Validate CSV file argument
+    if not args.csv_file:
+        logger.error("CSV file path is required in CLI mode. Use --interactive for guided setup.")
         return
 
     # Load and validate CSV
@@ -200,6 +210,43 @@ def main() -> None:
         pipeline.process_deferred_downloads(wait_for_reset=True)
     
     logger.info("Downloader finished.")
+
+
+def main() -> None:
+    """Main entry point supporting both interactive and CLI modes."""
+    try:
+        # Use centralized mode detection
+        config, interactive_mode, args = run_with_mode_detection(
+            interactive_handler=run_interactive,
+            cli_handler=run_cli,
+            parser_factory=create_cli_parser,
+            script_name="downloader"
+        )
+        
+        # Check for explicit mode override flags
+        if args:
+            if args.interactive:
+                interactive_mode = True
+            elif args.cli:
+                interactive_mode = False
+        
+        # Route to appropriate handler
+        if interactive_mode:
+            run_interactive()
+        else:
+            if args is None:
+                # This shouldn't happen, but handle gracefully
+                print("Error: CLI mode requires arguments. Use --interactive for guided setup.")
+                sys.exit(1)
+            run_cli(args, config)
+            
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
+        sys.exit(0)
+    except Exception as e:
+        logging.exception("Unexpected error: %s", e)
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

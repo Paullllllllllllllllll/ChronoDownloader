@@ -37,6 +37,7 @@ Meant to be used in conjunction with [ChronoMiner](https://github.com/Paulllllll
 - Rate Limiting: Built-in per-provider rate limiting with exponential backoff to respect API quotas
 - Robust Error Handling: Automatic retries, fallback providers, and comprehensive logging
 - Batch Processing: Process CSV files with hundreds or thousands of works efficiently with proven workflows for large-scale operations
+- Dual-Mode Operation: Interactive guided workflow or CLI automation via configuration toggle
 - Metadata Preservation: Save search results, manifests, and selection decisions for auditing
 - Performance Optimizations: Internet Archive PDF-first strategy with IIIF fallback for 60% faster downloads
 
@@ -77,8 +78,11 @@ pip install -r requirements.txt
 export EUROPEANA_API_KEY=your_key_here  # Linux/macOS
 export GOOGLE_BOOKS_API_KEY=your_key_here
 
-# Run with the sample CSV
-python main/downloader.py sample_works.csv --output_dir my_downloads
+# Run in interactive mode (default)
+python main/downloader.py
+
+# Or run with a CSV file in CLI mode
+python main/downloader.py --cli sample_works.csv --output_dir my_downloads
 
 # Check results
 ls my_downloads
@@ -174,14 +178,33 @@ ChronoDownloader uses a JSON configuration file (`config.json` by default) to co
 
 ### Configuration Structure
 
-The configuration file has six main sections:
+The configuration file has seven main sections:
 
-1. `providers`: Enable/disable specific providers
-2. `provider_settings`: Per-provider rate limiting and behavior
-3. `download`: Download preferences (PDF vs images, metadata, etc.)
-4. `download_limits`: Budget constraints to prevent runaway downloads
-5. `selection`: Candidate selection and matching strategy
-6. `naming`: Output folder and file naming conventions
+1. `general`: Global settings including interactive/CLI mode toggle
+2. `providers`: Enable/disable specific providers
+3. `provider_settings`: Per-provider rate limiting and behavior
+4. `download`: Download preferences (PDF vs images, metadata, etc.)
+5. `download_limits`: Budget constraints to prevent runaway downloads
+6. `selection`: Candidate selection and matching strategy
+7. `naming`: Output folder and file naming conventions
+
+### 0. General Settings
+
+```json
+{
+  "general": {
+    "interactive_mode": true,
+    "default_output_dir": "downloaded_works",
+    "default_csv_path": "sample_works.csv"
+  }
+}
+```
+
+General Settings Parameters:
+
+- `interactive_mode`: When `true`, launches interactive workflow with guided prompts. When `false`, uses CLI mode requiring command-line arguments.
+- `default_output_dir`: Default output directory used in interactive mode
+- `default_csv_path`: Default CSV file suggested in interactive mode
 
 ### 1. Enable/Disable Providers
 
@@ -438,14 +461,49 @@ python main/downloader.py my_books.csv --config config_small.json
 
 ### Command-Line Options
 
-Required:
-- `csv_file`: Path to CSV file with works to download (must have Title column)
+Positional:
+- `csv_file`: Path to CSV file with works to download (required in CLI mode, optional in interactive mode)
 
 Optional:
 - `--output_dir DIR`: Output directory (default: downloaded_works)
 - `--dry-run`: Search and score candidates without downloading
 - `--log-level LEVEL`: Set logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL; default: INFO)
 - `--config PATH`: Path to configuration JSON file (default: config.json)
+- `--interactive`: Force interactive mode regardless of config setting
+- `--cli`: Force CLI mode regardless of config setting
+
+### Interactive Mode
+
+When `interactive_mode` is `true` in config (default), running `python main/downloader.py` launches a guided workflow:
+
+1. **Mode Selection**: Choose between CSV batch, single work, or predefined collection
+2. **Source Configuration**: Specify CSV path or enter work details manually
+3. **Output Settings**: Configure output directory
+4. **Options**: Set dry-run, logging level
+5. **Confirmation**: Review and confirm before processing
+
+Interactive mode features:
+- Visual display of enabled/disabled providers
+- Navigation with back/quit options at each step
+- Input validation with helpful error messages
+- Processing summary on completion
+
+Force interactive mode with `--interactive` flag even when config says CLI:
+```bash
+python main/downloader.py --interactive
+```
+
+### CLI Mode
+
+When `interactive_mode` is `false` or using `--cli` flag, requires command-line arguments:
+
+```bash
+# Basic usage
+python main/downloader.py --cli sample_works.csv
+
+# With options
+python main/downloader.py --cli works.csv --output_dir results --dry-run --log-level DEBUG
+```
 
 ### Programmatic Usage
 
@@ -693,7 +751,9 @@ ChronoDownloader/
 ├── main/                         # CLI and orchestration
 │   ├── pipeline.py              # Core orchestration logic
 │   ├── selection.py             # Candidate collection, scoring, and selection
-│   └── downloader.py            # CLI entry point
+│   ├── mode_selector.py         # Mode detection (interactive vs CLI)
+│   ├── interactive.py           # Interactive workflow UI
+│   └── downloader.py            # Unified entry point (CLI + interactive)
 ├── config.json                   # Main configuration file
 ├── requirements.txt              # Python dependencies
 ├── sample_works.csv              # Example input
@@ -717,6 +777,9 @@ ChronoDownloader/
 **Orchestration** (`main/`):
 - `pipeline.py`: Provider loading, API key validation, work directory creation, metadata persistence, download coordination with fallback
 - `selection.py`: Candidate collection strategies (sequential/collect-and-select), fuzzy matching scoring, best candidate selection
+- `mode_selector.py`: Dual-mode detection (interactive vs CLI) based on config and CLI flags
+- `interactive.py`: Interactive workflow UI with guided prompts, navigation, and session management
+- `downloader.py`: Unified entry point routing to interactive or CLI handlers
 
 **Data Models** (`api/model.py`):
 - SearchResult: Unified search result format with provider metadata
