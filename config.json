@@ -115,11 +115,14 @@
       "network": {
         "delay_ms": 2000,
         "jitter_ms": 500,
-        "max_attempts": 5,
+        "max_attempts": 3,
         "base_backoff_s": 2.0,
         "backoff_multiplier": 2.0,
         "max_backoff_s": 30.0,
         "timeout_s": 30,
+        "circuit_breaker_enabled": true,
+        "circuit_breaker_threshold": 2,
+        "circuit_breaker_cooldown_s": 600.0,
         "headers": { "Referer": "https://books.google.com/" }
       }
     },

@@ -138,6 +138,11 @@ def get_network_config(provider_key: Optional[str]) -> Dict[str, Any]:
     net.setdefault("ssl_error_policy", "fail")
     net.setdefault("dns_retry", False)
     
+    # Circuit breaker defaults
+    net.setdefault("circuit_breaker_enabled", True)
+    net.setdefault("circuit_breaker_threshold", 3)  # Consecutive failures before disabling
+    net.setdefault("circuit_breaker_cooldown_s", 300.0)  # 5 minutes cooldown
+    
     # Ensure headers is a dict if provided
     if not isinstance(net.get("headers", {}), dict):
         net["headers"] = {}

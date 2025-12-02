@@ -35,6 +35,7 @@ Meant to be used in conjunction with [ChronoMiner](https://github.com/Paulllllll
 - IIIF Support: Native support for IIIF Presentation and Image APIs with optimized performance for faster downloads
 - Budget Management: Content-type download budgets (images, PDFs, metadata) with simple GB-based limits
 - Rate Limiting: Built-in per-provider rate limiting with exponential backoff to respect API quotas
+- Adaptive Circuit Breaker: Automatically pauses providers that hit repeated 429s and retries after a cooldown
 - Robust Error Handling: Automatic retries, fallback providers, and comprehensive logging
 - Batch Processing: Process CSV files with hundreds or thousands of works efficiently with proven workflows for large-scale operations
 - Dual-Mode Operation: Interactive guided workflow or CLI automation via configuration toggle
@@ -272,6 +273,10 @@ Network Policy Parameters:
 - `base_backoff_s`: Initial backoff duration for retries (seconds)
 - `backoff_multiplier`: Multiplier for exponential backoff
 - `timeout_s`: Request timeout in seconds
+- `max_backoff_s`: Upper bound for exponential backoff (prevents multi-minute sleeps)
+- `circuit_breaker_enabled`: Turn the circuit breaker on/off per provider (default: true)
+- `circuit_breaker_threshold`: Consecutive failures (typically HTTP 429) before temporarily disabling the provider
+- `circuit_breaker_cooldown_s`: Cooldown window before the provider is tested again in HALF_OPEN state
 
 Provider-Specific Limits:
 
@@ -281,6 +286,33 @@ Provider-Specific Limits:
 - `free_only`: Only download free/public domain works
 - `prefer`: Preferred format (pdf or images)
 - `allow_drm`: Whether to allow DRM-protected content
+- `circuit_breaker_*`: Optional overrides for providers with strict quotas (e.g., Google Books)
+
+#### Example: Google Books Hardened Settings
+
+```json
+"google_books": {
+  "free_only": true,
+  "prefer": "pdf",
+  "allow_drm": false,
+  "max_files": 1000,
+  "network": {
+    "delay_ms": 2000,
+    "jitter_ms": 500,
+    "max_attempts": 3,
+    "base_backoff_s": 2.0,
+    "backoff_multiplier": 2.0,
+    "max_backoff_s": 30.0,
+    "timeout_s": 30,
+    "circuit_breaker_enabled": true,
+    "circuit_breaker_threshold": 2,
+    "circuit_breaker_cooldown_s": 600.0,
+    "headers": { "Referer": "https://books.google.com/" }
+  }
+}
+```
+
+These values slow down request cadence, cap retries, and ensure the circuit breaker disables Google Books for ten minutes after two consecutive 429 responses, letting other providers finish uninterrupted.
 
 ### 3. Download Preferences
 

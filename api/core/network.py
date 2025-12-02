@@ -1,7 +1,7 @@
 """Network utilities for HTTP requests, rate limiting, and session management.
 
 Provides centralized HTTP session with retries, per-provider rate limiting,
-and robust error handling for API calls and file downloads.
+circuit breaker pattern, and robust error handling for API calls and file downloads.
 """
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ import json
 import logging
 import random
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from enum import Enum
 from typing import Dict, Optional, Union
 from urllib.parse import urlparse
 
@@ -23,6 +25,163 @@ from urllib3.util.retry import Retry
 from .config import get_network_config
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Circuit Breaker Pattern
+# =============================================================================
+
+class CircuitState(Enum):
+    """Circuit breaker states."""
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Provider disabled due to failures
+    HALF_OPEN = "half_open"  # Testing if provider recovered
+
+
+@dataclass
+class CircuitBreaker:
+    """Circuit breaker for a single provider.
+    
+    Tracks consecutive failures and temporarily disables providers that are
+    consistently failing (e.g., due to rate limiting).
+    """
+    failure_threshold: int = 3  # Consecutive failures before opening
+    cooldown_seconds: float = 300.0  # How long circuit stays open (5 min default)
+    
+    state: CircuitState = field(default=CircuitState.CLOSED)
+    failure_count: int = field(default=0)
+    last_failure_time: float = field(default=0.0)
+    opened_at: float = field(default=0.0)
+    
+    def record_success(self) -> None:
+        """Record a successful request - resets failure count and closes circuit."""
+        if self.state == CircuitState.HALF_OPEN:
+            logger.info("Circuit breaker: Provider recovered, closing circuit")
+        self.failure_count = 0
+        self.state = CircuitState.CLOSED
+    
+    def record_failure(self, provider: str = "") -> None:
+        """Record a failure (e.g., 429). May open the circuit."""
+        self.failure_count += 1
+        self.last_failure_time = time.monotonic()
+        
+        if self.state == CircuitState.HALF_OPEN:
+            # Failed during test - reopen circuit
+            self.state = CircuitState.OPEN
+            self.opened_at = time.monotonic()
+            logger.warning(
+                "Circuit breaker: %s still failing, reopening circuit for %.0fs",
+                provider or "Provider", self.cooldown_seconds
+            )
+        elif self.failure_count >= self.failure_threshold and self.state == CircuitState.CLOSED:
+            self.state = CircuitState.OPEN
+            self.opened_at = time.monotonic()
+            logger.warning(
+                "Circuit breaker: %s hit %d consecutive failures, disabling for %.0fs",
+                provider or "Provider", self.failure_count, self.cooldown_seconds
+            )
+    
+    def allow_request(self) -> bool:
+        """Check if a request should be allowed.
+        
+        Returns:
+            True if request can proceed, False if circuit is open
+        """
+        if self.state == CircuitState.CLOSED:
+            return True
+        
+        if self.state == CircuitState.OPEN:
+            # Check if cooldown has elapsed
+            elapsed = time.monotonic() - self.opened_at
+            if elapsed >= self.cooldown_seconds:
+                self.state = CircuitState.HALF_OPEN
+                logger.info(
+                    "Circuit breaker: Cooldown elapsed (%.0fs), testing provider",
+                    elapsed
+                )
+                return True
+            return False
+        
+        # HALF_OPEN: allow the test request
+        return True
+    
+    def time_until_retry(self) -> float:
+        """Get seconds until circuit will allow requests again.
+        
+        Returns:
+            Seconds remaining, or 0 if requests are allowed
+        """
+        if self.state != CircuitState.OPEN:
+            return 0.0
+        elapsed = time.monotonic() - self.opened_at
+        return max(0.0, self.cooldown_seconds - elapsed)
+
+
+# Per-provider circuit breakers
+_CIRCUIT_BREAKERS: Dict[str, CircuitBreaker] = {}
+
+
+def get_circuit_breaker(provider_key: Optional[str]) -> Optional[CircuitBreaker]:
+    """Get or create a circuit breaker for a provider.
+    
+    Args:
+        provider_key: Provider identifier
+        
+    Returns:
+        CircuitBreaker instance or None if circuit breaker disabled
+    """
+    if not provider_key:
+        return None
+    
+    net = get_network_config(provider_key)
+    
+    # Check if circuit breaker is enabled for this provider
+    if not net.get("circuit_breaker_enabled", True):
+        return None
+    
+    threshold = int(net.get("circuit_breaker_threshold", 3) or 3)
+    cooldown = float(net.get("circuit_breaker_cooldown_s", 300.0) or 300.0)
+    
+    cb = _CIRCUIT_BREAKERS.get(provider_key)
+    if cb is None:
+        cb = CircuitBreaker(failure_threshold=threshold, cooldown_seconds=cooldown)
+        _CIRCUIT_BREAKERS[provider_key] = cb
+    else:
+        # Update settings if changed
+        cb.failure_threshold = threshold
+        cb.cooldown_seconds = cooldown
+    
+    return cb
+
+
+def is_provider_available(provider_key: Optional[str]) -> bool:
+    """Check if a provider is currently available (circuit not open).
+    
+    Args:
+        provider_key: Provider identifier
+        
+    Returns:
+        True if provider can be used, False if circuit is open
+    """
+    cb = get_circuit_breaker(provider_key)
+    if cb is None:
+        return True
+    return cb.allow_request()
+
+
+def get_provider_cooldown(provider_key: Optional[str]) -> float:
+    """Get remaining cooldown time for a provider.
+    
+    Args:
+        provider_key: Provider identifier
+        
+    Returns:
+        Seconds until provider is available, or 0 if available now
+    """
+    cb = get_circuit_breaker(provider_key)
+    if cb is None:
+        return 0.0
+    return cb.time_until_retry()
 
 # Global session (lazy-initialized)
 _SESSION: Optional[requests.Session] = None
@@ -74,6 +233,11 @@ class RateLimiter:
 
 # Per-provider rate limiter instances
 _RATE_LIMITERS: Dict[str, RateLimiter] = {}
+
+
+# =============================================================================
+# Rate Limiter Functions
+# =============================================================================
 
 
 def get_provider_for_url(url: str) -> Optional[str]:
@@ -194,7 +358,7 @@ def make_request(
     headers: Optional[Dict] = None,
     timeout: int = 15,
 ) -> Optional[Union[Dict, str, bytes]]:
-    """HTTP GET with centralized per-provider pacing and backoff.
+    """HTTP GET with centralized per-provider pacing, backoff, and circuit breaker.
     
     Args:
         url: URL to request
@@ -206,11 +370,21 @@ def make_request(
         - dict for JSON responses
         - str for text/xml/html
         - bytes for other/binary content
-        - None on error
+        - None on error (including circuit breaker open)
     """
     session = get_session()
     provider = get_provider_for_url(url)
     net = get_network_config(provider)
+    
+    # Check circuit breaker before making any requests
+    cb = get_circuit_breaker(provider)
+    if cb and not cb.allow_request():
+        remaining = cb.time_until_retry()
+        logger.warning(
+            "Circuit breaker OPEN for %s; skipping request (retry in %.0fs): %s",
+            provider or "unknown", remaining, url
+        )
+        return None
     
     max_attempts = int(net.get("max_attempts", 5) or 5)
     base_backoff = float(net.get("base_backoff_s", 1.5) or 1.5)
@@ -223,6 +397,9 @@ def make_request(
     verify_default = bool(net.get("verify_ssl", True))
     ssl_policy = str(net.get("ssl_error_policy", "fail") or "fail").lower()
     provider_headers = dict(net.get("headers", {}) or {})
+    
+    # Track if we hit 429 during this request (for circuit breaker)
+    hit_rate_limit = False
     
     # Merge headers: session defaults < provider headers < per-call headers
     req_headers = {}
@@ -271,6 +448,7 @@ def make_request(
                     "429 Too Many Requests for %s; sleeping %.1fs (attempt %d/%d)",
                     url, sleep_s, attempt, max_attempts
                 )
+                hit_rate_limit = True
                 time.sleep(sleep_s)
                 continue
             
@@ -290,6 +468,10 @@ def make_request(
                 return None
             
             resp.raise_for_status()
+            
+            # Success! Record it for circuit breaker
+            if cb:
+                cb.record_success()
             
             # Parse response based on content type
             content_type = resp.headers.get("Content-Type", "").lower()
@@ -376,6 +558,10 @@ def make_request(
             
             logger.error("Request failed for %s: %s", url, e)
             return None
+    
+    # Record failure for circuit breaker if we exhausted retries due to rate limiting
+    if cb and hit_rate_limit:
+        cb.record_failure(provider or "unknown")
     
     logger.error("Giving up after %d attempts for %s", max_attempts, url)
     return None
