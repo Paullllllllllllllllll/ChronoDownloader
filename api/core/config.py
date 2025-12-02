@@ -133,6 +133,7 @@ def get_network_config(provider_key: Optional[str]) -> Dict[str, Any]:
     net.setdefault("max_attempts", 5)
     net.setdefault("base_backoff_s", 1.5)
     net.setdefault("backoff_multiplier", 1.5)
+    net.setdefault("max_backoff_s", 60.0)  # Cap exponential backoff at 60 seconds
     net.setdefault("verify_ssl", True)
     net.setdefault("ssl_error_policy", "fail")
     net.setdefault("dns_retry", False)

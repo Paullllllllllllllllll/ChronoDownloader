@@ -189,6 +189,7 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
     max_attempts = int(net.get("max_attempts", 5) or 5)
     base_backoff = float(net.get("base_backoff_s", 1.5) or 1.5)
     backoff_mult = float(net.get("backoff_multiplier", 1.5) or 1.5)
+    max_backoff = float(net.get("max_backoff_s", 60.0) or 60.0)
     timeout_s = net.get("timeout_s")
     timeout = float(timeout_s) if timeout_s is not None else 30.0
     verify_default = bool(net.get("verify_ssl", True))
@@ -239,7 +240,9 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                                 sleep_s = None
                     
                     if sleep_s is None:
-                        sleep_s = base_backoff * (backoff_mult ** (attempt - 1))
+                        sleep_s = min(base_backoff * (backoff_mult ** (attempt - 1)), max_backoff)
+                    else:
+                        sleep_s = min(sleep_s, max_backoff)
                     
                     logger.warning(
                         "429 Too Many Requests for %s; sleeping %.1fs (attempt %d/%d)",
@@ -251,7 +254,7 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                 
                 # Retry transient 5xx
                 if response.status_code in (500, 502, 503, 504):
-                    sleep_s = base_backoff * (backoff_mult ** (attempt - 1))
+                    sleep_s = min(base_backoff * (backoff_mult ** (attempt - 1)), max_backoff)
                     logger.warning(
                         "%s for %s; sleeping %.1fs (attempt %d/%d)",
                         response.status_code, url, sleep_s, attempt, max_attempts
