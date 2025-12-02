@@ -1,7 +1,14 @@
+"""BnF Gallica API connector for ChronoDownloader.
+
+Provides search and download functionality for the Bibliothèque nationale de France's
+Gallica digital library using SRU (Search/Retrieve via URL) and IIIF APIs.
+
+Gallica hosts millions of digitized documents including books, manuscripts,
+maps, periodicals, and more from the BnF collections.
+"""
 import logging
 import re
 import xml.etree.ElementTree as ET
-from typing import List, Union
 
 from .utils import (
     save_json,
@@ -22,7 +29,7 @@ SRU_BASE_URL = "https://gallica.bnf.fr/SRU"
 IIIF_MANIFEST_BASE_URL = "https://gallica.bnf.fr/iiif/ark:/12148/{ark_id}/manifest.json"
 
 
-def search_gallica(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_gallica(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search Gallica using its SRU API.
     
     Args:
@@ -51,7 +58,7 @@ def search_gallica(title: str, creator: str | None = None, max_results: int = 3)
     if not response_text or not isinstance(response_text, str):
         logger.warning("Gallica SRU request did not return valid XML text.")
         return []
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     try:
         namespaces = {
             'sru': 'http://www.loc.gov/zing/srw/',
@@ -86,7 +93,7 @@ def search_gallica(title: str, creator: str | None = None, max_results: int = 3)
     return results
 
 
-def download_gallica_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_gallica_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download Gallica IIIF manifest and full-size page images.
 
     - Fetches IIIF manifest (usually v2; handle v3 structures too).
@@ -127,7 +134,7 @@ def download_gallica_work(item_data: Union[SearchResult, dict], output_folder: s
         logger.exception("Gallica: error while downloading manifest renderings for %s", ark_id)
 
     # Extract image service bases from IIIF v2 or v3
-    image_service_bases: List[str] = extract_image_service_bases(manifest)
+    image_service_bases: list[str] = extract_image_service_bases(manifest)
 
     if not image_service_bases:
         logger.info("No IIIF image services found in Gallica manifest for %s", ark_id)

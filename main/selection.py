@@ -309,21 +309,18 @@ def _collect_candidates_sequential(
     creator_weight: float,
     max_candidates_per_provider: int
 ) -> List[SearchResult]:
-    """Sequential candidate collection (original behavior)."""
+    """Sequential candidate collection (collect-and-select mode without early exit).
+    
+    This is a simplified version of collect_candidates_sequential that doesn't
+    perform early exit on first match - it always collects from all providers.
+    """
     all_candidates: List[SearchResult] = []
     
-    for pkey, search_func, download_func, pname in provider_list:
+    for pkey, search_func, _download_func, pname in provider_list:
         logger.info("--- Searching on %s for '%s' ---", pname, title)
         try:
             max_results = get_max_results_for_provider(pkey, max_candidates_per_provider)
-            
-            if creator:
-                try:
-                    results = search_func(title, creator=creator, max_results=max_results)
-                except TypeError:
-                    results = search_func(title, max_results=max_results)
-            else:
-                results = search_func(title, max_results=max_results)
+            results = call_search_function(search_func, title, creator, max_results)
             
             if not results:
                 logger.info("No items found for '%s' on %s.", title, pname)

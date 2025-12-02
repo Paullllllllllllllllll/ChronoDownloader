@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
 
 # Provider slug mappings for abbreviated provider keys
 PROVIDER_SLUGS = {
@@ -129,7 +128,7 @@ def _split_name_and_suffixes(name: str) -> tuple[str, str]:
     return base_no_ext, ext
 
 
-def get_provider_slug(pref_key: Optional[str], url_provider: Optional[str]) -> str:
+def get_provider_slug(pref_key: str | None, url_provider: str | None) -> str:
     """Get a short slug identifier for a provider.
     
     Args:
@@ -162,7 +161,7 @@ def get_provider_abbrev(provider_key: str) -> str:
 
 
 def build_work_directory_name(
-    entry_id: Optional[str],
+    entry_id: str | None,
     title: str,
     max_len: int = 80
 ) -> str:

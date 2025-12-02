@@ -6,7 +6,6 @@ to track the current work ID, entry ID, provider key, and naming stem for file g
 from __future__ import annotations
 
 import threading
-from typing import Dict, Optional, Tuple
 
 # Thread-local storage for current work context
 _TLS = threading.local()
@@ -27,13 +26,13 @@ def _init_tls() -> None:
 
 
 # Work ID context
-def set_current_work(work_id: Optional[str]) -> None:
+def set_current_work(work_id: str | None) -> None:
     """Set the current work ID in thread-local storage."""
     _init_tls()
     _TLS.work_id = work_id
 
 
-def get_current_work() -> Optional[str]:
+def get_current_work() -> str | None:
     """Get the current work ID from thread-local storage."""
     _init_tls()
     return getattr(_TLS, "work_id", None)
@@ -46,13 +45,13 @@ def clear_current_work() -> None:
 
 
 # Entry ID context
-def set_current_entry(entry_id: Optional[str]) -> None:
+def set_current_entry(entry_id: str | None) -> None:
     """Set the current entry ID in thread-local storage."""
     _init_tls()
     _TLS.entry_id = entry_id
 
 
-def get_current_entry() -> Optional[str]:
+def get_current_entry() -> str | None:
     """Get the current entry ID from thread-local storage."""
     _init_tls()
     return getattr(_TLS, "entry_id", None)
@@ -65,13 +64,13 @@ def clear_current_entry() -> None:
 
 
 # Provider key context
-def set_current_provider(provider_key: Optional[str]) -> None:
+def set_current_provider(provider_key: str | None) -> None:
     """Set the current provider key in thread-local storage."""
     _init_tls()
     _TLS.provider_key = provider_key
 
 
-def get_current_provider() -> Optional[str]:
+def get_current_provider() -> str | None:
     """Get the current provider key from thread-local storage."""
     _init_tls()
     return getattr(_TLS, "provider_key", None)
@@ -84,13 +83,13 @@ def clear_current_provider() -> None:
 
 
 # Name stem context
-def set_current_name_stem(stem: Optional[str]) -> None:
+def set_current_name_stem(stem: str | None) -> None:
     """Set the current naming stem in thread-local storage."""
     _init_tls()
     _TLS.name_stem = stem
 
 
-def get_current_name_stem() -> Optional[str]:
+def get_current_name_stem() -> str | None:
     """Get the current naming stem from thread-local storage."""
     _init_tls()
     return getattr(_TLS, "name_stem", None)
@@ -103,7 +102,7 @@ def clear_current_name_stem() -> None:
 
 
 # Counters for file sequencing
-def get_counters() -> Dict[Tuple[str, str, str], int]:
+def get_counters() -> dict[tuple[str, str, str], int]:
     """Get the per-work file counters dictionary.
     
     Returns:
@@ -121,7 +120,7 @@ def reset_counters() -> None:
     _TLS.counters = {}
 
 
-def increment_counter(key: Tuple[str, str, str]) -> int:
+def increment_counter(key: tuple[str, str, str]) -> int:
     """Increment and return the counter for a specific file type.
     
     Args:

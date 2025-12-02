@@ -10,10 +10,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -73,21 +75,205 @@ logger = logging.getLogger(__name__)
 # Expose budget singleton for backward compatibility
 _BUDGET = get_budget()
 
+# Content-type to extension mapping
+_CONTENT_TYPE_EXT_MAP = {
+    "application/pdf": ".pdf",
+    "application/epub+zip": ".epub",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/jp2": ".jp2",
+    "text/plain": ".txt",
+    "text/html": ".html",
+    "application/json": ".json",
+}
 
-# Legacy internal helpers for backward compatibility
-def _prefer_pdf_over_images() -> bool:
-    """DEPRECATED: Use prefer_pdf_over_images() instead."""
-    return prefer_pdf_over_images()
+# Image file extensions for type classification
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".gif", ".bmp", ".webp"}
+
+# Anna's Archive login/error page markers
+_ANNAS_LOGIN_MARKERS = (
+    "<title>log in / register",
+    "<title>login",
+    "member login",
+    "please log in",
+    "__darkreader__",
+)
 
 
-def _overwrite_existing() -> bool:
-    """DEPRECATED: Use overwrite_existing() instead."""
-    return overwrite_existing()
+def _infer_extension_from_content_type(content_type: str) -> str:
+    """Infer file extension from Content-Type header.
+    
+    Args:
+        content_type: Content-Type header value
+        
+    Returns:
+        File extension (e.g., '.pdf') or empty string if unknown
+    """
+    ct_lower = content_type.lower()
+    for mime, ext in _CONTENT_TYPE_EXT_MAP.items():
+        if mime in ct_lower:
+            return ext
+    return ""
 
 
-def _include_metadata() -> bool:
-    """DEPRECATED: Use include_metadata() instead."""
-    return include_metadata()
+def _should_reject_html_response(
+    content_type: str,
+    url: str,
+    content_length: int | None = None,
+) -> tuple[bool, str]:
+    """Check if an HTML response should be rejected based on URL expectations.
+    
+    Args:
+        content_type: Response Content-Type header
+        url: Request URL
+        content_length: Optional Content-Length value
+        
+    Returns:
+        Tuple of (should_reject, reason)
+    """
+    if "text/html" not in content_type.lower():
+        return False, ""
+    
+    parsed = urlparse(url)
+    url_lower = url.lower()
+    path_lower = parsed.path.lower()
+    
+    # Check if URL suggests PDF/EPUB content
+    suggests_pdf = ".pdf" in path_lower or "output=pdf" in url_lower or "download" in url_lower
+    suggests_epub = ".epub" in path_lower or "output=epub" in url_lower
+    
+    if suggests_pdf or suggests_epub:
+        return True, "URL suggests PDF/EPUB but server returned HTML (likely error page)"
+    
+    # Check Anna's Archive specific patterns
+    if "annas-archive" in url_lower:
+        if content_length and 170000 < content_length < 185000:
+            return True, "Anna's Archive HTML page likely login/error page (~180KB)"
+    
+    return False, ""
+
+
+def _validate_file_magic_bytes(filepath: str, ext: str) -> tuple[bool, str]:
+    """Validate downloaded file by checking magic bytes.
+    
+    Args:
+        filepath: Path to downloaded file
+        ext: File extension (lowercase, with dot)
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if ext not in (".pdf", ".epub"):
+        return True, ""
+    
+    try:
+        with open(filepath, "rb") as f:
+            first_bytes = f.read(512)
+        
+        # Check for HTML content masquerading as PDF/EPUB
+        is_html = b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower()
+        
+        if ext == ".pdf":
+            if not first_bytes.startswith(b"%PDF-"):
+                if is_html:
+                    return False, "File claims to be PDF but contains HTML"
+        elif ext == ".epub":
+            if not first_bytes.startswith(b"PK\x03\x04"):
+                if is_html:
+                    return False, "File claims to be EPUB but contains HTML"
+        
+        return True, ""
+    except Exception as e:
+        logger.warning("Error validating file %s: %s", filepath, e)
+        return True, ""  # Don't reject on validation error
+
+
+def _validate_html_not_login_page(filepath: str, url: str, provider: str | None) -> tuple[bool, str]:
+    """Check if HTML file is a login/error page that should be rejected.
+    
+    Args:
+        filepath: Path to HTML file
+        url: Original URL
+        provider: Provider key
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    url_lower = url.lower()
+    provider_lower = (provider or "").lower()
+    
+    # Only check Anna's Archive pages
+    if "annas-archive" not in url_lower and "annas-archive" not in provider_lower:
+        return True, ""
+    
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            html_content = f.read(2048).lower()
+        
+        if any(marker in html_content for marker in _ANNAS_LOGIN_MARKERS):
+            return False, "Anna's Archive login/error page detected"
+        
+        return True, ""
+    except Exception as e:
+        logger.warning("Error validating HTML file %s: %s", filepath, e)
+        return True, ""
+
+
+def _determine_target_directory(
+    folder_path: str,
+    ext: str,
+    allowed_exts: list | None,
+    save_disallowed_to_metadata: bool,
+) -> tuple[str | None, str]:
+    """Determine target directory based on extension whitelist.
+    
+    Args:
+        folder_path: Base folder path
+        ext: File extension (lowercase, with dot)
+        allowed_exts: List of allowed extensions or None/empty for no filtering
+        save_disallowed_to_metadata: Whether to save disallowed files to metadata
+        
+    Returns:
+        Tuple of (target_directory, log_message). target_directory is None if should skip.
+    """
+    if allowed_exts and ext not in allowed_exts:
+        if save_disallowed_to_metadata:
+            return os.path.join(folder_path, "metadata"), f"Extension {ext} not in allowed list; saving to metadata folder"
+        return None, f"Extension {ext} not in allowed list; skipping download"
+    
+    return os.path.join(folder_path, "objects"), ""
+
+
+def _build_standardized_filename(
+    ext: str,
+    stem: str,
+    prov_slug: str,
+) -> str:
+    """Build a standardized filename with provider slug and sequence number.
+    
+    Args:
+        ext: File extension (lowercase, with dot)
+        stem: Base name stem
+        prov_slug: Provider slug
+        
+    Returns:
+        Sanitized filename
+    """
+    # Determine type key for numbering
+    type_key = "image" if ext in _IMAGE_EXTENSIONS else (ext.lstrip(".") or "bin")
+    
+    # Get sequence number
+    key = (stem, prov_slug, type_key)
+    seq = increment_counter(key)
+    
+    # Build filename based on type
+    if type_key == "image":
+        safe_base = f"{stem}_{prov_slug}_image_{seq:03d}"
+    else:
+        safe_base = f"{stem}_{prov_slug}" if seq <= 1 else f"{stem}_{prov_slug}_{seq}"
+    
+    return sanitize_filename(f"{safe_base}{ext}")
 
 
 def download_iiif_renderings(
@@ -169,7 +355,7 @@ def download_iiif_renderings(
     return count
 
 
-def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
+def download_file(url: str, folder_path: str, filename: str) -> str | None:
     """Download a file with centralized rate limiting, retries, and budget enforcement.
 
     Args:
@@ -196,70 +382,156 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
     ssl_policy = str(net.get("ssl_error_policy", "fail") or "fail").lower()
     provider_headers = dict(net.get("headers", {}) or {})
     
-    # Merge headers: session defaults < provider headers
-    req_headers = {}
-    if provider_headers:
-        req_headers.update({str(k): str(v) for k, v in provider_headers.items() if v is not None})
+    req_headers = {str(k): str(v) for k, v in provider_headers.items() if v is not None} if provider_headers else {}
     
     rl = _get_rate_limiter(provider)
     work_id = _current_work_id()
     
-    # If the download budget has already been exhausted globally, avoid any HTTP requests
     if _BUDGET.exhausted():
         logger.warning("Download budget exhausted; skipping %s", url)
         return None
     
-    # Pre-check file-count limits so we don't make a request we can't save
     if not _BUDGET.allow_new_file(provider, work_id):
         logger.warning("Download budget (files) exceeded; skipping %s", url)
         return None
     
+    def _process_response(response: requests.Response, is_insecure_retry: bool = False) -> str | None:
+        """Process a successful response and save the file."""
+        content_type = response.headers.get("Content-Type", "")
+        
+        # Check for HTML rejection
+        cl_header = response.headers.get("Content-Length")
+        content_len = int(cl_header) if cl_header else None
+        should_reject, reject_reason = _should_reject_html_response(content_type, url, content_len)
+        if should_reject:
+            log_suffix = " (insecure retry)" if is_insecure_retry else ""
+            logger.warning("Rejecting download%s: %s: %s", log_suffix, reject_reason, url)
+            return None
+        
+        # Determine file extension
+        cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
+        parsed = urlparse(url)
+        inferred_ext = (
+            Path(parsed.path).suffix
+            or _infer_extension_from_content_type(content_type)
+            or Path(cd_name or "").suffix
+            or Path(filename or "").suffix
+            or ".bin"
+        ).lower()
+        
+        stem = _current_name_stem() or to_snake_case(filename) or "object"
+        prov_slug = _provider_slug(_current_provider_key(), provider)
+        
+        # Determine target directory
+        dl_cfg = get_download_config()
+        allowed_exts = dl_cfg.get("allowed_object_extensions", [])
+        save_disallowed = dl_cfg.get("save_disallowed_to_metadata", True)
+        
+        target_dir, log_msg = _determine_target_directory(folder_path, inferred_ext, allowed_exts, save_disallowed)
+        if target_dir is None:
+            logger.info(log_msg)
+            return None
+        if log_msg:
+            logger.info(log_msg)
+        
+        os.makedirs(target_dir, exist_ok=True)
+        
+        # Build filename
+        safe_name = _build_standardized_filename(inferred_ext, stem, prov_slug)
+        filepath = os.path.join(target_dir, safe_name)
+        
+        # Check overwrite setting
+        if not overwrite_existing() and os.path.exists(filepath):
+            logger.info("File already exists, skipping: %s", filepath)
+            return filepath
+        
+        # Budget checks
+        if not _BUDGET.allow_new_file(provider, work_id):
+            logger.warning("Download budget (files) exceeded; skipping %s", url)
+            return None
+        
+        content_len_int = int(cl_header) if cl_header else 0
+        if content_len_int and not _BUDGET.allow_bytes(provider, work_id, content_len_int):
+            logger.warning("Download budget (bytes) would be exceeded by %s (%d bytes); skipping.", url, content_len_int)
+            return None
+        
+        # Write file
+        truncated = False
+        with open(filepath, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                if not _BUDGET.add_bytes(provider, work_id, len(chunk)):
+                    logger.error("Download budget exceeded while writing %s; truncating and removing file.", filepath)
+                    truncated = True
+                    break
+                f.write(chunk)
+        
+        if truncated:
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+            return None
+        
+        # Validate file content
+        is_valid, error_msg = _validate_file_magic_bytes(filepath, inferred_ext)
+        if not is_valid:
+            logger.warning("%s; removing: %s", error_msg, filepath)
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+            return None
+        
+        # Validate HTML files
+        if inferred_ext == ".html":
+            is_valid, error_msg = _validate_html_not_login_page(filepath, url, provider)
+            if not is_valid:
+                logger.warning("%s; removing: %s", error_msg, filepath)
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+                return None
+        
+        log_suffix = " (insecure)" if is_insecure_retry else ""
+        logger.info("Downloaded %s -> %s%s", url, filepath, log_suffix)
+        _BUDGET.add_file(provider, work_id)
+        return filepath
+    
+    def _calculate_backoff(attempt: int, retry_after: str | None) -> float:
+        """Calculate sleep duration for retry."""
+        if retry_after:
+            try:
+                return min(float(retry_after), max_backoff)
+            except ValueError:
+                try:
+                    retry_dt = parsedate_to_datetime(retry_after)
+                    return min(max(0.0, (retry_dt - datetime.now(retry_dt.tzinfo)).total_seconds()), max_backoff)
+                except Exception:
+                    pass
+        return min(base_backoff * (backoff_mult ** (attempt - 1)), max_backoff)
+    
     try:
-        insecure_retry_used = False
         verify = verify_default
         
         for attempt in range(1, max_attempts + 1):
-            # Centralized pacing
             if rl:
                 rl.wait()
             
             with session.get(url, stream=True, timeout=timeout, verify=verify, headers=req_headers or None) as response:
-                # Handle rate-limiting explicitly to respect Retry-After
+                # Handle rate limiting
                 if response.status_code == 429:
-                    retry_after = response.headers.get("Retry-After")
-                    sleep_s = None
-                    
-                    if retry_after:
-                        try:
-                            sleep_s = float(retry_after)
-                        except ValueError:
-                            try:
-                                retry_dt = parsedate_to_datetime(retry_after)
-                                sleep_s = max(0.0, (retry_dt - datetime.now(retry_dt.tzinfo)).total_seconds())
-                            except Exception:
-                                sleep_s = None
-                    
-                    if sleep_s is None:
-                        sleep_s = min(base_backoff * (backoff_mult ** (attempt - 1)), max_backoff)
-                    else:
-                        sleep_s = min(sleep_s, max_backoff)
-                    
-                    logger.warning(
-                        "429 Too Many Requests for %s; sleeping %.1fs (attempt %d/%d)",
-                        url, sleep_s, attempt, max_attempts
-                    )
-                    import time
+                    sleep_s = _calculate_backoff(attempt, response.headers.get("Retry-After"))
+                    logger.warning("429 Too Many Requests for %s; sleeping %.1fs (attempt %d/%d)", url, sleep_s, attempt, max_attempts)
                     time.sleep(sleep_s)
                     continue
                 
                 # Retry transient 5xx
                 if response.status_code in (500, 502, 503, 504):
-                    sleep_s = min(base_backoff * (backoff_mult ** (attempt - 1)), max_backoff)
-                    logger.warning(
-                        "%s for %s; sleeping %.1fs (attempt %d/%d)",
-                        response.status_code, url, sleep_s, attempt, max_attempts
-                    )
-                    import time
+                    sleep_s = _calculate_backoff(attempt, None)
+                    logger.warning("%s for %s; sleeping %.1fs (attempt %d/%d)", response.status_code, url, sleep_s, attempt, max_attempts)
                     time.sleep(sleep_s)
                     continue
                 
@@ -269,340 +541,18 @@ def download_file(url: str, folder_path: str, filename: str) -> Optional[str]:
                     return None
                 
                 response.raise_for_status()
-                
-                # Validate Content-Type to prevent saving HTML error pages as PDFs/EPUBs
-                content_type = response.headers.get("Content-Type", "").lower()
-                from urllib.parse import urlparse
-                parsed_url = urlparse(url)
-                url_suggests_pdf = ".pdf" in parsed_url.path.lower() or "output=pdf" in url.lower() or "download" in url.lower()
-                url_suggests_epub = ".epub" in parsed_url.path.lower() or "output=epub" in url.lower()
-                is_annas_archive = "annas-archive" in url.lower()
-                
-                # Reject HTML when expecting PDF/EPUB
-                if "text/html" in content_type:
-                    if url_suggests_pdf or url_suggests_epub:
-                        logger.warning(
-                            "Rejecting download: URL suggests PDF/EPUB but server returned HTML (likely error page): %s",
-                            url
-                        )
-                        return None
-                    # Also reject Anna's Archive HTML pages (likely login/error pages) unless explicitly allowed
-                    if is_annas_archive:
-                        # Check if this is a very small HTML page (likely error/login page)
-                        cl_header_check = response.headers.get("Content-Length")
-                        try:
-                            content_len_check = int(cl_header_check) if cl_header_check else 0
-                            # Anna's Archive login/error pages are typically ~180KB
-                            if 170000 < content_len_check < 185000:
-                                logger.warning(
-                                    "Rejecting download: Anna's Archive HTML page likely login/error page (~180KB): %s",
-                                    url
-                                )
-                                return None
-                        except Exception:
-                            pass
-                
-                cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
-                
-                # Determine extension and type up front
-                def _infer_ext() -> str:
-                    suffix = Path(parsed_url.path).suffix
-                    if suffix:
-                        return suffix
-                    ct = response.headers.get("Content-Type", "").lower()
-                    ct_map = {
-                        "application/pdf": ".pdf",
-                        "application/epub+zip": ".epub",
-                        "image/jpeg": ".jpg",
-                        "image/jpg": ".jpg",
-                        "image/png": ".png",
-                        "image/jp2": ".jp2",
-                        "text/plain": ".txt",
-                        "text/html": ".html",
-                        "application/json": ".json",
-                    }
-                    for k, v in ct_map.items():
-                        if k in ct:
-                            return v
-                    return ""
-                
-                # Build standardized filename in 'objects/' directory
-                inferred_ext = _infer_ext()
-                ext = inferred_ext or Path(cd_name or "").suffix or Path(filename or "").suffix or ""
-                if not ext:
-                    ext = ".bin"
-                ext = ext.lower()
-
-                stem = _current_name_stem() or to_snake_case(filename) or "object"
-                prov_slug = _provider_slug(_current_provider_key(), provider)
-                
-                # Determine type key for numbering
-                image_exts = {".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".gif", ".bmp", ".webp"}
-                if ext in image_exts:
-                    type_key = "image"
-                else:
-                    type_key = ext.lstrip(".") or "bin"
-
-                # Check if extension is allowed in objects folder
-                dl_cfg = get_download_config()
-                allowed_exts = dl_cfg.get("allowed_object_extensions", [])
-                save_disallowed_to_metadata = dl_cfg.get("save_disallowed_to_metadata", True)
-                
-                # Determine target directory based on extension whitelist
-                if allowed_exts and ext not in allowed_exts:
-                    if save_disallowed_to_metadata:
-                        # Save non-content files (HTML, TXT, etc.) to metadata folder
-                        target_dir = os.path.join(folder_path, "metadata")
-                        logger.info("Extension %s not in allowed list; saving to metadata folder", ext)
-                    else:
-                        # Skip download if not allowed and not saving to metadata
-                        logger.info("Extension %s not in allowed list; skipping download", ext)
-                        return None
-                else:
-                    # Allowed extension or no whitelist configured - save to objects
-                    target_dir = os.path.join(folder_path, "objects")
-                
-                os.makedirs(target_dir, exist_ok=True)
-
-                # Resolve sequence number using context
-                key = (stem, prov_slug, type_key)
-                seq = increment_counter(key)
-
-                if type_key == "image":
-                    safe_base = f"{stem}_{prov_slug}_image_{seq:03d}"
-                else:
-                    # For non-image types, only number when more than one exists
-                    if seq <= 1:
-                        safe_base = f"{stem}_{prov_slug}"
-                    else:
-                        safe_base = f"{stem}_{prov_slug}_{seq}"
-
-                safe_name = sanitize_filename(f"{safe_base}{ext}")
-                filepath = os.path.join(target_dir, safe_name)
-
-                # Respect overwrite setting
-                if not overwrite_existing() and os.path.exists(filepath):
-                    logger.info("File already exists, skipping: %s", filepath)
-                    return filepath
-
-                # Budget pre-checks
-                if not _BUDGET.allow_new_file(provider, work_id):
-                    logger.warning("Download budget (files) exceeded; skipping %s", url)
-                    if _BUDGET.exhausted():
-                        return None
-                    return None
-
-                # If server advertises Content-Length, ensure it fits before downloading
-                cl_header = response.headers.get("Content-Length")
-                try:
-                    content_len = int(cl_header) if cl_header is not None else 0
-                except Exception:
-                    content_len = 0
-                
-                if content_len and not _BUDGET.allow_bytes(provider, work_id, content_len):
-                    logger.warning(
-                        "Download budget (bytes) would be exceeded by %s (%d bytes); skipping.",
-                        url, content_len
-                    )
-                    return None
-                
-                with open(filepath, "wb") as f:
-                    truncated = False
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if not chunk:
-                            continue
-                        # Enforce byte budget dynamically for unknown sizes
-                        if not _BUDGET.add_bytes(provider, work_id, len(chunk)):
-                            logger.error(
-                                "Download budget exceeded while writing %s; truncating and removing file.",
-                                filepath
-                            )
-                            truncated = True
-                            break
-                        f.write(chunk)
-                
-                if truncated:
-                    try:
-                        os.remove(filepath)
-                    except Exception:
-                        pass
-                    return None
-                
-                # Validate file content for PDF/EPUB files to catch misnamed HTML pages
-                if ext.lower() in [".pdf", ".epub"]:
-                    try:
-                        with open(filepath, "rb") as check_f:
-                            first_bytes = check_f.read(512)
-                            # Check for PDF magic bytes
-                            if ext.lower() == ".pdf" and not first_bytes.startswith(b"%PDF-"):
-                                # Check if it's HTML instead
-                                if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
-                                    logger.warning(
-                                        "Downloaded file claims to be PDF but contains HTML; removing: %s",
-                                        filepath
-                                    )
-                                    os.remove(filepath)
-                                    return None
-                            # Check for EPUB (ZIP) magic bytes
-                            elif ext.lower() == ".epub" and not first_bytes.startswith(b"PK\x03\x04"):
-                                # Check if it's HTML instead
-                                if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
-                                    logger.warning(
-                                        "Downloaded file claims to be EPUB but contains HTML; removing: %s",
-                                        filepath
-                                    )
-                                    os.remove(filepath)
-                                    return None
-                    except Exception as ve:
-                        logger.warning("Error validating downloaded file %s: %s", filepath, ve)
-                
-                # Validate HTML files to ensure they're not login/error pages
-                if ext.lower() == ".html":
-                    try:
-                        with open(filepath, "r", encoding="utf-8", errors="ignore") as check_f:
-                            html_content = check_f.read(2048)  # Read first 2KB
-                            # Check for Anna's Archive login/register pages
-                            if "annas-archive" in url.lower() or "annas-archive" in provider.lower():
-                                if any(marker in html_content.lower() for marker in [
-                                    "<title>log in / register",
-                                    "<title>login",
-                                    "member login",
-                                    "please log in",
-                                    "__darkreader__",  # Anna's Archive specific JS
-                                ]):
-                                    logger.warning(
-                                        "Downloaded HTML file appears to be Anna's Archive login/error page; removing: %s",
-                                        filepath
-                                    )
-                                    os.remove(filepath)
-                                    return None
-                    except Exception as ve:
-                        logger.warning("Error validating HTML file %s: %s", filepath, ve)
-                
-                logger.info("Downloaded %s -> %s", url, filepath)
-                # Count file after successful write
-                _BUDGET.add_file(provider, work_id)
-                return filepath
+                return _process_response(response)
         
-        # If we exit the loop without returning, all attempts failed due to 429
         logger.error("Giving up after %d attempts due to rate limiting for %s", max_attempts, url)
         return None
         
     except requests.exceptions.SSLError as e:
-        # Handle SSL errors similarly to make_request
-        if ssl_policy == "retry_insecure_once" and not insecure_retry_used:
+        if ssl_policy == "retry_insecure_once":
             logger.warning("SSL verify failed for %s; retrying once with verify=False due to policy.", url)
             try:
                 with session.get(url, stream=True, timeout=timeout, verify=False, headers=req_headers or None) as response:
                     response.raise_for_status()
-                    
-                    # Validate Content-Type (same as main path)
-                    content_type_ssl = response.headers.get("Content-Type", "").lower()
-                    from urllib.parse import urlparse
-                    parsed_url_ssl = urlparse(url)
-                    url_suggests_pdf_ssl = ".pdf" in parsed_url_ssl.path.lower() or "output=pdf" in url.lower()
-                    url_suggests_epub_ssl = ".epub" in parsed_url_ssl.path.lower() or "output=epub" in url.lower()
-                    is_annas_archive_ssl = "annas-archive" in url.lower()
-                    
-                    if "text/html" in content_type_ssl:
-                        if url_suggests_pdf_ssl or url_suggests_epub_ssl:
-                            logger.warning(
-                                "Rejecting download (insecure retry): URL suggests PDF/EPUB but server returned HTML: %s",
-                                url
-                            )
-                            return None
-                        if is_annas_archive_ssl:
-                            cl_header_ssl = response.headers.get("Content-Length")
-                            try:
-                                content_len_ssl = int(cl_header_ssl) if cl_header_ssl else 0
-                                if 170000 < content_len_ssl < 185000:
-                                    logger.warning(
-                                        "Rejecting download (insecure retry): Anna's Archive HTML page likely login/error page: %s",
-                                        url
-                                    )
-                                    return None
-                            except Exception:
-                                pass
-                    
-                    # Fallback to generic name if needed
-                    cd_name = _filename_from_content_disposition(response.headers.get("Content-Disposition"))
-                    inferred_ext = Path(cd_name or "").suffix or ".bin"
-                    inferred_ext = inferred_ext.lower()
-                    stem = _current_name_stem() or to_snake_case(filename) or "object"
-                    prov_slug = _provider_slug(_current_provider_key(), provider)
-                    
-                    # Check extension whitelist (same as main path)
-                    dl_cfg_ssl = get_download_config()
-                    allowed_exts_ssl = dl_cfg_ssl.get("allowed_object_extensions", [])
-                    save_disallowed_ssl = dl_cfg_ssl.get("save_disallowed_to_metadata", True)
-                    
-                    if allowed_exts_ssl and inferred_ext not in allowed_exts_ssl:
-                        if save_disallowed_ssl:
-                            target_dir = os.path.join(folder_path, "metadata")
-                            logger.info("Extension %s not in allowed list; saving to metadata folder (SSL retry)", inferred_ext)
-                        else:
-                            logger.info("Extension %s not in allowed list; skipping download (SSL retry)", inferred_ext)
-                            return None
-                    else:
-                        target_dir = os.path.join(folder_path, "objects")
-                    
-                    os.makedirs(target_dir, exist_ok=True)
-                    safe_name = sanitize_filename(f"{stem}_{prov_slug}{inferred_ext}")
-                    filepath = os.path.join(target_dir, safe_name)
-                    with open(filepath, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                    
-                    # Validate file content (same as main path)
-                    if inferred_ext.lower() in [".pdf", ".epub"]:
-                        try:
-                            with open(filepath, "rb") as check_f:
-                                first_bytes = check_f.read(512)
-                                if inferred_ext.lower() == ".pdf" and not first_bytes.startswith(b"%PDF-"):
-                                    if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
-                                        logger.warning(
-                                            "Downloaded file claims to be PDF but contains HTML; removing: %s",
-                                            filepath
-                                        )
-                                        os.remove(filepath)
-                                        return None
-                                elif inferred_ext.lower() == ".epub" and not first_bytes.startswith(b"PK\x03\x04"):
-                                    if b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower():
-                                        logger.warning(
-                                            "Downloaded file claims to be EPUB but contains HTML; removing: %s",
-                                            filepath
-                                        )
-                                        os.remove(filepath)
-                                        return None
-                        except Exception as ve:
-                            logger.warning("Error validating downloaded file %s: %s", filepath, ve)
-                    
-                    # Validate HTML files
-                    if inferred_ext.lower() == ".html":
-                        try:
-                            with open(filepath, "r", encoding="utf-8", errors="ignore") as check_f:
-                                html_content = check_f.read(2048)
-                                if "annas-archive" in url.lower() or "annas-archive" in provider.lower():
-                                    if any(marker in html_content.lower() for marker in [
-                                        "<title>log in / register",
-                                        "<title>login",
-                                        "member login",
-                                        "please log in",
-                                        "__darkreader__",
-                                    ]):
-                                        logger.warning(
-                                            "Downloaded HTML file appears to be Anna's Archive login/error page; removing: %s",
-                                            filepath
-                                        )
-                                        os.remove(filepath)
-                                        return None
-                        except Exception as ve:
-                            logger.warning("Error validating HTML file %s: %s", filepath, ve)
-                    
-                    logger.info("Downloaded %s -> %s (insecure)", url, filepath)
-                    _BUDGET.add_file(provider, work_id)
-                    return filepath
+                    return _process_response(response, is_insecure_retry=True)
             except Exception as ee:
                 logger.error("Insecure retry failed for %s: %s", url, ee)
                 return None
