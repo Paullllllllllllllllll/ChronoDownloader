@@ -167,3 +167,17 @@ def get_max_pages(provider_key: str) -> int | None:
     if isinstance(val, int):
         return val
     return None
+
+
+def get_resume_mode() -> str:
+    """Get the resume mode for processing works.
+    
+    Resume modes:
+    - "skip_completed": Skip works with status="completed" in work.json (default)
+    - "reprocess_all": Reprocess all works regardless of status
+    - "skip_if_has_objects": Skip works that have files in objects/ directory
+    
+    Returns:
+        Resume mode string
+    """
+    return str(get_download_config().get("resume_mode", "skip_completed"))

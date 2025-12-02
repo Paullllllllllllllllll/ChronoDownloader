@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pandas as pd
 
 from api import utils
-from api.core.config import get_config
+from api.core.config import get_config, get_resume_mode
 from api.core.context import (
     clear_current_entry,
     clear_current_name_stem,
@@ -262,6 +262,77 @@ def _get_naming_config() -> Dict[str, Any]:
     return nm
 
 
+def check_work_status(work_dir: str, resume_mode: str) -> Tuple[bool, str]:
+    """Check if a work should be skipped based on resume mode and existing state.
+    
+    Args:
+        work_dir: Path to the work directory
+        resume_mode: Resume mode from config ("skip_completed", "reprocess_all", "skip_if_has_objects")
+        
+    Returns:
+        Tuple of (should_skip, reason). If should_skip is True, the work should be skipped.
+    """
+    if resume_mode == "reprocess_all":
+        return False, ""
+    
+    if not os.path.isdir(work_dir):
+        return False, ""
+    
+    work_json_path = os.path.join(work_dir, "work.json")
+    objects_dir = os.path.join(work_dir, "objects")
+    
+    if resume_mode == "skip_completed":
+        # Check work.json for status
+        if os.path.exists(work_json_path):
+            try:
+                with open(work_json_path, "r", encoding="utf-8") as f:
+                    work_meta = json.load(f)
+                status = work_meta.get("status", "")
+                if status == "completed":
+                    return True, "status=completed in work.json"
+            except Exception:
+                pass
+    
+    elif resume_mode == "skip_if_has_objects":
+        # Check if objects directory has any files
+        if os.path.isdir(objects_dir):
+            try:
+                files = [f for f in os.listdir(objects_dir) if os.path.isfile(os.path.join(objects_dir, f))]
+                if files:
+                    return True, f"objects/ contains {len(files)} file(s)"
+            except Exception:
+                pass
+    
+    return False, ""
+
+
+def update_work_status(work_json_path: str, status: str, download_info: Optional[Dict[str, Any]] = None) -> None:
+    """Update the status field in work.json.
+    
+    Args:
+        work_json_path: Path to work.json file
+        status: New status ("completed", "partial", "failed", "no_match")
+        download_info: Optional dict with download details to merge
+    """
+    if not os.path.exists(work_json_path):
+        return
+    
+    try:
+        with open(work_json_path, "r", encoding="utf-8") as f:
+            work_meta = json.load(f)
+        
+        work_meta["status"] = status
+        work_meta["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        
+        if download_info:
+            work_meta["download"] = download_info
+        
+        with open(work_json_path, "w", encoding="utf-8") as f:
+            json.dump(work_meta, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.warning("Failed to update work.json status: %s", e)
+
+
 def process_work(
     title: str,
     creator: Optional[str] = None,
@@ -284,6 +355,22 @@ def process_work(
     """
     logger = logging.getLogger(__name__)
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
+
+    # Compute work directory early to enable resume/skip check
+    naming_cfg = _get_naming_config()
+    work_dir_name = build_work_directory_name(
+        entry_id,
+        title,
+        max_len=int(naming_cfg.get("title_slug_max_len", 80))
+    )
+    work_dir = os.path.join(base_output_dir, work_dir_name)
+    
+    # Check if this work should be skipped based on resume mode
+    resume_mode = get_resume_mode()
+    should_skip, skip_reason = check_work_status(work_dir, resume_mode)
+    if should_skip:
+        logger.info("Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode)
+        return
 
     sel_cfg = _get_selection_config()
     provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
@@ -333,17 +420,8 @@ def process_work(
             pass
         return
 
-    # Build work directory and write metadata
-    naming_cfg = _get_naming_config()
+    # Create work directory (work_dir_name computed earlier for resume check)
     work_id = _compute_work_id(title, creator)
-    
-    # Build standardized work directory name
-    work_dir_name = build_work_directory_name(
-        entry_id,
-        title,
-        max_len=int(naming_cfg.get("title_slug_max_len", 80))
-    )
-    work_dir = os.path.join(base_output_dir, work_dir_name)
     os.makedirs(work_dir, exist_ok=True)
     
     # Use work_dir_name as the naming stem for files
@@ -427,6 +505,7 @@ def process_work(
     # Download according to strategy
     download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
     download_deferred = False  # Track if download was deferred due to quota
+    download_succeeded = False  # Track if download completed successfully
     if not dry_run and selected and selected_provider_tuple and selected_dir:
         pkey, _search_func, download_func, pname = selected_provider_tuple
         try:
@@ -439,6 +518,8 @@ def process_work(
                     clear_current_provider()
                 except Exception:
                     pass
+            if ok:
+                download_succeeded = True
             if not ok:
                 logger.warning(
                     "Download function reported failure for %s:%s",
@@ -471,6 +552,7 @@ def process_work(
                             set_current_provider(prov_key)
                             if dfunc(sr, selected_dir):
                                 logger.info("Fallback download from %s succeeded.", _pname)
+                                download_succeeded = True
                                 break
                         except QuotaDeferredException as qde:
                             logger.info(
@@ -536,6 +618,21 @@ def process_work(
                     )
     elif dry_run:
         logger.info("Dry-run: skipping download for selected item.")
+
+    # Update work.json status based on outcome
+    if not dry_run:
+        if download_succeeded:
+            update_work_status(work_json_path, "completed", {
+                "provider": selected.provider if selected else None,
+                "provider_key": selected.provider_key if selected else None,
+                "source_id": selected_source_id,
+            })
+        elif download_deferred:
+            update_work_status(work_json_path, "deferred")
+        elif selected:
+            update_work_status(work_json_path, "failed")
+        else:
+            update_work_status(work_json_path, "no_match")
 
     # Update index.csv summary
     try:

@@ -164,6 +164,18 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
 
     logger.info("Starting downloader. Output directory: %s", args.output_dir)
     
+    # Load completed works from index.csv for fast-path skip (resume support)
+    completed_entry_ids: set = set()
+    index_path = os.path.join(args.output_dir, "index.csv")
+    if os.path.exists(index_path):
+        try:
+            index_df = pd.read_csv(index_path)
+            if "entry_id" in index_df.columns:
+                completed_entry_ids = set(index_df["entry_id"].dropna().astype(str))
+                logger.info("Loaded %d completed works from index.csv for resume", len(completed_entry_ids))
+        except Exception as e:
+            logger.warning("Could not load index.csv for resume: %s", e)
+    
     # Process each work in the CSV
     for index, row in works_df.iterrows():
         title = row["Title"]
@@ -176,6 +188,11 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
         
         if pd.isna(title) or not str(title).strip():
             logger.warning("Skipping row %d due to missing or empty title.", index + 1)
+            continue
+        
+        # Fast-path skip: if entry_id already in index.csv, skip (pipeline will also check work.json)
+        if str(entry_id) in completed_entry_ids:
+            logger.debug("Fast-path skip: entry_id '%s' already in index.csv", entry_id)
             continue
         
         # Delegate to pipeline

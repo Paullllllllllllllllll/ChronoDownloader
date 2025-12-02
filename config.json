@@ -142,6 +142,7 @@
     }
   },
   "download": {
+    "resume_mode": "skip_completed",
     "prefer_pdf_over_images": true,
     "download_manifest_renderings": true,
     "max_renderings_per_manifest": 5,
@@ -149,7 +150,8 @@
     "overwrite_existing": false,
     "include_metadata": true,
     "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp", ".bmp", ".gif"],
-    "save_disallowed_to_metadata": true
+    "save_disallowed_to_metadata": true,
+    "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects"]
   },
   "selection": {
     "strategy": "collect_and_select",
