@@ -2,13 +2,18 @@
 
 This module extracts the candidate collection, scoring, and ranking logic
 from the main pipeline to improve modularity and testability.
+
+Supports parallel provider searches via ThreadPoolExecutor when
+selection.max_parallel_searches > 1 in config.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from api.core.config import get_provider_setting
+from api.core.config import get_config, get_provider_setting
 from api.matching import combined_match_score
 from api.model import SearchResult, convert_to_searchresult
 
@@ -215,6 +220,59 @@ def collect_candidates_sequential(
     return all_candidates, selected, selected_provider_tuple
 
 
+def _get_max_parallel_searches() -> int:
+    """Get max_parallel_searches from config.
+    
+    Returns:
+        Number of parallel search workers (1 = sequential)
+    """
+    cfg = get_config()
+    sel = cfg.get("selection", {})
+    try:
+        return max(1, int(sel.get("max_parallel_searches", 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _search_single_provider(
+    provider_tuple: ProviderTuple,
+    title: str,
+    creator: Optional[str],
+    max_candidates_per_provider: int,
+    creator_weight: float,
+) -> Tuple[str, str, List[SearchResult]]:
+    """Search a single provider and return scored candidates.
+    
+    This function is designed to be called from a ThreadPoolExecutor.
+    
+    Args:
+        provider_tuple: (provider_key, search_func, download_func, provider_name)
+        title: Work title to search
+        creator: Optional creator name
+        max_candidates_per_provider: Max results to request
+        creator_weight: Weight for creator matching
+        
+    Returns:
+        Tuple of (provider_key, provider_name, list of scored SearchResults)
+    """
+    pkey, search_func, _download_func, pname = provider_tuple
+    candidates: List[SearchResult] = []
+    
+    try:
+        max_results = get_max_results_for_provider(pkey, max_candidates_per_provider)
+        results = call_search_function(search_func, title, creator, max_results)
+        
+        if results:
+            for it in results:
+                sr = prepare_search_result(pkey, pname, it)
+                attach_scores(sr, title, creator, creator_weight)
+                candidates.append(sr)
+    except Exception:
+        logger.exception("Error during search with %s for '%s'", pname, title)
+    
+    return pkey, pname, candidates
+
+
 def collect_candidates_all(
     provider_list: List[ProviderTuple],
     title: str,
@@ -223,6 +281,8 @@ def collect_candidates_all(
     max_candidates_per_provider: int
 ) -> List[SearchResult]:
     """Collect candidates from all providers.
+    
+    Supports parallel searches when selection.max_parallel_searches > 1.
     
     Args:
         provider_list: List of provider tuples
@@ -234,6 +294,22 @@ def collect_candidates_all(
     Returns:
         List of all SearchResult candidates with scores attached
     """
+    max_workers = _get_max_parallel_searches()
+    
+    if max_workers <= 1 or len(provider_list) <= 1:
+        return _collect_candidates_sequential(provider_list, title, creator, creator_weight, max_candidates_per_provider)
+    
+    return _collect_candidates_parallel(provider_list, title, creator, creator_weight, max_candidates_per_provider, max_workers)
+
+
+def _collect_candidates_sequential(
+    provider_list: List[ProviderTuple],
+    title: str,
+    creator: Optional[str],
+    creator_weight: float,
+    max_candidates_per_provider: int
+) -> List[SearchResult]:
+    """Sequential candidate collection (original behavior)."""
     all_candidates: List[SearchResult] = []
     
     for pkey, search_func, download_func, pname in provider_list:
@@ -262,6 +338,72 @@ def collect_candidates_all(
                 
         except Exception:
             logger.exception("Error during search with %s for '%s'", pname, title)
+    
+    return all_candidates
+
+
+def _collect_candidates_parallel(
+    provider_list: List[ProviderTuple],
+    title: str,
+    creator: Optional[str],
+    creator_weight: float,
+    max_candidates_per_provider: int,
+    max_workers: int,
+) -> List[SearchResult]:
+    """Parallel candidate collection using ThreadPoolExecutor.
+    
+    Searches all providers concurrently, then merges results.
+    Provider order is preserved for consistent selection behavior.
+    """
+    all_candidates: List[SearchResult] = []
+    start_time = time.perf_counter()
+    
+    logger.info(
+        "--- Parallel search across %d providers (max %d workers) for '%s' ---",
+        len(provider_list), max_workers, title
+    )
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_provider: Dict[concurrent.futures.Future, ProviderTuple] = {}
+        
+        for provider_tuple in provider_list:
+            future = executor.submit(
+                _search_single_provider,
+                provider_tuple,
+                title,
+                creator,
+                max_candidates_per_provider,
+                creator_weight,
+            )
+            future_to_provider[future] = provider_tuple
+        
+        results_by_provider: Dict[str, List[SearchResult]] = {}
+        
+        for future in concurrent.futures.as_completed(future_to_provider):
+            provider_tuple = future_to_provider[future]
+            pkey = provider_tuple[0]
+            pname = provider_tuple[3]
+            
+            try:
+                _pkey, _pname, candidates = future.result()
+                if candidates:
+                    logger.info("Found %d item(s) on %s", len(candidates), pname)
+                    results_by_provider[pkey] = candidates
+                else:
+                    logger.info("No items found for '%s' on %s.", title, pname)
+            except Exception:
+                logger.exception("Error retrieving results from %s for '%s'", pname, title)
+    
+    for provider_tuple in provider_list:
+        pkey = provider_tuple[0]
+        if pkey in results_by_provider:
+            all_candidates.extend(results_by_provider[pkey])
+    
+    elapsed = time.perf_counter() - start_time
+    logger.info(
+        "Parallel search completed in %.2fs, found %d total candidates",
+        elapsed, len(all_candidates)
+    )
     
     return all_candidates
 

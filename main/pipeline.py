@@ -177,6 +177,7 @@ def _get_selection_config() -> Dict[str, Any]:
     
     # Defaults
     sel.setdefault("strategy", "collect_and_select")  # or "sequential_first_hit"
+    sel.setdefault("max_parallel_searches", 1)  # 1 = sequential, >1 = parallel provider searches
     sel.setdefault("provider_hierarchy", [])
     sel.setdefault("min_title_score", 85)
     sel.setdefault("creator_weight", 0.2)

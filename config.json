@@ -142,7 +142,7 @@
     }
   },
   "download": {
-    "resume_mode": "skip_completed",
+    "resume_mode": "skip_if_has_objects",
     "prefer_pdf_over_images": true,
     "download_manifest_renderings": true,
     "max_renderings_per_manifest": 5,
@@ -155,6 +155,7 @@
   },
   "selection": {
     "strategy": "collect_and_select",
+    "max_parallel_searches": 5,
     "provider_hierarchy": [
       "mdz",
       "bnf_gallica",
