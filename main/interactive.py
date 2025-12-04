@@ -463,19 +463,7 @@ def process_csv_batch(
     log.info("Starting downloader. Output directory: %s", output_dir)
     processed = 0
     
-    # Load completed works from index.csv for fast-path skip (resume support)
-    completed_entry_ids: set = set()
-    index_path = os.path.join(output_dir, "index.csv")
-    if os.path.exists(index_path):
-        try:
-            index_df = pd.read_csv(index_path)
-            if "entry_id" in index_df.columns:
-                completed_entry_ids = set(index_df["entry_id"].dropna().astype(str))
-                log.info("Loaded %d completed works from index.csv for resume", len(completed_entry_ids))
-        except Exception as e:
-            log.warning("Could not load index.csv for resume: %s", e)
-    
-    # Process each work in the CSV
+    # Process each work in the CSV (resume logic handled by pipeline.check_work_status)
     for index, row in works_df.iterrows():
         title = row["Title"]
         creator = row.get("Creator")
@@ -487,11 +475,6 @@ def process_csv_batch(
         
         if pd.isna(title) or not str(title).strip():
             log.warning("Skipping row %d due to missing or empty title.", index + 1)
-            continue
-        
-        # Fast-path skip: if entry_id already in index.csv, skip (pipeline will also check work.json)
-        if str(entry_id) in completed_entry_ids:
-            log.debug("Fast-path skip: entry_id '%s' already in index.csv", entry_id)
             continue
         
         # Delegate to pipeline
