@@ -15,6 +15,8 @@ A comprehensive Python tool for discovering and downloading digitized historical
 - [Documentation](#documentation)
 - [Output Structure](#output-structure)
 - [Advanced Usage](#advanced-usage)
+  - [Parallel Downloads](#parallel-downloads)
+  - [Large-Scale Processing](#large-scale-processing)
 - [Architecture](#architecture)
 - [Extending the Tool](#extending-the-tool)
 - [Troubleshooting](#troubleshooting)
@@ -30,6 +32,7 @@ Meant to be used in conjunction with [ChronoMiner](https://github.com/Paulllllll
 ## Key Features
 
 - Multi-Provider Search: Query 14 major digital libraries with configurable parallel searches (up to 5x faster) including Internet Archive, BnF Gallica, Library of Congress, Google Books, Anna's Archive, and more
+- Parallel Downloads: Concurrent download workers with per-provider concurrency limits for 2-4x faster batch processing while respecting API rate limits
 - Intelligent Selection: Automatic fuzzy matching and scoring to select the best candidate from multiple sources with configurable thresholds for multilingual collections
 - Flexible Download Strategies: Download PDFs, EPUBs, or high-resolution page images based on availability and preferences
 - IIIF Support: Native support for IIIF Presentation and Image APIs with optimized performance for faster downloads
@@ -186,7 +189,7 @@ The configuration file has seven main sections:
 1. `general`: Global settings including interactive/CLI mode toggle
 2. `providers`: Enable/disable specific providers
 3. `provider_settings`: Per-provider rate limiting and behavior
-4. `download`: Download preferences (PDF vs images, metadata, etc.)
+4. `download`: Download preferences, parallel download settings, resume modes
 5. `download_limits`: Budget constraints to prevent runaway downloads
 6. `selection`: Candidate selection and matching strategy
 7. `naming`: Output folder and file naming conventions
@@ -350,7 +353,17 @@ Anna's Archive supports two download modes: fast downloads with an API key (limi
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
     "overwrite_existing": false,
     "include_metadata": true,
-    "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff"]
+    "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff"],
+    "max_parallel_downloads": 4,
+    "provider_concurrency": {
+      "default": 2,
+      "annas_archive": 1,
+      "bnf_gallica": 1,
+      "google_books": 1,
+      "internet_archive": 3,
+      "mdz": 2
+    },
+    "worker_timeout_s": 600
   }
 }
 ```
@@ -365,6 +378,14 @@ Download Preference Parameters:
 - `overwrite_existing`: Whether to overwrite existing files
 - `include_metadata`: Save metadata JSON files alongside downloads
 - `allowed_object_extensions`: List of file extensions to download (e.g., [".pdf", ".epub", ".jpg"]). Files with other extensions are saved to metadata only if `save_disallowed_to_metadata` is true
+
+Parallel Download Parameters:
+
+- `max_parallel_downloads`: Number of concurrent download workers (default: 1 for sequential, set to 4 for parallel mode)
+- `provider_concurrency`: Per-provider limits on concurrent downloads. Prevents overwhelming rate-limited APIs while maximizing throughput.
+  - `default`: Default limit for providers not explicitly listed (default: 2)
+  - Provider-specific limits: e.g., `annas_archive: 1` for strict quota, `internet_archive: 3` for higher throughput
+- `worker_timeout_s`: Maximum seconds to wait for a single download to complete (default: 600)
 
 ### 4. Download Budget Limits
 
@@ -708,6 +729,41 @@ This comprehensive metadata enables auditing selection decisions, debugging fail
 
 ## Advanced Usage
 
+### Parallel Downloads
+
+ChronoDownloader supports parallel downloads to significantly speed up batch processing. When `max_parallel_downloads` is greater than 1, downloads run concurrently across multiple works while searches remain sequential.
+
+**How it works:**
+1. The main thread searches providers and selects candidates sequentially
+2. Download tasks are queued and executed by a pool of worker threads
+3. Per-provider semaphores limit concurrent downloads to each provider
+4. Thread-safe operations protect shared resources (index.csv, deferred downloads)
+
+**Configuration example for parallel downloads:**
+
+```json
+{
+  "download": {
+    "max_parallel_downloads": 4,
+    "provider_concurrency": {
+      "default": 2,
+      "annas_archive": 1,
+      "internet_archive": 3
+    },
+    "worker_timeout_s": 600
+  }
+}
+```
+
+**Performance tips:**
+- Start with 4 workers and adjust based on your network and provider mix
+- Set lower concurrency limits for rate-limited providers (Anna's Archive, BnF Gallica)
+- Set higher limits for providers with generous rate limits (Internet Archive)
+- Monitor logs for 429 errors and adjust `provider_concurrency` accordingly
+- Use `max_parallel_downloads: 1` for sequential mode (original behavior)
+
+**Expected speedup:** 2-4x faster for typical runs with 10+ works and multiple providers.
+
 ### Large-Scale Processing
 
 For very large jobs (thousands of works):
@@ -845,8 +901,9 @@ ChronoDownloader/
 │   ├── query_helpers.py         # Query string escaping for SRU/SPARQL
 │   └── <provider>_api.py        # Individual provider connectors
 ├── main/                         # CLI and orchestration
-│   ├── pipeline.py              # Core orchestration logic
+│   ├── pipeline.py              # Core orchestration logic (search, select, download phases)
 │   ├── selection.py             # Candidate collection, scoring, and selection
+│   ├── download_scheduler.py    # Parallel download scheduler with per-provider limits
 │   ├── mode_selector.py         # Mode detection (interactive vs CLI)
 │   ├── interactive.py           # Interactive workflow UI
 │   └── downloader.py            # Unified entry point (CLI + interactive)
@@ -871,11 +928,12 @@ ChronoDownloader/
 - `naming.py`: Consistent filename sanitization, snake_case conversion, and work directory naming
 
 **Orchestration** (`main/`):
-- `pipeline.py`: Provider loading, API key validation, work directory creation, metadata persistence, download coordination with fallback
+- `pipeline.py`: Provider loading, API key validation, work directory creation, metadata persistence, download coordination with fallback. Provides `search_and_select()` and `execute_download()` functions for parallel mode.
 - `selection.py`: Candidate collection strategies (sequential/collect-and-select), fuzzy matching scoring, best candidate selection
+- `download_scheduler.py`: ThreadPoolExecutor-based parallel download scheduler with per-provider semaphores, graceful shutdown, and progress callbacks
 - `mode_selector.py`: Dual-mode detection (interactive vs CLI) based on config and CLI flags
 - `interactive.py`: Interactive workflow UI with guided prompts, navigation, and session management
-- `downloader.py`: Unified entry point routing to interactive or CLI handlers
+- `downloader.py`: Unified entry point routing to interactive or CLI handlers, supports both sequential and parallel download modes
 
 **Data Models** (`api/model.py`):
 - SearchResult: Unified search result format with provider metadata
@@ -889,6 +947,7 @@ ChronoDownloader/
 
 ### Workflow
 
+**Sequential Mode** (max_parallel_downloads = 1):
 ```
 1. Load CSV → Parse rows
                 ↓
@@ -911,10 +970,37 @@ ChronoDownloader/
 3. Complete → Summary report
 ```
 
+**Parallel Mode** (max_parallel_downloads > 1):
+```
+1. Load CSV → Parse rows
+                ↓
+2. SEARCH PHASE (main thread):
+   For each work:
+   ├─→ Search all enabled providers
+   ├─→ Collect and score candidates
+   ├─→ Select best candidate
+   ├─→ Create work directory + work.json
+   └─→ Queue DownloadTask to worker pool
+                ↓
+3. DOWNLOAD PHASE (worker threads):
+   Worker pool executes tasks concurrently:
+   ├─→ Acquire per-provider semaphore
+   ├─→ Set thread-local context
+   ├─→ Download from selected provider
+   │   ├─→ Apply rate limiting
+   │   ├─→ Check budget limits
+   │   └─→ Try fallback providers if needed
+   ├─→ Update index.csv (thread-safe)
+   └─→ Release semaphore
+                ↓
+4. Complete → Summary report with stats
+```
+
 ### Scalability and Reliability
 
 **Rate Limiting:**
 - Per-provider rate limiters with configurable delays and jitter
+- Per-provider semaphores limit concurrent downloads in parallel mode
 - Prevents overwhelming provider servers
 - Respects API quotas and terms of service
 
@@ -1096,13 +1182,15 @@ Solution: Adjust limits in `config.json` under `download_limits`, or set to 0 fo
 
 #### Downloads are very slow
 
-Cause: Conservative rate limiting or slow providers
+Cause: Conservative rate limiting, slow providers, or sequential mode
 
 Solution:
 
+- Enable parallel downloads: set `max_parallel_downloads: 4` in config
 - Reduce `delay_ms` in provider settings (respect terms of service)
 - Use `sequential_first_hit` strategy for faster selection
 - Enable only fast providers (Internet Archive, Google Books)
+- Increase `provider_concurrency` for providers with generous rate limits
 
 #### Title column not found in CSV
 

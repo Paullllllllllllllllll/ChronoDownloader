@@ -343,6 +343,36 @@ ChronoDownloader supports parallel provider searches within a single run, signif
 
 With `max_parallel_searches: 5`, searching 5 providers completes in ~1 second instead of ~5 seconds (sequential). Each provider's rate limiting and backoff logic operates independently.
 
+### Parallel Download Workers
+
+Provider searches run fastest when combined with the new parallel download scheduler. When `download.max_parallel_downloads` is greater than 1, ChronoDownloader splits each work into two phases: the main thread handles search/selection, and worker threads download objects concurrently.
+
+**Enabling parallel downloads:**
+
+```json
+{
+  "download": {
+    "max_parallel_downloads": 4,
+    "provider_concurrency": {
+      "default": 2,
+      "internet_archive": 3,
+      "annas_archive": 1,
+      "bnf_gallica": 1
+    }
+  }
+}
+```
+
+**Operational guidance:**
+
+1. Start with 4 workers and monitor logs for 429/circuit-breaker events.
+2. Set lower concurrency for strict providers (Anna's Archive, Gallica) and higher for tolerant ones (Internet Archive, MDZ).
+3. Keep searches sequential to avoid overwhelming APIs—parallelism applies only to downloads.
+4. Ensure `resume_mode: skip_if_has_objects` so interrupted workers can safely restart.
+5. Watch `download_limits` to avoid draining budgets faster than expected.
+
+**Expected gains:** Parallel downloads typically reduce overall runtime by 2-4x for batches with mixed providers, especially when individual downloads are long-running PDFs.
+
 ### Multi-Terminal Processing (Advanced)
 
 For very large collections, consider running multiple instances in parallel:
