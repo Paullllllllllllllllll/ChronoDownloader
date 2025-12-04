@@ -5,6 +5,11 @@ Supports two modes:
 1. Interactive mode: Guided workflow with user prompts (interactive_mode: true in config)
 2. CLI mode: Command-line arguments for automation (interactive_mode: false in config)
 
+Parallel download support:
+- When max_parallel_downloads > 1, downloads run concurrently across works
+- Per-provider concurrency limits prevent overwhelming rate-limited providers
+- Thread-safe operations for index.csv and deferred downloads
+
 All orchestration logic has been moved to main/pipeline.py.
 """
 from __future__ import annotations
@@ -14,7 +19,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -105,6 +110,10 @@ Examples:
 def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
     """Run the downloader in CLI mode.
     
+    Supports both sequential and parallel download modes based on config.
+    When max_parallel_downloads > 1, downloads are parallelized across works
+    while respecting per-provider concurrency limits.
+    
     Args:
         args: Parsed command-line arguments
         config: Configuration dictionary
@@ -162,9 +171,45 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
         logger.error("CSV file must contain a 'Title' column or a mapped equivalent.")
         return
 
-    logger.info("Starting downloader. Output directory: %s", args.output_dir)
+    # Get parallel download configuration
+    dl_config = config.get("download", {})
+    max_parallel = int(dl_config.get("max_parallel_downloads", 1) or 1)
     
-    # Process each work in the CSV (resume logic handled by pipeline.check_work_status)
+    logger.info("Starting downloader. Output directory: %s", args.output_dir)
+    logger.info("Works to process: %d, Parallel downloads: %d", len(works_df), max_parallel)
+    
+    if max_parallel > 1 and not args.dry_run:
+        # Parallel mode: use DownloadScheduler
+        _run_parallel_downloads(works_df, args, config, logger)
+    else:
+        # Sequential mode: use original process_work flow
+        _run_sequential_downloads(works_df, args, logger)
+    
+    # Process any deferred downloads (e.g., Anna's Archive quota-limited items)
+    deferred = pipeline.get_deferred_downloads()
+    if deferred:
+        logger.info(
+            "%d download(s) were deferred due to quota limits. "
+            "Processing deferred downloads after quota reset...",
+            len(deferred)
+        )
+        pipeline.process_deferred_downloads(wait_for_reset=True)
+    
+    logger.info("Downloader finished.")
+
+
+def _run_sequential_downloads(
+    works_df: pd.DataFrame, 
+    args: argparse.Namespace, 
+    logger: logging.Logger
+) -> None:
+    """Run downloads sequentially (original behavior).
+    
+    Args:
+        works_df: DataFrame with works to process
+        args: Command-line arguments
+        logger: Logger instance
+    """
     for index, row in works_df.iterrows():
         title = row["Title"]
         creator = row.get("Creator")
@@ -198,18 +243,133 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
             pass
     
     logger.info("All works processed.")
+
+
+def _run_parallel_downloads(
+    works_df: pd.DataFrame,
+    args: argparse.Namespace,
+    config: Dict[str, Any],
+    logger: logging.Logger
+) -> None:
+    """Run downloads in parallel using DownloadScheduler.
     
-    # Process any deferred downloads (e.g., Anna's Archive quota-limited items)
-    deferred = pipeline.get_deferred_downloads()
-    if deferred:
+    Searches are still sequential to avoid overwhelming providers,
+    but downloads are parallelized across works.
+    
+    Args:
+        works_df: DataFrame with works to process
+        args: Command-line arguments
+        config: Configuration dictionary
+        logger: Logger instance
+    """
+    from main.download_scheduler import DownloadScheduler, DownloadTask, get_parallel_download_config
+    
+    # Get parallel download settings
+    dl_config = get_parallel_download_config()
+    max_workers = int(dl_config.get("max_parallel_downloads", 4) or 4)
+    provider_concurrency = dict(dl_config.get("provider_concurrency", {}) or {})
+    worker_timeout = float(dl_config.get("worker_timeout_s", 600) or 600)
+    
+    # Callbacks for progress tracking
+    submitted_count = 0
+    
+    def on_submit(task: DownloadTask) -> None:
+        nonlocal submitted_count
+        submitted_count += 1
+        logger.debug("Queued download %d: '%s'", submitted_count, task.title)
+    
+    def on_complete(task: DownloadTask, success: bool, error: Optional[Exception]) -> None:
+        status = "completed" if success else "failed"
+        if error:
+            logger.warning("Download %s for '%s': %s", status, task.title, error)
+        else:
+            logger.info("Download %s for '%s'", status, task.title)
+    
+    # Initialize scheduler
+    scheduler = DownloadScheduler(
+        max_workers=max_workers,
+        provider_limits=provider_concurrency,
+        on_submit=on_submit,
+        on_complete=on_complete,
+    )
+    scheduler.start()
+    
+    logger.info(
+        "Parallel download scheduler started: %d workers, provider limits: %s",
+        max_workers,
+        provider_concurrency or "default"
+    )
+    
+    try:
+        # Phase 1: Search and queue downloads
+        for index, row in works_df.iterrows():
+            # Check budget before searching
+            try:
+                if utils.budget_exhausted():
+                    logger.warning("Download budget exhausted; stopping further searches.")
+                    break
+            except Exception:
+                pass
+            
+            title = row["Title"]
+            creator = row.get("Creator")
+            entry_id = row.get("entry_id") if "entry_id" in works_df.columns else None
+            
+            # Generate fallback entry_id if missing
+            if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
+                entry_id = f"E{index + 1:04d}"
+            
+            if pd.isna(title) or not str(title).strip():
+                logger.warning("Skipping row %d due to missing or empty title.", index + 1)
+                continue
+            
+            # Search and select (runs in main thread)
+            task = pipeline.search_and_select(
+                str(title),
+                None if pd.isna(creator) else str(creator),
+                None if pd.isna(entry_id) else str(entry_id),
+                args.output_dir,
+            )
+            
+            if task:
+                # Submit download to worker pool
+                scheduler.submit(task, pipeline.execute_download)
+            
+            logger.info("%s", "-" * 50)
+        
+        # Phase 2: Wait for all downloads to complete
+        pending = scheduler.pending_count
+        if pending > 0:
+            logger.info("Search phase complete. Waiting for %d pending download(s)...", pending)
+            
+            results = scheduler.wait_all(timeout=worker_timeout)
+            
+            stats = scheduler.get_stats()
+            logger.info(
+                "Download phase complete: %d succeeded, %d failed",
+                stats["succeeded"],
+                stats["failed"]
+            )
+    
+    except KeyboardInterrupt:
+        logger.warning("Interrupt received; shutting down scheduler...")
+        scheduler.request_shutdown()
+        
+        # Wait briefly for in-progress downloads
+        pending = scheduler.pending_count
+        if pending > 0:
+            logger.info("Waiting for %d in-progress download(s) to finish...", pending)
+            scheduler.wait_all(timeout=30)
+    
+    finally:
+        scheduler.shutdown(wait=True)
+        stats = scheduler.get_stats()
         logger.info(
-            "%d download(s) were deferred due to quota limits. "
-            "Processing deferred downloads after quota reset...",
-            len(deferred)
+            "Scheduler shutdown. Final stats: %d completed (%d succeeded, %d failed)",
+            stats["completed"],
+            stats["succeeded"],
+            stats["failed"]
         )
-        pipeline.process_deferred_downloads(wait_for_reset=True)
-    
-    logger.info("Downloader finished.")
 
 
 def main() -> None:

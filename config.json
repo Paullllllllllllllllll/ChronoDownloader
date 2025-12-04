@@ -36,12 +36,12 @@
     "gallica": {
       "max_pages": 0,
       "network": {
-        "delay_ms": 1500,
-        "jitter_ms": 400,
+        "delay_ms": 2500,
+        "jitter_ms": 800,
         "max_attempts": 25,
-        "base_backoff_s": 1.5,
+        "base_backoff_s": 2.0,
         "backoff_multiplier": 1.6,
-        "max_backoff_s": 60.0,
+        "max_backoff_s": 90.0,
         "timeout_s": 30
       }
     },
@@ -140,7 +140,7 @@
     },
     "annas_archive": {
       "max_pages": 0,
-      "daily_fast_download_limit": 10,
+      "daily_fast_download_limit": 25,
       "wait_for_quota_reset": true,
       "quota_reset_wait_hours": 24,
       "network": {
@@ -164,7 +164,19 @@
     "include_metadata": true,
     "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp", ".bmp", ".gif"],
     "save_disallowed_to_metadata": true,
-    "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects"]
+    "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects"],
+    "max_parallel_downloads": 4,
+    "provider_concurrency": {
+      "default": 2,
+      "annas_archive": 1,
+      "bnf_gallica": 1,
+      "google_books": 1,
+      "internet_archive": 3,
+      "mdz": 2,
+      "wellcome": 2
+    },
+    "queue_size": 100,
+    "worker_timeout_s": 600
   },
   "selection": {
     "strategy": "collect_and_select",

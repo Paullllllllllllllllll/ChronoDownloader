@@ -7,6 +7,10 @@ This module encapsulates the reusable logic for:
 - Creating per-work directories and persisting selection metadata
 - Delegating actual downloads to provider-specific download_* functions
 
+The pipeline supports both sequential and parallel download modes:
+- Sequential (default): process_work() handles search and download in one call
+- Parallel: search_and_select() returns a DownloadTask, execute_download() runs in workers
+
 The CLI in main/downloader.py is now a thin wrapper that parses arguments
 and delegates to functions in this module. Import and use:
 
@@ -14,7 +18,14 @@ and delegates to functions in this module. Import and use:
     providers = pipeline.load_enabled_apis(config_path)
     providers = pipeline.filter_enabled_providers_for_keys(providers)
     pipeline.ENABLED_APIS = providers
+    
+    # Sequential mode:
     pipeline.process_work(...)
+    
+    # Parallel mode:
+    task = pipeline.search_and_select(...)
+    if task:
+        success = pipeline.execute_download(task)
 """
 from __future__ import annotations
 
@@ -22,10 +33,14 @@ import hashlib
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from main.download_scheduler import DownloadTask
 
 from api import utils
 from api.core.config import get_config, get_resume_mode
@@ -55,9 +70,13 @@ logger = logging.getLogger(__name__)
 # Type alias for provider tuple
 ProviderTuple = Tuple[str, Callable, Callable, str]
 
-# Deferred downloads tracking (works that need retry when quota resets)
+# Thread-safe deferred downloads tracking (works that need retry when quota resets)
 # Structure: List of dicts with keys: title, creator, entry_id, base_output_dir, selected, provider_tuple, work_dir, reset_time
 _deferred_downloads: List[dict] = []
+_deferred_downloads_lock = threading.Lock()
+
+# Thread-safe index.csv updates
+_index_csv_lock = threading.Lock()
 
 
 def load_enabled_apis(config_path: str) -> List[ProviderTuple]:
@@ -334,6 +353,392 @@ def update_work_status(work_json_path: str, status: str, download_info: Optional
         logger.warning("Failed to update work.json status: %s", e)
 
 
+def _update_index_csv(base_output_dir: str, row: Dict[str, Any]) -> None:
+    """Thread-safe update of index.csv.
+    
+    Args:
+        base_output_dir: Base output directory containing index.csv
+        row: Dictionary of row data to append
+    """
+    with _index_csv_lock:
+        try:
+            index_path = os.path.join(base_output_dir, "index.csv")
+            df = pd.DataFrame([row])
+            header = not os.path.exists(index_path)
+            df.to_csv(index_path, mode="a", header=header, index=False)
+        except Exception:
+            logger.exception("Failed to update index.csv")
+
+
+def _add_deferred_download(item: dict) -> None:
+    """Thread-safe addition to deferred downloads list.
+    
+    Args:
+        item: Deferred download info dict
+    """
+    with _deferred_downloads_lock:
+        _deferred_downloads.append(item)
+
+
+def search_and_select(
+    title: str,
+    creator: Optional[str] = None,
+    entry_id: Optional[str] = None,
+    base_output_dir: str = "downloaded_works",
+) -> Optional["DownloadTask"]:
+    """Phase 1: Search providers and select best candidate.
+    
+    This function performs the search phase and returns a DownloadTask
+    that can be executed by a worker thread. It creates the work directory
+    and persists work.json but does NOT perform the actual download.
+    
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        entry_id: Optional unique identifier for this work
+        base_output_dir: Base directory for downloaded works
+        
+    Returns:
+        DownloadTask if a candidate was found, None otherwise.
+    """
+    from main.download_scheduler import DownloadTask
+    
+    logger.info("Searching for work: '%s'%s", title, f" by '{creator}'" if creator else "")
+
+    # Compute work directory early to enable resume/skip check
+    naming_cfg = _get_naming_config()
+    work_dir_name = build_work_directory_name(
+        entry_id,
+        title,
+        max_len=int(naming_cfg.get("title_slug_max_len", 80))
+    )
+    work_dir = os.path.join(base_output_dir, work_dir_name)
+    
+    # Check if this work should be skipped based on resume mode
+    resume_mode = get_resume_mode()
+    should_skip, skip_reason = check_work_status(work_dir, resume_mode)
+    if should_skip:
+        logger.info("Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode)
+        return None
+
+    sel_cfg = _get_selection_config()
+    provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
+
+    # Build a quick map of provider_key -> (search_func, download_func, provider_name)
+    provider_map: Dict[str, Tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
+
+    # Gather candidates depending on strategy
+    all_candidates: List[SearchResult] = []
+    selected: Optional[SearchResult] = None
+    selected_provider_tuple: Optional[ProviderTuple] = None
+
+    min_title_score = float(sel_cfg.get("min_title_score", 85))
+    creator_weight = float(sel_cfg.get("creator_weight", 0.2))
+    max_candidates_per_provider = int(sel_cfg.get("max_candidates_per_provider", 5))
+
+    strategy = (sel_cfg.get("strategy") or "collect_and_select").lower()
+    if strategy == "sequential_first_hit":
+        all_candidates, selected, selected_provider_tuple = collect_candidates_sequential(
+            provider_list,
+            title,
+            creator,
+            min_title_score,
+            creator_weight,
+            max_candidates_per_provider,
+        )
+    else:
+        # collect_and_select: search all providers, then choose best
+        all_candidates = collect_candidates_all(
+            provider_list,
+            title,
+            creator,
+            creator_weight,
+            max_candidates_per_provider,
+        )
+        selected, selected_provider_tuple = select_best_candidate(
+            all_candidates,
+            provider_list,
+            min_title_score,
+        )
+
+    if not all_candidates:
+        logger.info("No items found for '%s' across all enabled APIs.", title)
+        return None
+
+    # Create work directory
+    work_id = _compute_work_id(title, creator)
+    os.makedirs(work_dir, exist_ok=True)
+    work_stem = work_dir_name
+
+    selected_source_id = None
+    if selected and selected_provider_tuple:
+        selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
+
+    # Persist work.json summarizing decision
+    work_json_path = os.path.join(work_dir, "work.json")
+    work_meta: Dict[str, Any] = {
+        "input": {"title": title, "creator": creator, "entry_id": entry_id},
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "status": "pending",  # Will be updated by execute_download
+        "selection": sel_cfg,
+        "candidates": [
+            {
+                "provider": sr.provider,
+                "provider_key": sr.provider_key,
+                "title": sr.title,
+                "creators": sr.creators,
+                "date": sr.date,
+                "source_id": sr.source_id,
+                "item_url": sr.item_url,
+                "iiif_manifest": sr.iiif_manifest,
+                "scores": sr.raw.get("__matching__", {}),
+            }
+            for sr in all_candidates
+        ],
+        "selected": (
+            {
+                "provider": selected.provider if selected else None,
+                "provider_key": selected.provider_key if selected else None,
+                "source_id": selected_source_id,
+                "title": selected.title if selected else None,
+            }
+            if selected
+            else None
+        ),
+    }
+    try:
+        with open(work_json_path, "w", encoding="utf-8") as f:
+            json.dump(work_meta, f, indent=2, ensure_ascii=False)
+    except Exception:
+        logger.exception("Failed to write work.json to %s", work_json_path)
+
+    # Optionally persist non-selected metadata
+    if sel_cfg.get("keep_non_selected_metadata", True):
+        for sr in all_candidates:
+            try:
+                if not sr.provider_key:
+                    continue
+                try:
+                    set_current_provider(sr.provider_key)
+                    utils.save_json(sr.to_dict(include_raw=True), work_dir, "search_result")
+                finally:
+                    try:
+                        clear_current_provider()
+                    except Exception:
+                        pass
+            except Exception:
+                logger.exception(
+                    "Failed to persist candidate metadata for %s:%s",
+                    sr.provider_key,
+                    sr.source_id,
+                )
+
+    # If no selected candidate, update status and return None
+    if not selected or not selected_provider_tuple:
+        update_work_status(work_json_path, "no_match")
+        logger.info("No matching candidate found for '%s'.", title)
+        return None
+
+    # Create and return DownloadTask
+    task = DownloadTask(
+        work_id=work_id,
+        entry_id=entry_id,
+        title=title,
+        creator=creator,
+        work_dir=work_dir,
+        work_stem=work_stem,
+        selected_result=selected,
+        provider_key=selected_provider_tuple[0],
+        provider_tuple=selected_provider_tuple,
+        work_json_path=work_json_path,
+        all_candidates=all_candidates,
+        provider_map=provider_map,
+        selection_config=sel_cfg,
+        base_output_dir=base_output_dir,
+    )
+    
+    logger.info("Created download task for '%s' from %s", title, selected_provider_tuple[3])
+    return task
+
+
+def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
+    """Phase 2: Execute download for a task.
+    
+    This function is designed to be called by worker threads. Thread-local
+    context should be set by the scheduler before calling this function.
+    
+    Args:
+        task: DownloadTask from search_and_select()
+        dry_run: If True, skip actual downloads
+        
+    Returns:
+        True if download succeeded, False otherwise.
+    """
+    if dry_run:
+        logger.info("Dry-run: skipping download for '%s'", task.title)
+        return True
+    
+    pkey, _search_func, download_func, pname = task.provider_tuple
+    selected = task.selected_result
+    work_dir = task.work_dir
+    work_json_path = task.work_json_path
+    sel_cfg = task.selection_config
+    provider_map = task.provider_map
+    all_candidates = task.all_candidates
+    
+    download_deferred = False
+    download_succeeded = False
+    selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
+    
+    try:
+        logger.info("Downloading selected item for '%s' from %s into %s", task.title, pname, work_dir)
+        try:
+            set_current_provider(pkey)
+            ok = download_func(selected, work_dir)
+        finally:
+            try:
+                clear_current_provider()
+            except Exception:
+                pass
+        
+        if ok:
+            download_succeeded = True
+        else:
+            logger.warning(
+                "Download function reported failure for %s:%s",
+                pkey,
+                selected.source_id,
+            )
+            # Fallback: try the next-best candidate based on provider priority and score
+            try:
+                provider_list = ENABLED_APIS
+                prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
+                ranked_fallbacks: List[Tuple[int, float, SearchResult]] = []
+                for sr in all_candidates:
+                    try:
+                        if sr.provider_key == pkey and sr.source_id == selected.source_id:
+                            continue
+                        sc = sr.raw.get("__matching__", {})
+                        if float(sc.get("score", 0.0)) < float(sel_cfg.get("min_title_score", 85)):
+                            continue
+                        pprio = prov_priority.get(sr.provider_key or "", 9999)
+                        ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))
+                    except Exception:
+                        continue
+                ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
+                for _pprio, _tot, sr in ranked_fallbacks:
+                    prov_key = sr.provider_key or "unknown"
+                    if prov_key not in provider_map:
+                        continue
+                    _s, dfunc, _pname = provider_map[prov_key]
+                    logger.info("Attempting fallback download from %s", _pname)
+                    try:
+                        set_current_provider(prov_key)
+                        if dfunc(sr, work_dir):
+                            logger.info("Fallback download from %s succeeded.", _pname)
+                            download_succeeded = True
+                            break
+                    except QuotaDeferredException as qde:
+                        logger.info(
+                            "Fallback provider %s quota exhausted: %s", _pname, qde.message
+                        )
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "Fallback download error for %s:%s", prov_key, sr.source_id
+                        )
+                    finally:
+                        try:
+                            clear_current_provider()
+                        except Exception:
+                            pass
+            except Exception:
+                logger.exception("Error while attempting fallback download candidates.")
+    except QuotaDeferredException as qde:
+        # Quota exhausted for selected provider - defer for later retry
+        download_deferred = True
+        logger.info("Download deferred for '%s': %s", task.title, qde.message)
+        _add_deferred_download({
+            "title": task.title,
+            "creator": task.creator,
+            "entry_id": task.entry_id,
+            "base_output_dir": task.base_output_dir,
+            "selected": selected,
+            "provider_tuple": task.provider_tuple,
+            "work_dir": work_dir,
+            "reset_time": qde.reset_time,
+            "provider": qde.provider,
+        })
+    except Exception:
+        logger.exception("Error during download for %s:%s", pkey, selected.source_id)
+    
+    # If 'all', also download other candidates
+    download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
+    if download_strategy == "all":
+        for sr in all_candidates:
+            try:
+                if sr.provider_key == pkey and sr.source_id == selected.source_id:
+                    continue
+                prov_key = sr.provider_key or "unknown"
+                if prov_key in provider_map:
+                    _s, dfunc, pname2 = provider_map[prov_key]
+                    logger.info(
+                        "Downloading additional candidate from %s into %s",
+                        pname2,
+                        work_dir,
+                    )
+                    try:
+                        set_current_provider(prov_key)
+                        dfunc(sr, work_dir)
+                    finally:
+                        try:
+                            clear_current_provider()
+                        except Exception:
+                            pass
+            except Exception:
+                logger.exception(
+                    "Failed to download additional candidate %s:%s",
+                    sr.provider_key,
+                    sr.source_id,
+                )
+
+    # Update work.json status based on outcome
+    if download_succeeded:
+        update_work_status(work_json_path, "completed", {
+            "provider": selected.provider,
+            "provider_key": selected.provider_key,
+            "source_id": selected_source_id,
+        })
+    elif download_deferred:
+        update_work_status(work_json_path, "deferred")
+    else:
+        update_work_status(work_json_path, "failed")
+
+    # Update index.csv summary (thread-safe)
+    work_id = task.work_id
+    row = {
+        "work_id": work_id,
+        "entry_id": task.entry_id,
+        "work_dir": work_dir,
+        "title": task.title,
+        "creator": task.creator,
+        "selected_provider": selected.provider,
+        "selected_provider_key": selected.provider_key,
+        "selected_source_id": selected_source_id,
+        "selected_dir": work_dir,
+        "work_json": work_json_path,
+        "status": "completed" if download_succeeded else ("deferred" if download_deferred else "failed"),
+    }
+    _update_index_csv(task.base_output_dir, row)
+
+    if download_succeeded:
+        logger.info("Download completed for '%s'. Check '%s' for results.", task.title, work_dir)
+    else:
+        logger.info("Download %s for '%s'.", "deferred" if download_deferred else "failed", task.title)
+    
+    return download_succeeded
+
+
 def process_work(
     title: str,
     creator: Optional[str] = None,
@@ -575,7 +980,7 @@ def process_work(
             # Quota exhausted for selected provider - defer for later retry
             download_deferred = True
             logger.info("Download deferred for '%s': %s", title, qde.message)
-            _deferred_downloads.append({
+            _add_deferred_download({
                 "title": title,
                 "creator": creator,
                 "entry_id": entry_id,
@@ -635,56 +1040,57 @@ def process_work(
         else:
             update_work_status(work_json_path, "no_match")
 
-    # Update index.csv summary
-    try:
-        index_path = os.path.join(base_output_dir, "index.csv")
-        row = {
-            "work_id": work_id,
-            "entry_id": entry_id,
-            "work_dir": work_dir,
-            "title": title,
-            "creator": creator,
-            "selected_provider": selected.provider if selected else None,
-            "selected_provider_key": selected.provider_key if selected else None,
-            "selected_source_id": selected_source_id,
-            "selected_dir": selected_dir,
-            "work_json": work_json_path,
-        }
-        df = pd.DataFrame([row])
-        header = not os.path.exists(index_path)
-        df.to_csv(index_path, mode="a", header=header, index=False)
-    except Exception:
-        logger.exception("Failed to update index.csv")
+    # Update index.csv summary (thread-safe)
+    row = {
+        "work_id": work_id,
+        "entry_id": entry_id,
+        "work_dir": work_dir,
+        "title": title,
+        "creator": creator,
+        "selected_provider": selected.provider if selected else None,
+        "selected_provider_key": selected.provider_key if selected else None,
+        "selected_source_id": selected_source_id,
+        "selected_dir": selected_dir,
+        "work_json": work_json_path,
+    }
+    _update_index_csv(base_output_dir, row)
 
-    finally:
-        # Clear per-work context
-        try:
-            clear_current_work()
-        except Exception:
-            pass
-        try:
-            clear_current_entry()
-        except Exception:
-            pass
-        try:
-            clear_current_name_stem()
-        except Exception:
-            pass
+    # Clear per-work context
+    try:
+        clear_current_work()
+    except Exception:
+        pass
+    try:
+        clear_current_entry()
+    except Exception:
+        pass
+    try:
+        clear_current_name_stem()
+    except Exception:
+        pass
+    
     logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
 
 
 def get_deferred_downloads() -> List[dict]:
     """Get the list of deferred downloads waiting for quota reset.
     
+    Thread-safe.
+    
     Returns:
-        List of deferred download info dicts
+        List of deferred download info dicts (copy)
     """
-    return list(_deferred_downloads)
+    with _deferred_downloads_lock:
+        return list(_deferred_downloads)
 
 
 def clear_deferred_downloads() -> None:
-    """Clear the deferred downloads list."""
-    _deferred_downloads.clear()
+    """Clear the deferred downloads list.
+    
+    Thread-safe.
+    """
+    with _deferred_downloads_lock:
+        _deferred_downloads.clear()
 
 
 def process_deferred_downloads(wait_for_reset: bool = True) -> int:
@@ -692,6 +1098,8 @@ def process_deferred_downloads(wait_for_reset: bool = True) -> int:
     
     This function should be called after processing all works to retry
     downloads that were deferred because a provider's quota was exhausted.
+    
+    Thread-safe.
     
     Args:
         wait_for_reset: If True, wait for the quota reset time before retrying.
@@ -702,15 +1110,19 @@ def process_deferred_downloads(wait_for_reset: bool = True) -> int:
     """
     import time
     
-    if not _deferred_downloads:
-        logger.info("No deferred downloads to process.")
-        return 0
+    # Get a copy of deferred downloads
+    with _deferred_downloads_lock:
+        if not _deferred_downloads:
+            logger.info("No deferred downloads to process.")
+            return 0
+        
+        deferred_copy = list(_deferred_downloads)
     
-    logger.info("Processing %d deferred download(s)...", len(_deferred_downloads))
+    logger.info("Processing %d deferred download(s)...", len(deferred_copy))
     
     # Find the earliest reset time
     earliest_reset = None
-    for item in _deferred_downloads:
+    for item in deferred_copy:
         reset_time = item.get("reset_time")
         if reset_time and (earliest_reset is None or reset_time < earliest_reset):
             earliest_reset = reset_time
@@ -743,7 +1155,7 @@ def process_deferred_downloads(wait_for_reset: bool = True) -> int:
     processed = 0
     failed = []
     
-    for item in list(_deferred_downloads):
+    for item in deferred_copy:
         title = item.get("title")
         selected = item.get("selected")
         provider_tuple = item.get("provider_tuple")
@@ -762,7 +1174,12 @@ def process_deferred_downloads(wait_for_reset: bool = True) -> int:
             if ok:
                 logger.info("Deferred download succeeded for '%s'", title)
                 processed += 1
-                _deferred_downloads.remove(item)
+                # Remove from deferred list (thread-safe)
+                with _deferred_downloads_lock:
+                    try:
+                        _deferred_downloads.remove(item)
+                    except ValueError:
+                        pass  # Already removed
             else:
                 logger.warning("Deferred download still failed for '%s'", title)
                 failed.append(item)
