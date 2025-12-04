@@ -37,6 +37,26 @@ This guide provides best practices for running large-scale downloads (50+ items)
 | 51-100 items | 1-3 hours | 60-70% | Multiple batches recommended |
 | 100+ items | 3+ hours | 60-70% | Definitely use batches, run overnight |
 
+### Interactive vs CLI Mode
+
+ChronoDownloader supports two operation modes:
+
+**Interactive Mode** (default): Best for small batches (1-25 items) and exploration
+- Guided workflow with colored console interface
+- Three download modes: CSV Batch, Single Work, Predefined Collection
+- Visual provider status display
+- Real-time input validation
+
+**CLI Mode**: Recommended for large-scale workflows (25+ items)
+- Scriptable and automatable
+- Better for overnight runs and batch processing
+- Can be combined with resume mode for interrupted downloads
+
+For large-scale operations, use CLI mode with explicit parameters:
+```bash
+python main/downloader.py --cli batch.csv --output_dir output --log-level INFO
+```
+
 ---
 
 ## Planning Your Workflow
@@ -66,36 +86,57 @@ This guide provides best practices for running large-scale downloads (50+ items)
 **Provider Characteristics:**
 
 **MDZ (Bavarian State Library)**
-- ✅ Excellent IIIF implementation (fast, reliable)
-- ✅ Strong coverage: German, Italian, Latin works
-- ✅ Complete digitizations (500+ pages common)
-- ⚠️ Limited to European materials
+- Excellent IIIF implementation (fast, reliable)
+- Strong coverage: German, Italian, Latin works
+- Complete digitizations (500+ pages common)
+- Limited to European materials
 
 **BnF Gallica**
-- ✅ Comprehensive French collections
-- ✅ Good metadata quality
-- ⚠️ Slower API (use 1500ms delay)
-- ✅ IIIF manifests usually available
+- Comprehensive French collections
+- Good metadata quality
+- Slower API (use 1500ms+ delay)
+- IIIF manifests usually available
 
 **Internet Archive**
-- ✅ Broadest coverage globally
-- ✅ PDF availability usually good
-- ⚠️ IIIF manifests often fail (optimization critical!)
-- ✅ Community uploads = unexpected finds
+- Broadest coverage globally
+- PDF availability usually good
+- IIIF manifests can be slow (use PDF preference)
+- Community uploads = unexpected finds
 
 **Google Books**
-- ✅ Fast API, good PDF/EPUB support
-- ✅ Strong English-language coverage
-- ⚠️ Many items are preview-only
-- ✅ Good for 19th-20th century works
+- Fast API, good PDF/EPUB support
+- Strong English-language coverage
+- Many items are preview-only
+- Good for 19th-20th century works
+- Has strict rate limits (use circuit breaker)
 
 **Library of Congress**
-- ✅ Authoritative US materials
-- ✅ Good metadata quality
-- ⚠️ Smaller digitized collection
-- ✅ Historical American documents
+- Authoritative US materials
+- Good metadata quality
+- Smaller digitized collection
+- Historical American documents
+
+**Anna's Archive**
+- Shadow library aggregator with broad coverage
+- Supports fast downloads with API key (daily quota)
+- Falls back to public scraping without key
+- Good for rare or hard-to-find materials
 
 ### Step 3: Create CSV Files
+
+**CSV Column Mapping:**
+
+ChronoDownloader supports flexible column mapping, allowing you to use CSV files with different column naming conventions. Configure in `config.json`:
+
+```json
+"csv_column_mapping": {
+  "title": ["Title", "short_title", "full_title"],
+  "creator": ["Creator", "main_author", "author"],
+  "entry_id": ["entry_id", "id", "work_id"]
+}
+```
+
+The tool checks columns in priority order and uses the first match found.
 
 **Best Practices:**
 
@@ -112,10 +153,10 @@ This guide provides best practices for running large-scale downloads (50+ items)
    ```
 
 3. **Quality Checks**
-   - ✅ No extra quotes or special characters
-   - ✅ Consistent date format (YYYY)
-   - ✅ Creator names in original form
-   - ✅ Diacritics preserved
+   - No extra quotes or special characters
+   - Consistent date format (YYYY)
+   - Creator names in original form
+   - Diacritics preserved
 
 4. **Batch Organization**
    ```
@@ -129,27 +170,33 @@ This guide provides best practices for running large-scale downloads (50+ items)
 
 ## Configuration Optimization
 
-### Critical Optimization: Internet Archive IIIF
+### Critical Optimization: PDF Preference and Resume Mode
 
-**Problem:** Internet Archive IIIF manifests frequently return 500 errors, causing 5+ minutes of retries per item.
+**Problem:** IIIF image downloads can be slow and manifest requests sometimes fail, causing extended retries.
 
-**Solution:** Enable PDF preference to skip IIIF entirely.
+**Solution:** Enable PDF preference and configure resume mode for interrupted downloads.
 
 ```json
 {
+  "download": {
+    "resume_mode": "skip_if_has_objects",
+    "prefer_pdf_over_images": true
+  },
   "provider_settings": {
     "internet_archive": {
       "prefer_pdf": true,
       "max_pages": 0
     }
-  },
-  "download": {
-    "prefer_pdf_over_images": true
   }
 }
 ```
 
-**Impact:** 60% speed improvement for Internet Archive downloads!
+**Resume Mode Options:**
+- `skip_completed`: Skip if work.json exists (fastest resume)
+- `skip_if_has_objects`: Skip if objects/ folder has files (recommended)
+- `reprocess_all`: Always reprocess everything
+
+**Impact:** 60% speed improvement for Internet Archive downloads, plus safe interruption handling!
 
 ### Network Settings Tuning
 
@@ -282,9 +329,23 @@ python main/downloader.py batches/french_cookbooks.csv \
 # Continue pattern...
 ```
 
-### Parallel Processing (Advanced)
+### Parallel Provider Searches
 
-For very large collections, consider parallel execution:
+ChronoDownloader supports parallel provider searches within a single run, significantly speeding up candidate collection:
+
+```json
+{
+  "selection": {
+    "max_parallel_searches": 5
+  }
+}
+```
+
+With `max_parallel_searches: 5`, searching 5 providers completes in ~1 second instead of ~5 seconds (sequential). Each provider's rate limiting and backoff logic operates independently.
+
+### Multi-Terminal Processing (Advanced)
+
+For very large collections, consider running multiple instances in parallel:
 
 ```powershell
 # Terminal 1
@@ -322,12 +383,15 @@ python main/downloader.py batch_02.csv --output_dir output_02 --config config.js
 
 ### Speed Optimization Checklist
 
-- [ ] `prefer_pdf_over_images: true` enabled
-- [ ] `max_attempts: 5` (not 10)
-- [ ] Provider hierarchy optimized for your content
-- [ ] Appropriate delays set (no rate limiting)
-- [ ] `max_pages` limits set if needed
-- [ ] Download strategy: `selected_only`
+- `prefer_pdf_over_images: true` enabled
+- `resume_mode: skip_if_has_objects` for safe interruption
+- `max_attempts: 5` (not 10)
+- `max_parallel_searches: 5` for parallel provider searches
+- Provider hierarchy optimized for your content
+- Appropriate delays set (no rate limiting)
+- `max_pages` limits set if needed
+- Download strategy: `selected_only`
+- Circuit breaker enabled for rate-limited providers (Google Books)
 
 ### Expected Download Times
 
@@ -354,7 +418,7 @@ python main/downloader.py batch_02.csv --output_dir output_02 --config config.js
 
 **Watch For:**
 
-✅ **Good Signs:**
+**Good Signs:**
 ```
 INFO - Found X item(s) on [provider]
 INFO - Downloading selected item from [provider]
@@ -362,13 +426,13 @@ INFO - Downloaded [file]
 INFO - Finished processing '[work]'
 ```
 
-⚠️ **Warning Signs:**
+**Warning Signs:**
 ```
 WARNING - No items found for '[work]' on [provider]
 WARNING - 500 for [URL]; sleeping Xs (attempt Y/10)
 ```
 
-❌ **Error Signs:**
+**Error Signs:**
 ```
 ERROR - Giving up after 10 attempts
 ERROR - No items found across all enabled APIs
@@ -479,10 +543,10 @@ Get-ChildItem output -Recurse -Filter "work.json" |
 **3. PDF Validation**
 
 Sample check PDFs to ensure:
-- ✅ Files open correctly
-- ✅ Content matches expected work
-- ✅ Complete (not truncated)
-- ✅ Reasonable file size
+- Files open correctly
+- Content matches expected work
+- Complete (not truncated)
+- Reasonable file size
 
 **4. Success Rate Analysis**
 
@@ -643,11 +707,20 @@ python main/downloader.py new_items_2024-10.csv \
 - 429 errors
 - Repeated timeouts
 - Very slow responses
+- Circuit breaker messages in logs
 
 **Solutions:**
 - Increase `delay_ms` for that provider
 - Reduce `max_candidates_per_provider`
 - Split into smaller batches with time gaps
+- Enable circuit breaker to auto-pause problem providers:
+  ```json
+  "network": {
+    "circuit_breaker_enabled": true,
+    "circuit_breaker_threshold": 3,
+    "circuit_breaker_cooldown_s": 300
+  }
+  ```
 - Switch to different provider
 
 ### Issue: Inconsistent Results
@@ -667,34 +740,39 @@ python main/downloader.py new_items_2024-10.csv \
 ## Best Practices Summary
 
 ### Configuration
-- ✅ Always enable `prefer_pdf_over_images: true`
-- ✅ Set `max_attempts: 5` (not 10)
-- ✅ Configure appropriate provider delays
-- ✅ Set reasonable download limits
+- Always enable `prefer_pdf_over_images: true`
+- Set `resume_mode: skip_if_has_objects` for safe interruption
+- Set `max_attempts: 5` (not 10)
+- Configure appropriate provider delays
+- Set reasonable download limits
+- Enable circuit breaker for rate-limited providers
 
 ### CSV Preparation
-- ✅ Use original language titles
-- ✅ Research exact titles in library catalogs
-- ✅ Keep diacritics and special characters
-- ✅ Test with small batch first
+- Use original language titles
+- Research exact titles in library catalogs
+- Keep diacritics and special characters
+- Test with small batch first
+- Use CSV column mapping for non-standard column names
 
 ### Execution
-- ✅ Start with 5-10 items to validate
-- ✅ Use batch sizes of 25-50 items
-- ✅ Monitor logs in real-time
-- ✅ Run large batches overnight
+- Start with 5-10 items to validate
+- Use batch sizes of 25-50 items
+- Enable parallel searches (`max_parallel_searches: 5`) for faster processing
+- Monitor logs in real-time
+- Run large batches overnight
 
 ### Quality Control
-- ✅ Review index.csv after each batch
-- ✅ Spot-check downloaded files
-- ✅ Track success rates
-- ✅ Adjust configuration based on results
+- Review index.csv after each batch
+- Spot-check downloaded files
+- Track success rates
+- Adjust configuration based on results
 
 ### Recovery
-- ✅ Identify failure patterns
-- ✅ Adjust titles for failures
-- ✅ Retry with modified configuration
-- ✅ Document what works for your collection
+- Use resume mode to continue interrupted downloads
+- Identify failure patterns
+- Adjust titles for failures
+- Retry with modified configuration
+- Document what works for your collection
 
 ---
 
@@ -712,4 +790,4 @@ With these practices, you can achieve 60-70% success rates on large collections 
 
 For specific use cases (historical cookbooks, medical texts, etc.), see the specialized guides in the `cookbooks/` or other collection-specific directories.
 
-Happy downloading! 🚀
+Happy downloading!

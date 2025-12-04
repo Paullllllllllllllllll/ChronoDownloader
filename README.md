@@ -35,12 +35,14 @@ Meant to be used in conjunction with [ChronoMiner](https://github.com/Paulllllll
 - IIIF Support: Native support for IIIF Presentation and Image APIs with optimized performance for faster downloads
 - Budget Management: Content-type download budgets (images, PDFs, metadata) with simple GB-based limits
 - Rate Limiting: Built-in per-provider rate limiting with exponential backoff to respect API quotas
-- Adaptive Circuit Breaker: Automatically pauses providers that hit repeated 429s and retries after a cooldown
+- Adaptive Circuit Breaker: Automatically pauses providers that hit repeated 429s and retries after a configurable cooldown period
 - Robust Error Handling: Automatic retries, fallback providers, and comprehensive logging
 - Batch Processing: Process CSV files with hundreds or thousands of works efficiently with proven workflows for large-scale operations
-- Dual-Mode Operation: Interactive guided workflow or CLI automation via configuration toggle
+- Dual-Mode Operation: Interactive guided workflow with colored console UI, or CLI automation for scripting and batch jobs
 - Metadata Preservation: Save search results, manifests, and selection decisions for auditing
 - Performance Optimizations: Internet Archive PDF-first strategy with IIIF fallback for 60% faster downloads
+- Resume Modes: Continue interrupted downloads with configurable resume strategies (skip completed, skip if has objects, reprocess all)
+- Flexible CSV Mapping: Configurable column name mapping supports varied input formats without manual renaming
 
 ## Supported Providers
 
@@ -314,29 +316,55 @@ Provider-Specific Limits:
 
 These values slow down request cadence, cap retries, and ensure the circuit breaker disables Google Books for ten minutes after two consecutive 429 responses, letting other providers finish uninterrupted.
 
+#### Example: Anna's Archive with Quota Management
+
+```json
+"annas_archive": {
+  "max_pages": 0,
+  "daily_fast_download_limit": 10,
+  "wait_for_quota_reset": true,
+  "quota_reset_wait_hours": 24,
+  "network": {
+    "delay_ms": 800,
+    "jitter_ms": 300,
+    "max_attempts": 5,
+    "base_backoff_s": 2.0,
+    "backoff_multiplier": 2.0,
+    "max_backoff_s": 45.0,
+    "timeout_s": 45
+  }
+}
+```
+
+Anna's Archive supports two download modes: fast downloads with an API key (limited daily quota) and slower public scraping without a key. The `daily_fast_download_limit` tracks how many fast downloads have been used, and `wait_for_quota_reset` controls whether to defer or fall back to scraping when the quota is exhausted.
+
 ### 3. Download Preferences
 
 ```json
 {
   "download": {
+    "resume_mode": "skip_if_has_objects",
     "prefer_pdf_over_images": true,
     "download_manifest_renderings": true,
     "max_renderings_per_manifest": 1,
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
     "overwrite_existing": false,
-    "include_metadata": true
+    "include_metadata": true,
+    "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff"]
   }
 }
 ```
 
 Download Preference Parameters:
 
+- `resume_mode`: How to handle previously processed works. Options: `skip_completed` (skip if work.json exists), `skip_if_has_objects` (skip if objects/ folder has files), `reprocess_all` (always reprocess)
 - `prefer_pdf_over_images`: Skip page images when PDF/EPUB is available (recommended: true for faster downloads, especially with Internet Archive)
 - `download_manifest_renderings`: Download PDFs/EPUBs linked in IIIF manifests
 - `max_renderings_per_manifest`: Maximum number of rendering files per manifest
 - `rendering_mime_whitelist`: Allowed MIME types for renderings
 - `overwrite_existing`: Whether to overwrite existing files
 - `include_metadata`: Save metadata JSON files alongside downloads
+- `allowed_object_extensions`: List of file extensions to download (e.g., [".pdf", ".epub", ".jpg"]). Files with other extensions are saved to metadata only if `save_disallowed_to_metadata` is true
 
 ### 4. Download Budget Limits
 
@@ -419,7 +447,27 @@ Fuzzy Matching:
 
 The tool uses token-set ratio matching to handle minor spelling variations, different word orders, punctuation differences, and subtitle variations. Scoring combines title similarity, creator similarity (weighted), and quality signals (IIIF availability, item URL). The min_title_score threshold is configurable and can be adjusted based on your collection: use lower values (50-60) for multilingual or historical collections with variant spellings, and higher values (70-85) for modern English-language collections where exact matching is expected.
 
-### 6. Naming Conventions
+### 6. CSV Column Mapping
+
+```json
+{
+  "csv_column_mapping": {
+    "title": ["Title", "short_title", "full_title"],
+    "creator": ["Creator", "main_author", "author"],
+    "entry_id": ["entry_id", "id", "work_id"]
+  }
+}
+```
+
+CSV Column Mapping Parameters:
+
+- `title`: List of column names to check for the work title, in priority order. The first matching column found will be used.
+- `creator`: List of column names to check for the creator/author name.
+- `entry_id`: List of column names to check for the unique entry identifier.
+
+This feature allows you to use CSV files with different column naming conventions without manual renaming. For example, if your CSV has a column named `short_title` instead of `Title`, the tool will automatically use it.
+
+### 7. Naming Conventions
 
 ```json
 {
@@ -511,21 +559,32 @@ Optional:
 
 ### Interactive Mode
 
-When `interactive_mode` is `true` in config (default), running `python main/downloader.py` launches a guided workflow:
+When `interactive_mode` is `true` in config (default), running `python main/downloader.py` launches a guided workflow with a colored console interface:
 
-1. **Mode Selection**: Choose between CSV batch, single work, or predefined collection
-2. **Source Configuration**: Specify CSV path or enter work details manually
-3. **Output Settings**: Configure output directory
-4. **Options**: Set dry-run, logging level
-5. **Confirmation**: Review and confirm before processing
+**Workflow Steps:**
 
-Interactive mode features:
-- Visual display of enabled/disabled providers
-- Navigation with back/quit options at each step
-- Input validation with helpful error messages
-- Processing summary on completion
+1. **Welcome Screen**: Displays tool banner and lists all enabled/disabled providers
+2. **Mode Selection**: Choose between three download modes:
+   - **CSV Batch**: Process multiple works from a CSV file
+   - **Single Work**: Download a specific work by entering title and optional creator
+   - **Predefined Collection**: Select from CSV files in the current directory or `collections/` folder
+3. **Source Configuration**: Based on selected mode, specify CSV path, enter work details, or pick a collection
+4. **Output Settings**: Configure output directory (defaults to `downloaded_works`)
+5. **Options**: Set dry-run mode and logging level
+6. **Confirmation**: Review all settings and confirm before processing
+7. **Processing Summary**: View results with success/failure counts on completion
 
-Force interactive mode with `--interactive` flag even when config says CLI:
+**Interactive Mode Features:**
+
+- **Colored Console UI**: ANSI color support for better readability (Windows 10+ supported)
+- **Provider Status Display**: Visual indicator of which providers are enabled/disabled
+- **CSV Discovery**: Automatically lists available CSV files in the current directory
+- **CSV Column Mapping**: Validates CSV and applies configured column mappings automatically
+- **Navigation**: Back/quit options at each step for easy workflow control
+- **Input Validation**: Helpful error messages for invalid inputs (missing files, bad CSV format)
+- **Default Values**: Uses `default_output_dir` and `default_csv_path` from config
+
+**Force Interactive Mode:**
 ```bash
 python main/downloader.py --interactive
 ```
