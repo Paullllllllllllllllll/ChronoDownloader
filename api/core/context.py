@@ -2,10 +2,17 @@
 
 This module provides thread-safe context variables used throughout the download pipeline
 to track the current work ID, entry ID, provider key, and naming stem for file generation.
+
+Key features:
+- Thread-local storage for per-work context
+- Context manager for automatic setup/cleanup
+- File sequencing counters for standardized naming
 """
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
+from typing import Generator
 
 # Thread-local storage for current work context
 _TLS = threading.local()
@@ -132,3 +139,81 @@ def increment_counter(key: tuple[str, str, str]) -> int:
     counters = get_counters()
     counters[key] = counters.get(key, 0) + 1
     return counters[key]
+
+
+def clear_all_context() -> None:
+    """Clear all thread-local context variables.
+    
+    This is a convenience function that clears work, entry, provider,
+    and name_stem contexts in a single call, suppressing any errors.
+    """
+    for clear_fn in (clear_current_work, clear_current_entry, clear_current_provider, clear_current_name_stem):
+        try:
+            clear_fn()
+        except Exception:
+            pass
+
+
+@contextmanager
+def work_context(
+    work_id: str | None = None,
+    entry_id: str | None = None,
+    provider_key: str | None = None,
+    name_stem: str | None = None,
+) -> Generator[None, None, None]:
+    """Context manager for setting up and tearing down work context.
+    
+    Automatically sets the provided context values on entry and clears
+    all context on exit, even if an exception occurs.
+    
+    Args:
+        work_id: Optional work ID to set
+        entry_id: Optional entry ID to set
+        provider_key: Optional provider key to set
+        name_stem: Optional naming stem to set
+        
+    Yields:
+        None
+        
+    Example:
+        with work_context(work_id="abc123", entry_id="E0001", name_stem="my_work"):
+            # Do work here - context is automatically managed
+            pass
+        # Context is automatically cleared here
+    """
+    try:
+        if work_id is not None:
+            set_current_work(work_id)
+        if entry_id is not None:
+            set_current_entry(entry_id)
+        if provider_key is not None:
+            set_current_provider(provider_key)
+        if name_stem is not None:
+            set_current_name_stem(name_stem)
+        reset_counters()
+        yield
+    finally:
+        clear_all_context()
+
+
+@contextmanager
+def provider_context(provider_key: str | None) -> Generator[None, None, None]:
+    """Context manager for setting provider context only.
+    
+    Useful for wrapping download operations where only provider context is needed.
+    
+    Args:
+        provider_key: Provider key to set
+        
+    Yields:
+        None
+    """
+    try:
+        if provider_key is not None:
+            set_current_provider(provider_key)
+        yield
+    finally:
+        try:
+            clear_current_provider()
+        except Exception:
+            pass
