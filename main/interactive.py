@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -262,6 +262,35 @@ class InteractiveWorkflow:
             default=False
         )
         
+        # Parallel download options (only for batch modes)
+        if self.config.mode in ("csv", "collection"):
+            dl_config = get_download_config()
+            config_max_parallel = int(dl_config.get("max_parallel_downloads", 1) or 1)
+            
+            if config_max_parallel > 1:
+                # Config already enables parallelism
+                ConsoleUI.print_info(
+                    f"Parallel downloads enabled via config ({config_max_parallel} workers)"
+                )
+                self.config.use_parallel = True
+                self.config.max_workers_override = None
+            else:
+                # Ask if user wants to enable parallelism
+                if ConsoleUI.prompt_yes_no("Enable parallel downloads?", default=True):
+                    self.config.use_parallel = True
+                    workers_input = ConsoleUI.prompt_input(
+                        "Number of parallel workers",
+                        default="4"
+                    )
+                    try:
+                        workers = max(1, int(workers_input))
+                        self.config.max_workers_override = workers
+                    except ValueError:
+                        self.config.max_workers_override = 4
+                else:
+                    self.config.use_parallel = False
+                    self.config.max_workers_override = None
+        
         # Log level
         log_options = [
             ("INFO", "INFO — Standard logging (recommended)"),
@@ -301,6 +330,20 @@ class InteractiveWorkflow:
         
         print(f"  {ConsoleUI.BOLD}Output Directory:{ConsoleUI.RESET} {self.config.output_dir}")
         print(f"  {ConsoleUI.BOLD}Dry Run:{ConsoleUI.RESET} {'Yes' if self.config.dry_run else 'No'}")
+        
+        # Show parallel settings for batch modes
+        if self.config.mode in ("csv", "collection"):
+            if self.config.use_parallel and not self.config.dry_run:
+                workers = self.config.max_workers_override
+                if workers:
+                    print(f"  {ConsoleUI.BOLD}Parallel Downloads:{ConsoleUI.RESET} {workers} workers")
+                else:
+                    dl_config = get_download_config()
+                    workers = int(dl_config.get("max_parallel_downloads", 1) or 1)
+                    print(f"  {ConsoleUI.BOLD}Parallel Downloads:{ConsoleUI.RESET} {workers} workers (from config)")
+            else:
+                print(f"  {ConsoleUI.BOLD}Parallel Downloads:{ConsoleUI.RESET} Sequential")
+        
         print(f"  {ConsoleUI.BOLD}Log Level:{ConsoleUI.RESET} {self.config.log_level}")
         
         print()
@@ -426,9 +469,13 @@ def process_csv_batch(
     output_dir: str,
     config_path: str,
     dry_run: bool,
-    log: logging.Logger
+    log: logging.Logger,
+    use_parallel: bool = True,
+    max_workers_override: Optional[int] = None
 ) -> int:
     """Process works from a CSV file.
+    
+    Supports both parallel and sequential processing modes.
     
     Args:
         csv_path: Path to CSV file
@@ -436,11 +483,13 @@ def process_csv_batch(
         config_path: Path to config file
         dry_run: Whether to skip downloads
         log: Logger instance
+        use_parallel: Whether to use parallel downloads
+        max_workers_override: Override for max_parallel_downloads config
         
     Returns:
         Number of works processed
     """
-    from api import utils
+    from main.execution import run_batch_downloads, create_interactive_callbacks
     
     # Load and validate CSV
     if not os.path.exists(csv_path):
@@ -461,43 +510,28 @@ def process_csv_batch(
         return 0
     
     log.info("Starting downloader. Output directory: %s", output_dir)
-    processed = 0
+    log.info("Works to process: %d", len(works_df))
     
-    # Process each work in the CSV (resume logic handled by pipeline.check_work_status)
-    for index, row in works_df.iterrows():
-        title = row["Title"]
-        creator = row.get("Creator")
-        entry_id = row.get("entry_id") if "entry_id" in works_df.columns else None
-        
-        # Generate fallback entry_id if missing
-        if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
-            entry_id = f"E{index + 1:04d}"
-        
-        if pd.isna(title) or not str(title).strip():
-            log.warning("Skipping row %d due to missing or empty title.", index + 1)
-            continue
-        
-        # Delegate to pipeline
-        pipeline.process_work(
-            str(title),
-            None if pd.isna(creator) else str(creator),
-            None if pd.isna(entry_id) else str(entry_id),
-            output_dir,
-            dry_run=dry_run,
-        )
-        
-        processed += 1
-        log.info("%s", "-" * 50)
-        
-        # Stop early if the global download budget has been exhausted
-        try:
-            if utils.budget_exhausted():
-                log.warning("Download budget exhausted; stopping further processing.")
-                break
-        except Exception:
-            pass
+    # Get config for execution
+    config = get_config()
     
-    return processed
+    # Create interactive-friendly callbacks for parallel mode
+    on_submit, on_complete = create_interactive_callbacks(log)
+    
+    # Use shared execution module for both parallel and sequential
+    stats = run_batch_downloads(
+        works_df=works_df,
+        output_dir=output_dir,
+        config=config,
+        dry_run=dry_run,
+        use_parallel=use_parallel,
+        max_workers_override=max_workers_override,
+        logger=log,
+        on_submit=on_submit,
+        on_complete=on_complete,
+    )
+    
+    return stats.get("processed", 0)
 
 
 def process_single_work(
@@ -578,7 +612,9 @@ def run_interactive_session(config: DownloadConfiguration) -> None:
             config.output_dir,
             config.config_path,
             config.dry_run,
-            log
+            log,
+            use_parallel=config.use_parallel,
+            max_workers_override=config.max_workers_override,
         )
     elif config.mode == "single":
         if process_single_work(

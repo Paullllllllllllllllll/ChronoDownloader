@@ -34,6 +34,10 @@ class DownloadConfiguration:
     dry_run: bool = False
     log_level: str = "INFO"
     
+    # Parallel download settings
+    use_parallel: bool = True  # Whether to use parallel downloads (respects config)
+    max_workers_override: int | None = None  # Optional override for max_parallel_downloads
+    
     # Provider overrides (optional)
     provider_hierarchy: list[str] = field(default_factory=list)
     

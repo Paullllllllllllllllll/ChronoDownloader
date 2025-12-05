@@ -15,7 +15,7 @@
     "mdz": true,
     "polona": true,
     "bne": false,
-    "google_books": true,
+    "google_books": false,
     "hathitrust": false,
     "wellcome": true,
     "annas_archive": true
@@ -36,7 +36,7 @@
     "gallica": {
       "max_pages": 0,
       "network": {
-        "delay_ms": 2500,
+        "delay_ms": 4000,
         "jitter_ms": 800,
         "max_attempts": 25,
         "base_backoff_s": 2.0,
@@ -165,9 +165,9 @@
     "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp", ".bmp", ".gif"],
     "save_disallowed_to_metadata": true,
     "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects"],
-    "max_parallel_downloads": 4,
+    "max_parallel_downloads": 10,
     "provider_concurrency": {
-      "default": 2,
+      "default": 5,
       "annas_archive": 1,
       "bnf_gallica": 1,
       "google_books": 1,
@@ -180,14 +180,14 @@
   },
   "selection": {
     "strategy": "collect_and_select",
-    "max_parallel_searches": 5,
+    "max_parallel_searches": 10,
     "provider_hierarchy": [
       "mdz",
       "bnf_gallica",
-      "internet_archive",
       "annas_archive",
-      "google_books",
+      "internet_archive",
       "wellcome",
+      "google_books",
       "loc",
       "europeana",
       "dpla",
@@ -216,7 +216,7 @@
     "per_work": {
       "images_gb": 5,
       "pdfs_gb": 3,
-      "metadata_mb": 10
+      "metadata_mb": 250
     },
     "on_exceed": "stop"
   },
