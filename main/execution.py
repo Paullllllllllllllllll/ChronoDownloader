@@ -247,7 +247,15 @@ def _run_parallel(
         if pending > 0:
             logger.info("Search phase complete. Waiting for %d pending download(s)...", pending)
             
-            results = scheduler.wait_all(timeout=worker_timeout)
+            try:
+                results = scheduler.wait_all(timeout=worker_timeout)
+            except TimeoutError as te:
+                # Some futures didn't complete within timeout, but downloads may have finished
+                # The scheduler tracks completed/succeeded/failed counts independently
+                logger.warning(
+                    "Timeout waiting for all futures: %s. Some downloads may still be in progress.",
+                    te
+                )
             
             stats = scheduler.get_stats()
             logger.info(
@@ -264,7 +272,10 @@ def _run_parallel(
         pending = scheduler.pending_count
         if pending > 0:
             logger.info("Waiting for %d in-progress download(s) to finish...", pending)
-            scheduler.wait_all(timeout=30)
+            try:
+                scheduler.wait_all(timeout=30)
+            except TimeoutError:
+                logger.warning("Timeout waiting for in-progress downloads after interrupt")
     
     finally:
         scheduler.shutdown(wait=True)

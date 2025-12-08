@@ -225,7 +225,7 @@ def _determine_target_directory(
     ext: str,
     allowed_exts: list | None,
     save_disallowed_to_metadata: bool,
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, bool]:
     """Determine target directory based on extension whitelist.
     
     Args:
@@ -235,14 +235,16 @@ def _determine_target_directory(
         save_disallowed_to_metadata: Whether to save disallowed files to metadata
         
     Returns:
-        Tuple of (target_directory, log_message). target_directory is None if should skip.
+        Tuple of (target_directory, log_message, counts_as_success).
+        - target_directory is None if should skip entirely.
+        - counts_as_success is False if file was saved to metadata (not objects).
     """
     if allowed_exts and ext not in allowed_exts:
         if save_disallowed_to_metadata:
-            return os.path.join(folder_path, "metadata"), f"Extension {ext} not in allowed list; saving to metadata folder"
-        return None, f"Extension {ext} not in allowed list; skipping download"
+            return os.path.join(folder_path, "metadata"), f"Extension {ext} not in allowed list; saving to metadata folder", False
+        return None, f"Extension {ext} not in allowed list; skipping download", False
     
-    return os.path.join(folder_path, "objects"), ""
+    return os.path.join(folder_path, "objects"), "", True
 
 
 def _build_standardized_filename(
@@ -427,7 +429,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         allowed_exts = dl_cfg.get("allowed_object_extensions", [])
         save_disallowed = dl_cfg.get("save_disallowed_to_metadata", True)
         
-        target_dir, log_msg = _determine_target_directory(folder_path, inferred_ext, allowed_exts, save_disallowed)
+        target_dir, log_msg, counts_as_success = _determine_target_directory(folder_path, inferred_ext, allowed_exts, save_disallowed)
         if target_dir is None:
             logger.info(log_msg)
             return None
@@ -498,6 +500,11 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         log_suffix = " (insecure)" if is_insecure_retry else ""
         logger.info("Downloaded %s -> %s%s", url, filepath, log_suffix)
         _BUDGET.add_file(provider, work_id)
+        
+        # Return None if saved to metadata (not objects) - caller should not consider this a success
+        if not counts_as_success:
+            logger.info("File saved to metadata folder; not counting as successful download for work completion")
+            return None
         return filepath
     
     def _calculate_backoff(attempt: int, retry_after: str | None) -> float:

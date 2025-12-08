@@ -155,7 +155,9 @@ def get_parallel_download_config() -> Dict[str, Any]:
         "google_books": 1,   # Rate limited
     })
     dl.setdefault("queue_size", 100)
-    dl.setdefault("worker_timeout_s", 600)  # 10 minutes per download
+    # 0 (or omitted) = wait indefinitely for downloads to finish; set a
+    # positive value to enforce a hard ceiling per batch wait.
+    dl.setdefault("worker_timeout_s", 0)
     
     return dl
 
