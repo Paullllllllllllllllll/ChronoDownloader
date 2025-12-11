@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from api.core.config import get_config, get_provider_setting
+from api.core.config import get_config, get_provider_setting, get_min_title_score
 from api.matching import combined_match_score
 from api.model import SearchResult, convert_to_searchresult
 
@@ -169,12 +169,13 @@ def collect_candidates_sequential(
     """Collect candidates using sequential first-hit strategy.
     
     Searches providers in order and stops at the first acceptable match.
+    Uses per-provider min_title_score thresholds when configured.
     
     Args:
         provider_list: Ordered list of provider tuples
         title: Work title
         creator: Optional creator name
-        min_title_score: Minimum score threshold
+        min_title_score: Global minimum score threshold (used as fallback)
         creator_weight: Weight for creator matching
         max_candidates_per_provider: Max results per provider
         
@@ -197,6 +198,9 @@ def collect_candidates_sequential(
             
             logger.info("Found %d item(s) on %s", len(results), pname)
             
+            # Get per-provider threshold, falling back to global
+            provider_threshold = get_min_title_score(pkey, default=min_title_score)
+            
             # Score and collect candidates
             temp: List[Tuple[float, SearchResult]] = []
             for it in results:
@@ -205,7 +209,7 @@ def collect_candidates_sequential(
                 all_candidates.append(sr)
                 
                 sc = sr.raw.get("__matching__", {})
-                if sc.get("score", 0) >= min_title_score:
+                if sc.get("score", 0) >= provider_threshold:
                     temp.append((sc.get("total", 0.0), sr))
             
             if temp:
@@ -412,10 +416,13 @@ def select_best_candidate(
 ) -> Tuple[Optional[SearchResult], Optional[ProviderTuple]]:
     """Select the best candidate based on provider hierarchy and scores.
     
+    Uses per-provider min_title_score thresholds when configured,
+    falling back to the global min_title_score parameter.
+    
     Args:
         all_candidates: List of scored SearchResult candidates
         provider_list: Ordered list of provider tuples (defines priority)
-        min_title_score: Minimum score threshold
+        min_title_score: Global minimum score threshold (used as fallback)
         
     Returns:
         Tuple of (selected_result, selected_provider_tuple)
@@ -425,7 +432,11 @@ def select_best_candidate(
     
     for sr in all_candidates:
         sc = sr.raw.get("__matching__", {})
-        if sc.get("score", 0) < min_title_score:
+        score = sc.get("score", 0)
+        
+        # Use per-provider threshold if configured, else fall back to global
+        provider_threshold = get_min_title_score(sr.provider_key, default=min_title_score)
+        if score < provider_threshold:
             continue
         
         pprio = prov_priority.get(sr.provider_key or "", 9999)

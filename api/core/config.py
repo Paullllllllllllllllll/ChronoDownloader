@@ -187,3 +187,39 @@ def get_resume_mode() -> str:
         Resume mode string
     """
     return str(get_download_config().get("resume_mode", "skip_completed"))
+
+
+def get_min_title_score(provider_key: Optional[str] = None, default: float = 50.0) -> float:
+    """Get minimum title score threshold, with optional per-provider override.
+    
+    Checks provider_settings.<provider_key>.min_title_score first,
+    then falls back to selection.min_title_score, then to default.
+    
+    Args:
+        provider_key: Provider identifier (e.g., 'annas_archive', 'mdz')
+        default: Default value if not configured anywhere
+        
+    Returns:
+        Minimum title score threshold (0-100)
+    """
+    cfg = get_config()
+    
+    # Check per-provider setting first
+    if provider_key:
+        provider_score = get_provider_setting(provider_key, "min_title_score", None)
+        if provider_score is not None:
+            try:
+                return float(provider_score)
+            except (TypeError, ValueError):
+                pass
+    
+    # Fall back to global selection.min_title_score
+    sel = cfg.get("selection", {})
+    global_score = sel.get("min_title_score")
+    if global_score is not None:
+        try:
+            return float(global_score)
+        except (TypeError, ValueError):
+            pass
+    
+    return default
