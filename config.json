@@ -174,7 +174,8 @@
     "include_metadata": true,
     "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp", ".bmp", ".gif"],
     "save_disallowed_to_metadata": true,
-    "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects"],
+    "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects", "resume_from_csv"],
+    "_resume_mode_note": "resume_from_csv uses the retrievable column in the source CSV for resume logic",
     "max_parallel_downloads": 10,
     "provider_concurrency": {
       "default": 5,
@@ -230,9 +231,5 @@
     },
     "on_exceed": "stop"
   },
-  "csv_column_mapping": {
-    "title": ["Title", "short_title", "full_title"],
-    "creator": ["Creator", "main_author", "author"],
-    "entry_id": ["entry_id", "id", "work_id"]
-  }
+  "_csv_format_note": "Expects sampling notebook format: entry_id, short_title, main_author, retrievable, link columns"
 }

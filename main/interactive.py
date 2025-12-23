@@ -22,6 +22,12 @@ from api.providers import PROVIDERS
 from main import pipeline
 from main.console_ui import ConsoleUI, DownloadConfiguration
 from main.mode_selector import get_general_config
+from main.unified_csv import (
+    load_works_csv,
+    get_pending_works,
+    get_stats,
+    TITLE_COL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -414,56 +420,6 @@ class InteractiveWorkflow:
 # Processing Functions
 # =============================================================================
 
-def _normalize_csv_columns(df: pd.DataFrame, config_path: str, log: logging.Logger) -> pd.DataFrame:
-    """Normalize CSV column names based on configured mappings.
-    
-    Args:
-        df: Input DataFrame
-        config_path: Path to configuration JSON file
-        log: Logger instance
-        
-    Returns:
-        DataFrame with normalized column names
-    """
-    import json
-    
-    # Try to load column mappings from config
-    mappings = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                mappings = cfg.get("csv_column_mapping", {})
-        except Exception as e:
-            log.warning("Could not load csv_column_mapping from config: %s", e)
-    
-    # Apply mappings: for each target column, find first matching source column
-    for target_col, source_candidates in mappings.items():
-        if not isinstance(source_candidates, list):
-            source_candidates = [source_candidates]
-        
-        # Check if target already exists
-        if target_col.capitalize() in df.columns:
-            continue
-            
-        # Find first matching source column
-        for source_col in source_candidates:
-            if source_col in df.columns:
-                # Rename to standard format (Title, Creator, entry_id)
-                if target_col == "title":
-                    df.rename(columns={source_col: "Title"}, inplace=True)
-                    log.info("Mapped column '%s' to 'Title'", source_col)
-                elif target_col == "creator":
-                    df.rename(columns={source_col: "Creator"}, inplace=True)
-                    log.info("Mapped column '%s' to 'Creator'", source_col)
-                elif target_col == "entry_id":
-                    df.rename(columns={source_col: "entry_id"}, inplace=True)
-                    log.info("Mapped column '%s' to 'entry_id'", source_col)
-                break
-    
-    return df
-
-
 def process_csv_batch(
     csv_path: str,
     output_dir: str,
@@ -476,9 +432,10 @@ def process_csv_batch(
     """Process works from a CSV file.
     
     Supports both parallel and sequential processing modes.
+    Uses unified CSV system with notebook column format.
     
     Args:
-        csv_path: Path to CSV file
+        csv_path: Path to CSV file (expects sampling notebook format)
         output_dir: Output directory
         config_path: Path to config file
         dry_run: Whether to skip downloads
@@ -491,26 +448,39 @@ def process_csv_batch(
     """
     from main.execution import run_batch_downloads, create_interactive_callbacks
     
-    # Load and validate CSV
-    if not os.path.exists(csv_path):
-        log.error("CSV file not found at %s", csv_path)
-        return 0
-    
+    # Load CSV using unified CSV system
+    abs_csv_path = os.path.abspath(csv_path)
     try:
-        works_df = pd.read_csv(csv_path)
+        works_df = load_works_csv(abs_csv_path)
+    except FileNotFoundError:
+        log.error("CSV file not found at %s", abs_csv_path)
+        return 0
+    except ValueError as e:
+        log.error("CSV validation error: %s", e)
+        return 0
     except Exception as e:
         log.error("Error reading CSV file: %s", e)
         return 0
     
-    # Apply column mappings from config
-    works_df = _normalize_csv_columns(works_df, config_path, log)
+    # Validate required column
+    if TITLE_COL not in works_df.columns:
+        log.error("CSV file must contain a '%s' column (sampling notebook format).", TITLE_COL)
+        return 0
     
-    if "Title" not in works_df.columns:
-        log.error("CSV file must contain a 'Title' column or a mapped equivalent.")
+    # Filter to pending works only (resume support)
+    initial_stats = get_stats(abs_csv_path)
+    pending_df = get_pending_works(works_df)
+    
+    log.info("CSV status: %d total, %d completed, %d failed, %d pending",
+             initial_stats["total"], initial_stats["completed"],
+             initial_stats["failed"], initial_stats["pending"])
+    
+    if len(pending_df) == 0:
+        log.info("No pending works to process. All items already have a status.")
         return 0
     
     log.info("Starting downloader. Output directory: %s", output_dir)
-    log.info("Works to process: %d", len(works_df))
+    log.info("Works to process: %d (pending)", len(pending_df))
     
     # Get config for execution
     config = get_config()
@@ -519,8 +489,9 @@ def process_csv_batch(
     on_submit, on_complete = create_interactive_callbacks(log)
     
     # Use shared execution module for both parallel and sequential
+    # Pass csv_path for status updates back to the source CSV
     stats = run_batch_downloads(
-        works_df=works_df,
+        works_df=pending_df,
         output_dir=output_dir,
         config=config,
         dry_run=dry_run,
@@ -529,6 +500,7 @@ def process_csv_batch(
         logger=log,
         on_submit=on_submit,
         on_complete=on_complete,
+        csv_path=abs_csv_path,
     )
     
     return stats.get("processed", 0)

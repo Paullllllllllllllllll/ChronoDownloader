@@ -45,7 +45,7 @@ Meant to be used in conjunction with [ChronoMiner](https://github.com/Paulllllll
 - Metadata Preservation: Save search results, manifests, and selection decisions for auditing
 - Performance Optimizations: Internet Archive PDF-first strategy with IIIF fallback for 60% faster downloads
 - Resume Modes: Continue interrupted downloads with configurable resume strategies (skip completed, skip if has objects, reprocess all)
-- Flexible CSV Mapping: Configurable column name mapping supports varied input formats without manual renaming
+- Unified CSV System: Single CSV file serves as both input and output, tracking download status and URLs for seamless integration with sampling workflows
 
 ## Supported Providers
 
@@ -370,7 +370,7 @@ Anna's Archive supports two download modes: fast downloads with an API key (limi
 
 Download Preference Parameters:
 
-- `resume_mode`: How to handle previously processed works. Options: `skip_completed` (skip if work.json exists), `skip_if_has_objects` (skip if objects/ folder has files), `reprocess_all` (always reprocess)
+- `resume_mode`: How to handle previously processed works. Options: `skip_completed` (skip if work.json exists), `skip_if_has_objects` (skip if objects/ folder has files), `resume_from_csv` (skip if retrievable=True in CSV), `reprocess_all` (always reprocess)
 - `prefer_pdf_over_images`: Skip page images when PDF/EPUB is available (recommended: true for faster downloads, especially with Internet Archive)
 - `download_manifest_renderings`: Download PDFs/EPUBs linked in IIIF manifests
 - `max_renderings_per_manifest`: Maximum number of rendering files per manifest
@@ -468,25 +468,19 @@ Fuzzy Matching:
 
 The tool uses token-set ratio matching to handle minor spelling variations, different word orders, punctuation differences, and subtitle variations. Scoring combines title similarity, creator similarity (weighted), and quality signals (IIIF availability, item URL). The min_title_score threshold is configurable and can be adjusted based on your collection: use lower values (50-60) for multilingual or historical collections with variant spellings, and higher values (70-85) for modern English-language collections where exact matching is expected.
 
-### 6. CSV Column Mapping
+### 6. CSV Format Requirements
 
-```json
-{
-  "csv_column_mapping": {
-    "title": ["Title", "short_title", "full_title"],
-    "creator": ["Creator", "main_author", "author"],
-    "entry_id": ["entry_id", "id", "work_id"]
-  }
-}
-```
+ChronoDownloader expects CSV files in the sampling notebook format with fixed column names:
 
-CSV Column Mapping Parameters:
+- `entry_id`: Unique identifier (required)
+- `short_title`: Work title for search (required)
+- `main_author`: Creator name (optional)
+- `retrievable`: Download status - True/False/empty (automatically managed)
+- `link`: Item URL (automatically populated)
 
-- `title`: List of column names to check for the work title, in priority order. The first matching column found will be used.
-- `creator`: List of column names to check for the creator/author name.
-- `entry_id`: List of column names to check for the unique entry identifier.
+Additional columns from the sampling notebook (e.g., full_title, primary_category, stratum_abbrev, selection_type, etc.) are preserved but not used by the downloader.
 
-This feature allows you to use CSV files with different column naming conventions without manual renaming. For example, if your CSV has a column named `short_title` instead of `Title`, the tool will automatically use it.
+This standardized format enables seamless integration with the WhatForDinner bib_sampling.ipynb workflow, where the same CSV file can be used for sampling, downloading, and re-sampling failed items.
 
 ### 7. Naming Conventions
 
@@ -526,24 +520,35 @@ For basic usage, see the Configuration and Usage sections in this README. For sp
 
 ### CSV Input Format
 
-The input CSV must contain at minimum a `Title` column. Additional columns enhance matching accuracy:
+ChronoDownloader uses a unified CSV format compatible with sampling notebooks. The CSV serves as both input (defining works to download) and output (tracking download status).
 
-Required:
-- `Title`: The title of the work to search for
+Required columns:
+- `entry_id`: Unique identifier for each work (must be present)
+- `short_title`: Title of the work to search for
 
-Optional but recommended:
-- `entry_id`: Unique identifier for each work (e.g., E0001, BOOK_001). If missing, auto-generated.
-- `Creator`: Author or creator name(s). Improves matching accuracy.
+Optional columns:
+- `main_author`: Creator/author name (improves matching accuracy)
+- `retrievable`: Download status (True/False/empty). Automatically updated during downloads.
+- `link`: Item URL (automatically populated after successful download)
 
-Example CSV (`sample_works.csv`):
+The CSV may contain additional columns (e.g., full_title, primary_category, stratum_abbrev) which are preserved but not used by the downloader.
+
+Example CSV (`sampled_books.csv`):
 
 ```csv
-entry_id,Title,Creator
-E0001,"Le Morte d'Arthur","Thomas Malory"
-E0002,"The Raven","Edgar Allan Poe"
-E0003,"Philosophiæ Naturalis Principia Mathematica","Isaac Newton"
-E0004,"De revolutionibus orbium coelestium","Nicolaus Copernicus"
-E0005,"Discours de la méthode","René Descartes"
+entry_id,short_title,main_author,retrievable,link
+6106,Tractatus de uino,Anonymous,,
+12495,Tractatus de praeparandis,Hier. Emser,,
+12613,Hydrenogamia triumphans,Hippolyto Guarinonio,,
+```
+
+After processing, the CSV is updated in-place:
+
+```csv
+entry_id,short_title,main_author,retrievable,link
+6106,Tractatus de uino,Anonymous,True,https://archive.org/details/...
+12495,Tractatus de praeparandis,Hier. Emser,False,
+12613,Hydrenogamia triumphans,Hippolyto Guarinonio,True,https://gallica.bnf.fr/ark:/...
 ```
 
 ### Basic Usage
@@ -600,7 +605,7 @@ When `interactive_mode` is `true` in config (default), running `python main/down
 - **Colored Console UI**: ANSI color support for better readability (Windows 10+ supported)
 - **Provider Status Display**: Visual indicator of which providers are enabled/disabled
 - **CSV Discovery**: Automatically lists available CSV files in the current directory
-- **CSV Column Mapping**: Validates CSV and applies configured column mappings automatically
+- **CSV Validation**: Validates CSV format and ensures required columns are present
 - **Navigation**: Back/quit options at each step for easy workflow control
 - **Input Validation**: Helpful error messages for invalid inputs (missing files, bad CSV format)
 - **Default Values**: Uses `default_output_dir` and `default_csv_path` from config
@@ -628,6 +633,7 @@ You can use ChronoDownloader as a Python library:
 
 ```python
 from main import pipeline
+from main.unified_csv import load_works_csv, get_pending_works
 from api.core.config import get_config
 
 # Load and configure providers
@@ -637,26 +643,26 @@ pipeline.ENABLED_APIS = providers
 
 # Process a single work
 pipeline.process_work(
-    title="Le Morte d'Arthur",
-    creator="Thomas Malory",
-    entry_id="E0001",
+    title="Tractatus de uino",
+    creator="Anonymous",
+    entry_id="6106",
     base_output_dir="downloaded_works",
     dry_run=False,
 )
 
-# Process multiple works
-works = [
-    {"title": "The Raven", "creator": "Edgar Allan Poe", "entry_id": "E0002"},
-    {"title": "Divina Commedia", "creator": "Dante Alighieri", "entry_id": "E0003"},
-]
+# Process works from CSV (unified CSV system)
+from main.execution import run_batch_downloads
 
-for work in works:
-    pipeline.process_work(
-        title=work["title"],
-        creator=work.get("creator"),
-        entry_id=work.get("entry_id"),
-        base_output_dir="my_output",
-        dry_run=False,
+csv_path = "sampled_books.csv"
+works_df = load_works_csv(csv_path)
+pending_df = get_pending_works(works_df)  # Only process pending items
+
+stats = run_batch_downloads(
+    works_df=pending_df,
+    output_dir="downloaded_works",
+    config=get_config(),
+    dry_run=False,
+    csv_path=csv_path,  # Updates status back to CSV
     )
 ```
 

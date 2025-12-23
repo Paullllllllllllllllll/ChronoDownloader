@@ -7,6 +7,13 @@ ensure consistent behavior.
 The execution flow:
 1. Sequential mode: Process works one at a time via pipeline.process_work()
 2. Parallel mode: Search sequentially, queue downloads to DownloadScheduler
+
+Expected CSV columns (from bib_sampling.ipynb):
+- short_title: Work title for search
+- main_author: Creator/author for search
+- entry_id: Unique identifier
+- retrievable: Download status (True/False/empty)
+- link: Item URL (populated after download)
 """
 from __future__ import annotations
 
@@ -18,6 +25,15 @@ import pandas as pd
 from api import utils
 from main import pipeline
 from main.download_scheduler import DownloadScheduler, DownloadTask, get_parallel_download_config
+from main.unified_csv import (
+    TITLE_COL,
+    CREATOR_COL,
+    ENTRY_ID_COL,
+    get_pending_works,
+    mark_success,
+    mark_failed,
+    mark_deferred,
+)
 
 
 def run_batch_downloads(
@@ -30,11 +46,13 @@ def run_batch_downloads(
     logger: Optional[logging.Logger] = None,
     on_submit: Optional[Callable[[DownloadTask], None]] = None,
     on_complete: Optional[Callable[[DownloadTask, bool, Optional[Exception]], None]] = None,
+    csv_path: Optional[str] = None,
 ) -> Dict[str, int]:
     """Run batch downloads with automatic mode selection.
     
     Args:
-        works_df: DataFrame with 'Title' column (and optional 'Creator', 'entry_id')
+        works_df: DataFrame with columns from sampling notebook:
+                  short_title, main_author, entry_id, retrievable, link
         output_dir: Base directory for downloaded works
         config: Configuration dictionary (from get_config())
         dry_run: If True, skip actual downloads
@@ -43,6 +61,7 @@ def run_batch_downloads(
         logger: Logger instance (creates default if None)
         on_submit: Optional callback when a task is submitted (parallel mode)
         on_complete: Optional callback when a task completes (parallel mode)
+        csv_path: Path to the source CSV for status updates (unified CSV mode)
         
     Returns:
         Dictionary with execution statistics:
@@ -62,40 +81,46 @@ def run_batch_downloads(
     if use_parallel and max_parallel > 1 and not dry_run:
         return _run_parallel(
             works_df, output_dir, config, max_workers_override, logger,
-            on_submit, on_complete
+            on_submit, on_complete, csv_path
         )
     else:
-        return _run_sequential(works_df, output_dir, dry_run, logger)
+        return _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
 
 
 def _run_sequential(
     works_df: pd.DataFrame,
     output_dir: str,
     dry_run: bool,
-    logger: logging.Logger
+    logger: logging.Logger,
+    csv_path: Optional[str] = None,
 ) -> Dict[str, int]:
     """Run downloads sequentially.
     
     Args:
-        works_df: DataFrame with works
+        works_df: DataFrame with works (using notebook column names)
         output_dir: Output directory
         dry_run: Whether to skip downloads
         logger: Logger instance
+        csv_path: Path to source CSV for status updates
         
     Returns:
         Statistics dictionary
     """
     processed = 0
+    succeeded = 0
+    failed = 0
     skipped = 0
     
     for index, row in works_df.iterrows():
-        title = row["Title"]
-        creator = row.get("Creator")
-        entry_id = row.get("entry_id") if "entry_id" in works_df.columns else None
+        title = row.get(TITLE_COL)
+        creator = row.get(CREATOR_COL)
+        entry_id = row.get(ENTRY_ID_COL)
         
-        # Generate fallback entry_id if missing
+        # entry_id is required from the sampling CSV
         if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
-            entry_id = f"E{index + 1:04d}"
+            logger.warning("Skipping row %d due to missing entry_id.", index + 1)
+            skipped += 1
+            continue
         
         if pd.isna(title) or not str(title).strip():
             logger.warning("Skipping row %d due to missing or empty title.", index + 1)
@@ -103,13 +128,27 @@ def _run_sequential(
             continue
         
         # Delegate to pipeline
-        pipeline.process_work(
+        result = pipeline.process_work(
             str(title),
             None if pd.isna(creator) else str(creator),
-            None if pd.isna(entry_id) else str(entry_id),
+            str(entry_id),
             output_dir,
             dry_run=dry_run,
         )
+        
+        # Update CSV status if path provided
+        if csv_path and not dry_run:
+            if result and isinstance(result, dict):
+                # Success - result contains item_url and provider
+                item_url = result.get("item_url", "")
+                provider = result.get("provider", "")
+                mark_success(csv_path, str(entry_id), item_url, provider)
+                succeeded += 1
+            elif result is False:
+                # Explicit failure
+                mark_failed(csv_path, str(entry_id))
+                failed += 1
+            # result is None means deferred/skipped - don't update CSV
         
         processed += 1
         logger.info("%s", "-" * 50)
@@ -123,7 +162,7 @@ def _run_sequential(
             pass
     
     logger.info("All works processed.")
-    return {"processed": processed, "succeeded": 0, "failed": 0, "skipped": skipped}
+    return {"processed": processed, "succeeded": succeeded, "failed": failed, "skipped": skipped}
 
 
 def _run_parallel(
@@ -134,6 +173,7 @@ def _run_parallel(
     logger: logging.Logger,
     on_submit: Optional[Callable[[DownloadTask], None]] = None,
     on_complete: Optional[Callable[[DownloadTask, bool, Optional[Exception]], None]] = None,
+    csv_path: Optional[str] = None,
 ) -> Dict[str, int]:
     """Run downloads in parallel using DownloadScheduler.
     
@@ -141,13 +181,14 @@ def _run_parallel(
     but downloads are parallelized across works.
     
     Args:
-        works_df: DataFrame with works
+        works_df: DataFrame with works (using notebook column names)
         output_dir: Output directory
         config: Configuration dictionary
         max_workers_override: Override for max workers
         logger: Logger instance
         on_submit: Optional callback for task submission
         on_complete: Optional callback for task completion
+        csv_path: Path to source CSV for status updates
         
     Returns:
         Statistics dictionary
@@ -174,6 +215,15 @@ def _run_parallel(
             logger.warning("Download %s for '%s': %s", status, task.title, error)
         else:
             logger.info("Download %s for '%s'", status, task.title)
+        
+        # Update CSV status if path provided
+        if csv_path and task.entry_id:
+            if success:
+                item_url = getattr(task, "item_url", "") or ""
+                provider = getattr(task, "provider", "") or ""
+                mark_success(csv_path, task.entry_id, item_url, provider)
+            else:
+                mark_failed(csv_path, task.entry_id)
     
     # Use provided callbacks or defaults
     submit_callback = on_submit or default_on_submit
@@ -215,13 +265,15 @@ def _run_parallel(
             except Exception:
                 pass
             
-            title = row["Title"]
-            creator = row.get("Creator")
-            entry_id = row.get("entry_id") if "entry_id" in works_df.columns else None
+            title = row.get(TITLE_COL)
+            creator = row.get(CREATOR_COL)
+            entry_id = row.get(ENTRY_ID_COL)
             
-            # Generate fallback entry_id if missing
+            # entry_id is required from the sampling CSV
             if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
-                entry_id = f"E{index + 1:04d}"
+                logger.warning("Skipping row %d due to missing entry_id.", index + 1)
+                skipped_count += 1
+                continue
             
             if pd.isna(title) or not str(title).strip():
                 logger.warning("Skipping row %d due to missing or empty title.", index + 1)

@@ -29,8 +29,14 @@ if __package__ is None or __package__ == "":
 
 from main import pipeline
 from main.mode_selector import run_with_mode_detection
-from main.interactive import run_interactive, _normalize_csv_columns
+from main.interactive import run_interactive
 from main.execution import run_batch_downloads
+from main.unified_csv import (
+    load_works_csv,
+    get_pending_works,
+    get_stats,
+    TITLE_COL,
+)
 from api import utils
 
 
@@ -154,22 +160,38 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
         logger.error("CSV file path is required in CLI mode. Use --interactive for guided setup.")
         return
 
-    # Load and validate CSV
-    if not os.path.exists(args.csv_file):
-        logger.error("CSV file not found at %s", args.csv_file)
-        return
-    
+    # Load CSV using unified CSV system (expects notebook column format)
+    csv_path = os.path.abspath(args.csv_file)
     try:
-        works_df = pd.read_csv(args.csv_file)
+        works_df = load_works_csv(csv_path)
+    except FileNotFoundError:
+        logger.error("CSV file not found at %s", csv_path)
+        return
+    except ValueError as e:
+        logger.error("CSV validation error: %s", e)
+        return
     except Exception as e:
         logger.error("Error reading CSV file: %s", e)
         return
     
-    # Apply column mappings from config
-    works_df = _normalize_csv_columns(works_df, args.config, logger)
+    # Validate required column
+    if TITLE_COL not in works_df.columns:
+        logger.error(
+            "CSV file must contain a '%s' column (sampling notebook format).",
+            TITLE_COL
+        )
+        return
     
-    if "Title" not in works_df.columns:
-        logger.error("CSV file must contain a 'Title' column or a mapped equivalent.")
+    # Filter to pending works only (resume support)
+    initial_stats = get_stats(csv_path)
+    pending_df = get_pending_works(works_df)
+    
+    logger.info("CSV status: %d total, %d completed, %d failed, %d pending",
+                initial_stats["total"], initial_stats["completed"],
+                initial_stats["failed"], initial_stats["pending"])
+    
+    if len(pending_df) == 0:
+        logger.info("No pending works to process. All items already have a status.")
         return
 
     # Get parallel download configuration
@@ -177,16 +199,18 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
     max_parallel = int(dl_config.get("max_parallel_downloads", 1) or 1)
     
     logger.info("Starting downloader. Output directory: %s", args.output_dir)
-    logger.info("Works to process: %d, Parallel downloads: %d", len(works_df), max_parallel)
+    logger.info("Works to process: %d (pending), Parallel downloads: %d", len(pending_df), max_parallel)
     
     # Use shared execution module for both parallel and sequential modes
+    # Pass csv_path for status updates back to the source CSV
     stats = run_batch_downloads(
-        works_df=works_df,
+        works_df=pending_df,
         output_dir=args.output_dir,
         config=config,
         dry_run=args.dry_run,
         use_parallel=(max_parallel > 1),
         logger=logger,
+        csv_path=csv_path,
     )
     
     # Process any deferred downloads (e.g., Anna's Archive quota-limited items)

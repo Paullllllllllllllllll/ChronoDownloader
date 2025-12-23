@@ -580,7 +580,7 @@ def process_work(
     entry_id: Optional[str] = None,
     base_output_dir: str = "downloaded_works",
     dry_run: bool = False,
-) -> None:
+) -> Optional[Dict[str, Any]]:
     """Search, select, persist metadata, and download one work.
 
     This function orchestrates provider searches and the download phase for a
@@ -593,6 +593,10 @@ def process_work(
         entry_id: Optional unique identifier for this work
         base_output_dir: Base directory for downloaded works
         dry_run: If True, skip actual downloads
+        
+    Returns:
+        Dict with 'status', 'item_url', 'provider' on success/failure,
+        None if skipped or deferred
     """
     logger = logging.getLogger(__name__)
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
@@ -605,7 +609,7 @@ def process_work(
     should_skip, skip_reason = check_work_status(work_dir, resume_mode)
     if should_skip:
         logger.info("Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode)
-        return
+        return None  # Skipped - no status update needed
 
     sel_cfg = _get_selection_config()
     provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
@@ -653,7 +657,7 @@ def process_work(
             clear_current_work()
         except Exception:
             pass
-        return
+        return {"status": "failed", "item_url": "", "provider": "", "reason": "no_candidates"}
 
     # Create work directory (work_dir_name computed earlier for resume check)
     work_id = compute_work_id(title, creator)
@@ -899,3 +903,17 @@ def process_work(
         pass
     
     logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
+    
+    # Return result for unified CSV updates
+    if download_succeeded:
+        return {
+            "status": "completed",
+            "item_url": selected.item_url if selected else "",
+            "provider": selected.provider if selected else "",
+        }
+    elif download_deferred:
+        return None  # Deferred - don't update CSV yet
+    elif selected:
+        return {"status": "failed", "item_url": "", "provider": selected.provider, "reason": "download_failed"}
+    else:
+        return {"status": "failed", "item_url": "", "provider": "", "reason": "no_selection"}
