@@ -94,10 +94,12 @@ def search_wellcome(title: str, creator: Optional[str] = None, max_results: int 
         services = _extract_image_services(work)
         if not services:
             continue
+        work_id = work.get("id")
         raw = {
             "title": work.get("title") or title,
             "creator": None,
-            "id": work.get("id"),
+            "id": work_id,
+            "item_url": f"https://wellcomecollection.org/works/{work_id}" if work_id else None,
             "image_services": services,
             "thumbnail": (work.get("thumbnail") or {}).get("url"),
         }

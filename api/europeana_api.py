@@ -108,6 +108,7 @@ def search_europeana(title: str, creator: str | None = None, max_results: int = 
                 "title": item_title,
                 "creator": item_creator,
                 "id": item.get("id"),
+                "item_url": item.get("guid"),
                 "europeana_url": item.get("guid"),
                 "provider": item.get("dataProvider", ["N/A"])[0] if item.get("dataProvider") else "N/A",
                 "iiif_manifest": iiif_manifest,

@@ -88,6 +88,7 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
                 "title": title_text or "N/A",
                 "creator": ", ".join(creators),
                 "id": doc.get("id"),
+                "item_url": doc.get("isShownAt"),
                 "iiif_manifest": iiif_manifest,
                 # Keep additional discovery fields for auditing/fallback
                 "isShownAt": doc.get("isShownAt"),

@@ -55,6 +55,7 @@ def search_polona(title: str, creator: str | None = None, max_results: int = 3) 
                             "title": title_text,
                             "creator": creator or "N/A",
                             "id": item_id,
+                            "item_url": f"https://polona.pl/item/{item_id}",
                         }
                         results.append(convert_to_searchresult("Polona", raw))
                         if len(results) >= max_results:

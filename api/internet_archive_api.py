@@ -59,10 +59,12 @@ def search_internet_archive(
     if data and data.get("response") and data["response"].get("docs"):
         for item in data["response"]["docs"]:
             # Build a normalized SearchResult, keep raw for downloads
+            ia_identifier = item.get("identifier")
             raw = {
                 "title": item.get("title", "N/A"),
                 "creator": ", ".join(item.get("creator", ["N/A"])),
-                "identifier": item.get("identifier"),
+                "identifier": ia_identifier,
+                "item_url": f"https://archive.org/details/{ia_identifier}" if ia_identifier else None,
                 "year": item.get("year", "N/A"),
             }
             sr = convert_to_searchresult("Internet Archive", raw)

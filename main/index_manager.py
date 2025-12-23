@@ -48,6 +48,7 @@ def build_index_row(
     selected_source_id: str | None,
     work_json_path: str,
     status: str | None = None,
+    item_url: str | None = None,
 ) -> Dict[str, Any]:
     """Build a row dictionary for index.csv.
     
@@ -76,6 +77,7 @@ def build_index_row(
         "selected_source_id": selected_source_id,
         "selected_dir": work_dir if selected else None,
         "work_json": work_json_path,
+        "item_url": item_url if item_url else (selected.item_url if selected else None),
     }
     if status is not None:
         row["status"] = status

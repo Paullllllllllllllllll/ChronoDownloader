@@ -57,7 +57,12 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
                 title_text = re.sub(r"<[^>]+>", "", title_html)
                 authors = doc.get("authors") or []
                 creator_text = ", ".join(authors) if isinstance(authors, list) else (authors or "N/A")
-                raw = {"title": title_text, "creator": creator_text, "id": obj_id}
+                raw = {
+                    "title": title_text,
+                    "creator": creator_text,
+                    "id": obj_id,
+                    "item_url": f"https://www.digitale-sammlungen.de/view/{obj_id}",
+                }
                 results.append(convert_to_searchresult("MDZ", raw))
             except Exception:
                 continue
@@ -80,7 +85,12 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
                 continue
             seen.add(obj_id)
             title_text = a.get_text(strip=True) or title
-            raw = {"title": title_text, "creator": creator or "N/A", "id": obj_id}
+            raw = {
+                "title": title_text,
+                "creator": creator or "N/A",
+                "id": obj_id,
+                "item_url": f"https://www.digitale-sammlungen.de/view/{obj_id}",
+            }
             results.append(convert_to_searchresult("MDZ", raw))
             if len(results) >= max_results:
                 break

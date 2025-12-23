@@ -708,6 +708,35 @@ A master index is maintained at `downloaded_works/index.csv` with columns:
 - `selected_source_id`: Provider's identifier for the work
 - `selected_dir`: Download directory
 - `work_json`: Path to work.json metadata file
+ - `item_url`: Best-effort public URL for the selected item (typically a landing page; in some cases this may be an IIIF manifest URL)
+ - `status`: Final status of the work (`completed`, `failed`, `deferred`)
+
+If `item_url` is missing for a given row, check the corresponding `work_json` file. The detailed candidate list stored there typically contains `item_url` and/or `iiif_manifest` links for provenance and reproducibility.
+
+#### Backfilling item_url for older index.csv files
+
+If you have an `index.csv` created before `item_url` was added, you can backfill it from the per-work `work.json` files.
+
+Run this from the repository root (with your virtual environment activated):
+
+```bash
+python -c "import json, os; import pandas as pd; p='downloaded_works/index.csv'; df=pd.read_csv(p); item_urls=[]; \
+\nfor _, r in df.iterrows():\
+    wjp=str(r.get('work_json') or ''); u=None;\
+    try:\
+        if wjp and os.path.exists(wjp):\
+            w=json.load(open(wjp,'r',encoding='utf-8'));\
+            sel=w.get('selected') or {};\
+            sid=sel.get('source_id'); pk=sel.get('provider_key');\
+            for c in w.get('candidates') or []:\
+                if c.get('source_id')==sid and c.get('provider_key')==pk:\
+                    u=c.get('item_url') or c.get('iiif_manifest');\
+                    break\
+    except Exception:\
+        u=None\
+    item_urls.append(u)\
+\ndf['item_url']=item_urls; df.to_csv(p,index=False); print('Backfilled item_url for', sum(1 for x in item_urls if isinstance(x,str) and x.strip()), 'rows')"
+```
 
 ### Metadata Files
 

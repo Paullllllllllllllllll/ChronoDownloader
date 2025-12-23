@@ -57,6 +57,7 @@ def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> 
                     "title": item_title or "N/A",
                     "creator": item_creator or "N/A",
                     "id": item_id,
+                    "item_url": item_id if item_id.startswith("http") else f"https://datos.bne.es/resource/{item_id}",
                 }
                 results.append(convert_to_searchresult("BNE", raw))
 

@@ -100,10 +100,12 @@ def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> 
                 if len(view) > 6:
                     creator = view[6]  # Provider/creator is often at index 6
                 
+                ddb_id = item.get("id")
                 raw = {
                     "title": title,
                     "creator": creator,
-                    "id": item.get("id"),
+                    "id": ddb_id,
+                    "item_url": f"https://www.deutsche-digitale-bibliothek.de/item/{ddb_id}" if ddb_id else None,
                     "thumbnail": item.get("thumbnail"),
                     "iiif_manifest": None,  # Will be fetched from item metadata
                 }

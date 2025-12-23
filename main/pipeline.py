@@ -561,6 +561,7 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
         "selected_source_id": selected_source_id,
         "selected_dir": work_dir,
         "work_json": work_json_path,
+        "item_url": selected.item_url,
         "status": "completed" if download_succeeded else ("deferred" if download_deferred else "failed"),
     }
     update_index_csv(task.base_output_dir, row)
