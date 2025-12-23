@@ -135,30 +135,32 @@ class InteractiveWorkflow:
             ConsoleUI.print_error(f"CSV file not found: {csv_path}")
             return False
         
-        # Validate CSV has required columns
+        # Validate CSV has required columns (unified CSV format)
         try:
-            df = pd.read_csv(csv_path)
+            df = load_works_csv(csv_path)
             
-            # Apply column mappings
-            cfg = get_config()
-            mappings = cfg.get("csv_column_mapping", {})
-            for target_col, source_candidates in mappings.items():
-                if not isinstance(source_candidates, list):
-                    source_candidates = [source_candidates]
-                for source_col in source_candidates:
-                    if source_col in df.columns:
-                        if target_col == "title" and "Title" not in df.columns:
-                            df.rename(columns={source_col: "Title"}, inplace=True)
-                        break
-            
-            if "Title" not in df.columns:
-                ConsoleUI.print_error("CSV must have a 'Title' column (or mapped equivalent)")
+            # Check for required notebook columns
+            if TITLE_COL not in df.columns:
+                ConsoleUI.print_error(f"CSV must have '{TITLE_COL}' column (sampling notebook format)")
                 return False
             
-            ConsoleUI.print_success(f"Found {len(df)} works in CSV")
+            # Show statistics
+            stats = get_stats(csv_path)
+            total = stats["total"]
+            pending = stats["pending"]
+            completed = stats["completed"]
+            failed = stats["failed"]
+            
+            ConsoleUI.print_success(f"Found {total} works in CSV ({pending} pending, {completed} completed, {failed} failed)")
             self.config.csv_path = csv_path
             return True
             
+        except FileNotFoundError:
+            ConsoleUI.print_error(f"CSV file not found: {csv_path}")
+            return False
+        except ValueError as e:
+            ConsoleUI.print_error(f"CSV validation error: {e}")
+            return False
         except Exception as e:
             ConsoleUI.print_error(f"Error reading CSV: {e}")
             return False
