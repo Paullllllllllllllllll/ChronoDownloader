@@ -1,7 +1,6 @@
 """Connector for the Münchener DigitalisierungsZentrum (MDZ) API."""
 
 import logging
-import os
 import re
 import urllib.parse
 from typing import List, Union

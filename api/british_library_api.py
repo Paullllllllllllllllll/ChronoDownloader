@@ -186,8 +186,7 @@ def download_british_library_work(item_data: Union[SearchResult, dict], output_f
             logger.info("BL fallback: attempting to discover manifest from %s", viewer_url)
             html = make_request(viewer_url)
             if isinstance(html, str):
-                import re as _re
-                m = _re.search(r"https?://[^\"'<>]+/manifest\.json", html)
+                m = re.search(r"https?://[^\"'<>]+/manifest\.json", html)
                 if m:
                     alt_manifest = m.group(0)
                     logger.info("BL fallback: found manifest URL %s", alt_manifest)

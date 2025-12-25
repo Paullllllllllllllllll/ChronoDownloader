@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+import re
 import urllib.parse
 from typing import List, Union
 
@@ -91,7 +92,6 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
         return make_request(API_BASE_URL, params=_params(q, use_filter))
 
     # Build a few query variants
-    import re as _re
     # 1) strict intitle/inauthor with quotes
     q1 = f'intitle:"{title}"'
     if creator:
@@ -103,7 +103,7 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
     # 3) plain text title+creator
     q3 = f"{title} {creator}" if creator else f"{title}"
     # 4) heavily sanitized plain title only
-    q4 = _re.sub(r"[^\w\s]", " ", title).strip()
+    q4 = re.sub(r"[^\w\s]", " ", title).strip()
 
     queries = [q1, q2, q3, q4]
     filters = []

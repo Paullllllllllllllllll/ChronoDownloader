@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import csv
 import threading
 from typing import Any, Dict
 
@@ -30,7 +31,24 @@ def update_index_csv(base_output_dir: str, row: Dict[str, Any]) -> None:
     """
     with _index_csv_lock:
         try:
+            os.makedirs(base_output_dir, exist_ok=True)
             index_path = os.path.join(base_output_dir, "index.csv")
+
+            if os.path.exists(index_path):
+                header_cols = None
+                try:
+                    with open(index_path, "r", encoding="utf-8", newline="") as f:
+                        reader = csv.reader(f)
+                        header_cols = next(reader, None)
+                except Exception:
+                    header_cols = None
+
+                if header_cols:
+                    normalized = {col: row.get(col) for col in header_cols}
+                    df = pd.DataFrame([normalized], columns=header_cols)
+                    df.to_csv(index_path, mode="a", header=False, index=False)
+                    return
+
             df = pd.DataFrame([row])
             header = not os.path.exists(index_path)
             df.to_csv(index_path, mode="a", header=header, index=False)

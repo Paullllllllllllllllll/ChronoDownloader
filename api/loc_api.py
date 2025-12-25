@@ -47,55 +47,42 @@ def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> 
         search_url = urllib.parse.urljoin(LOC_API_BASE_URL, "search/")
         data = make_request(search_url, params=params, headers=headers)
     results: List[SearchResult] = []
+
+    def _extract_iiif_manifest(item: dict) -> str | None:
+        iiif_manifest = item.get("iiif_manifest_url")
+        if iiif_manifest:
+            return iiif_manifest
+        resources = item.get("resources") or []
+        if isinstance(resources, list):
+            for res in resources:
+                if isinstance(res, dict) and res.get("iiif_manifest"):
+                    return res.get("iiif_manifest")
+        elif isinstance(resources, dict):
+            return resources.get("iiif_manifest") or iiif_manifest
+        return None
+
+    def _item_to_search_result(item: dict) -> SearchResult:
+        item_id = item.get("id")
+        if item_id:
+            item_id = item_id.strip("/").split("/")[-1]
+        raw = {
+            "title": item.get("title", "N/A"),
+            "creator": item.get("contributor_names", ["N/A"])[0] if item.get("contributor_names") else "N/A",
+            "id": item_id,
+            "item_url": item.get("url"),
+            "iiif_manifest": _extract_iiif_manifest(item),
+        }
+        return convert_to_searchresult("Library of Congress", raw)
+
+    items = None
     if data and data.get("results"):
-        for item in data["results"]:
-            item_id = item.get("id")
-            if item_id:
-                item_id = item_id.strip('/').split('/')[-1]
-            # Safely extract IIIF manifest
-            iiif_manifest = item.get("iiif_manifest_url")
-            if not iiif_manifest:
-                resources = item.get("resources") or []
-                if isinstance(resources, list):
-                    for res in resources:
-                        if isinstance(res, dict) and res.get("iiif_manifest"):
-                            iiif_manifest = res.get("iiif_manifest")
-                            break
-                elif isinstance(resources, dict):
-                    iiif_manifest = resources.get("iiif_manifest") or iiif_manifest
-            raw = {
-                "title": item.get("title", "N/A"),
-                "creator": item.get("contributor_names", ["N/A"])[0] if item.get("contributor_names") else "N/A",
-                "id": item_id,
-                "item_url": item.get("url"),
-                "iiif_manifest": iiif_manifest,
-            }
-            sr = convert_to_searchresult("Library of Congress", raw)
-            results.append(sr)
+        items = data.get("results")
     elif data and data.get("content") and data["content"].get("results"):
-        for item in data["content"]["results"]:
-            item_id = item.get("id")
-            if item_id:
-                item_id = item_id.strip('/').split('/')[-1]
-            # Safely extract IIIF manifest
-            iiif_manifest = item.get("iiif_manifest_url")
-            if not iiif_manifest:
-                resources = item.get("resources") or []
-                if isinstance(resources, list):
-                    for res in resources:
-                        if isinstance(res, dict) and res.get("iiif_manifest"):
-                            iiif_manifest = res.get("iiif_manifest")
-                            break
-                elif isinstance(resources, dict):
-                    iiif_manifest = resources.get("iiif_manifest") or iiif_manifest
-            raw = {
-                "title": item.get("title", "N/A"),
-                "creator": item.get("contributor_names", ["N/A"])[0] if item.get("contributor_names") else "N/A",
-                "id": item_id,
-                "item_url": item.get("url"),
-                "iiif_manifest": iiif_manifest,
-            }
-            results.append(convert_to_searchresult("Library of Congress", raw))
+        items = data["content"].get("results")
+
+    if items:
+        for item in items:
+            results.append(_item_to_search_result(item))
     return results
 
 def download_loc_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:

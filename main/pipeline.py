@@ -20,6 +20,7 @@ Refactored modules:
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -69,6 +70,153 @@ logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
 ProviderTuple = Tuple[str, Callable, Callable, str]
+
+
+@dataclasses.dataclass
+class _PreparedWork:
+    title: str
+    creator: Optional[str]
+    entry_id: Optional[str]
+    base_output_dir: str
+    work_dir: str
+    work_dir_name: str
+    work_stem: str
+    work_id: str
+    work_json_path: str
+    sel_cfg: Dict[str, Any]
+    provider_list: List[ProviderTuple]
+    provider_map: Dict[str, Tuple[Any, Any, str]]
+    all_candidates: List[SearchResult]
+    selected: Optional[SearchResult]
+    selected_provider_tuple: Optional[ProviderTuple]
+    selected_source_id: Optional[str]
+
+
+def _compute_selected_source_id(selected: Optional[SearchResult]) -> Optional[str]:
+    if not selected:
+        return None
+    return selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
+
+
+def _collect_and_select(
+    title: str,
+    creator: Optional[str],
+    sel_cfg: Dict[str, Any],
+    provider_list: List[ProviderTuple],
+) -> tuple[List[SearchResult], Optional[SearchResult], Optional[ProviderTuple]]:
+    all_candidates: List[SearchResult] = []
+    selected: Optional[SearchResult] = None
+    selected_provider_tuple: Optional[ProviderTuple] = None
+
+    min_title_score = float(sel_cfg.get("min_title_score", 85))
+    creator_weight = float(sel_cfg.get("creator_weight", 0.2))
+    max_candidates_per_provider = int(sel_cfg.get("max_candidates_per_provider", 5))
+
+    strategy = (sel_cfg.get("strategy") or "collect_and_select").lower()
+    if strategy == "sequential_first_hit":
+        all_candidates, selected, selected_provider_tuple = collect_candidates_sequential(
+            provider_list,
+            title,
+            creator,
+            min_title_score,
+            creator_weight,
+            max_candidates_per_provider,
+        )
+    else:
+        all_candidates = collect_candidates_all(
+            provider_list,
+            title,
+            creator,
+            creator_weight,
+            max_candidates_per_provider,
+        )
+        selected, selected_provider_tuple = select_best_candidate(
+            all_candidates,
+            provider_list,
+            min_title_score,
+        )
+
+    return all_candidates, selected, selected_provider_tuple
+
+
+def _prepare_work(
+    title: str,
+    creator: Optional[str],
+    entry_id: Optional[str],
+    base_output_dir: str,
+) -> Optional[_PreparedWork]:
+    work_dir, work_dir_name = compute_work_dir(base_output_dir, entry_id, title)
+
+    resume_mode = get_resume_mode()
+    should_skip, skip_reason = check_work_status(work_dir, resume_mode)
+    if should_skip:
+        logger.info("Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode)
+        return None
+
+    sel_cfg = _get_selection_config()
+    provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
+    provider_map: Dict[str, Tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
+
+    all_candidates, selected, selected_provider_tuple = _collect_and_select(
+        title,
+        creator,
+        sel_cfg,
+        provider_list,
+    )
+
+    work_id = compute_work_id(title, creator)
+    work_json_path = os.path.join(work_dir, "work.json")
+    selected_source_id = _compute_selected_source_id(selected if selected and selected_provider_tuple else None)
+
+    return _PreparedWork(
+        title=title,
+        creator=creator,
+        entry_id=entry_id,
+        base_output_dir=base_output_dir,
+        work_dir=work_dir,
+        work_dir_name=work_dir_name,
+        work_stem=work_dir_name,
+        work_id=work_id,
+        work_json_path=work_json_path,
+        sel_cfg=sel_cfg,
+        provider_list=provider_list,
+        provider_map=provider_map,
+        all_candidates=all_candidates,
+        selected=selected,
+        selected_provider_tuple=selected_provider_tuple,
+        selected_source_id=selected_source_id,
+    )
+
+
+def _persist_work_json(prep: _PreparedWork, status: str = "pending") -> None:
+    create_work_json(
+        work_json_path=prep.work_json_path,
+        title=prep.title,
+        creator=prep.creator,
+        entry_id=prep.entry_id,
+        selection_config=prep.sel_cfg,
+        candidates=format_candidates_for_json(prep.all_candidates),
+        selected=format_selected_for_json(prep.selected, prep.selected_source_id),
+        status=status,
+    )
+
+
+def _persist_candidates_metadata(prep: _PreparedWork) -> None:
+    if not prep.sel_cfg.get("keep_non_selected_metadata", True):
+        return
+    with work_context(work_id=prep.work_id, entry_id=prep.entry_id, name_stem=prep.work_stem):
+        for sr in prep.all_candidates:
+            if not sr.provider_key:
+                continue
+            try:
+                with provider_context(sr.provider_key):
+                    utils.save_json(sr.to_dict(include_raw=True), prep.work_dir, "search_result")
+            except Exception:
+                logger.exception(
+                    "Failed to persist candidate metadata for %s:%s",
+                    sr.provider_key,
+                    sr.source_id,
+                )
 
 
 def load_enabled_apis(config_path: str) -> List[ProviderTuple]:
@@ -251,147 +399,41 @@ def search_and_select(
     
     logger.info("Searching for work: '%s'%s", title, f" by '{creator}'" if creator else "")
 
-    # Compute work directory early to enable resume/skip check
-    work_dir, work_dir_name = compute_work_dir(base_output_dir, entry_id, title)
-    
-    # Check if this work should be skipped based on resume mode
-    resume_mode = get_resume_mode()
-    should_skip, skip_reason = check_work_status(work_dir, resume_mode)
-    if should_skip:
-        logger.info("Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode)
+    prep = _prepare_work(title, creator, entry_id, base_output_dir)
+    if prep is None:
         return None
 
-    sel_cfg = _get_selection_config()
-    provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
-
-    # Build a quick map of provider_key -> (search_func, download_func, provider_name)
-    provider_map: Dict[str, Tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
-
-    # Gather candidates depending on strategy
-    all_candidates: List[SearchResult] = []
-    selected: Optional[SearchResult] = None
-    selected_provider_tuple: Optional[ProviderTuple] = None
-
-    min_title_score = float(sel_cfg.get("min_title_score", 85))
-    creator_weight = float(sel_cfg.get("creator_weight", 0.2))
-    max_candidates_per_provider = int(sel_cfg.get("max_candidates_per_provider", 5))
-
-    strategy = (sel_cfg.get("strategy") or "collect_and_select").lower()
-    if strategy == "sequential_first_hit":
-        all_candidates, selected, selected_provider_tuple = collect_candidates_sequential(
-            provider_list,
-            title,
-            creator,
-            min_title_score,
-            creator_weight,
-            max_candidates_per_provider,
-        )
-    else:
-        # collect_and_select: search all providers, then choose best
-        all_candidates = collect_candidates_all(
-            provider_list,
-            title,
-            creator,
-            creator_weight,
-            max_candidates_per_provider,
-        )
-        selected, selected_provider_tuple = select_best_candidate(
-            all_candidates,
-            provider_list,
-            min_title_score,
-        )
-
-    if not all_candidates:
+    if not prep.all_candidates:
         logger.info("No items found for '%s' across all enabled APIs.", title)
         return None
 
-    # Create work directory
-    work_id = compute_work_id(title, creator)
-    os.makedirs(work_dir, exist_ok=True)
-    work_stem = work_dir_name
+    os.makedirs(prep.work_dir, exist_ok=True)
+    _persist_work_json(prep, status="pending")
+    _persist_candidates_metadata(prep)
 
-    selected_source_id = None
-    if selected and selected_provider_tuple:
-        selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
-
-    # Persist work.json summarizing decision
-    work_json_path = os.path.join(work_dir, "work.json")
-    work_meta: Dict[str, Any] = {
-        "input": {"title": title, "creator": creator, "entry_id": entry_id},
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "status": "pending",  # Will be updated by execute_download
-        "selection": sel_cfg,
-        "candidates": [
-            {
-                "provider": sr.provider,
-                "provider_key": sr.provider_key,
-                "title": sr.title,
-                "creators": sr.creators,
-                "date": sr.date,
-                "source_id": sr.source_id,
-                "item_url": sr.item_url,
-                "iiif_manifest": sr.iiif_manifest,
-                "scores": sr.raw.get("__matching__", {}),
-            }
-            for sr in all_candidates
-        ],
-        "selected": (
-            {
-                "provider": selected.provider if selected else None,
-                "provider_key": selected.provider_key if selected else None,
-                "source_id": selected_source_id,
-                "title": selected.title if selected else None,
-            }
-            if selected
-            else None
-        ),
-    }
-    try:
-        with open(work_json_path, "w", encoding="utf-8") as f:
-            json.dump(work_meta, f, indent=2, ensure_ascii=False)
-    except Exception:
-        logger.exception("Failed to write work.json to %s", work_json_path)
-
-    # Optionally persist non-selected metadata
-    if sel_cfg.get("keep_non_selected_metadata", True):
-        for sr in all_candidates:
-            if not sr.provider_key:
-                continue
-            try:
-                with provider_context(sr.provider_key):
-                    utils.save_json(sr.to_dict(include_raw=True), work_dir, "search_result")
-            except Exception:
-                logger.exception(
-                    "Failed to persist candidate metadata for %s:%s",
-                    sr.provider_key,
-                    sr.source_id,
-                )
-
-    # If no selected candidate, update status and return None
-    if not selected or not selected_provider_tuple:
-        update_work_status(work_json_path, "no_match")
+    if not prep.selected or not prep.selected_provider_tuple:
+        update_work_status(prep.work_json_path, "no_match")
         logger.info("No matching candidate found for '%s'.", title)
         return None
 
-    # Create and return DownloadTask
     task = DownloadTask(
-        work_id=work_id,
+        work_id=prep.work_id,
         entry_id=entry_id,
         title=title,
         creator=creator,
-        work_dir=work_dir,
-        work_stem=work_stem,
-        selected_result=selected,
-        provider_key=selected_provider_tuple[0],
-        provider_tuple=selected_provider_tuple,
-        work_json_path=work_json_path,
-        all_candidates=all_candidates,
-        provider_map=provider_map,
-        selection_config=sel_cfg,
+        work_dir=prep.work_dir,
+        work_stem=prep.work_stem,
+        selected_result=prep.selected,
+        provider_key=prep.selected_provider_tuple[0],
+        provider_tuple=prep.selected_provider_tuple,
+        work_json_path=prep.work_json_path,
+        all_candidates=prep.all_candidates,
+        provider_map=prep.provider_map,
+        selection_config=prep.sel_cfg,
         base_output_dir=base_output_dir,
     )
-    
-    logger.info("Created download task for '%s' from %s", title, selected_provider_tuple[3])
+
+    logger.info("Created download task for '%s' from %s", title, prep.selected_provider_tuple[3])
     return task
 
 
@@ -549,22 +591,27 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
         update_work_status(work_json_path, "failed")
 
     # Update index.csv summary (thread-safe)
-    work_id = task.work_id
-    row = {
-        "work_id": work_id,
-        "entry_id": task.entry_id,
-        "work_dir": work_dir,
-        "title": task.title,
-        "creator": task.creator,
-        "selected_provider": selected.provider,
-        "selected_provider_key": selected.provider_key,
-        "selected_source_id": selected_source_id,
-        "selected_dir": work_dir,
-        "work_json": work_json_path,
-        "item_url": selected.item_url,
-        "status": "completed" if download_succeeded else ("deferred" if download_deferred else "failed"),
-    }
+    final_status = "completed" if download_succeeded else ("deferred" if download_deferred else "failed")
+    row = build_index_row(
+        work_id=task.work_id,
+        entry_id=task.entry_id,
+        work_dir=work_dir,
+        title=task.title,
+        creator=task.creator,
+        selected=selected,
+        selected_source_id=selected_source_id,
+        work_json_path=work_json_path,
+        status=final_status,
+        item_url=selected.item_url,
+    )
     update_index_csv(task.base_output_dir, row)
+
+    try:
+        task.status = final_status
+        task.item_url = selected.item_url
+        task.provider = selected.provider
+    except Exception:
+        pass
 
     if download_succeeded:
         logger.info("Download completed for '%s'. Check '%s' for results.", task.title, work_dir)
@@ -601,57 +648,11 @@ def process_work(
     logger = logging.getLogger(__name__)
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
 
-    # Compute work directory early to enable resume/skip check
-    work_dir, work_dir_name = compute_work_dir(base_output_dir, entry_id, title)
-    
-    # Check if this work should be skipped based on resume mode
-    resume_mode = get_resume_mode()
-    should_skip, skip_reason = check_work_status(work_dir, resume_mode)
-    if should_skip:
-        logger.info("Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode)
-        return None  # Skipped - no status update needed
+    prep = _prepare_work(title, creator, entry_id, base_output_dir)
+    if prep is None:
+        return None
 
-    sel_cfg = _get_selection_config()
-    provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
-
-    # Build a quick map of provider_key -> (search_func, download_func, provider_name)
-    provider_map: Dict[str, Tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
-
-    # Gather candidates depending on strategy
-    all_candidates: List[SearchResult] = []
-    selected: Optional[SearchResult] = None
-    selected_provider_tuple: Optional[ProviderTuple] = None
-
-    min_title_score = float(sel_cfg.get("min_title_score", 85))
-    creator_weight = float(sel_cfg.get("creator_weight", 0.2))
-    max_candidates_per_provider = int(sel_cfg.get("max_candidates_per_provider", 5))
-
-    strategy = (sel_cfg.get("strategy") or "collect_and_select").lower()
-    if strategy == "sequential_first_hit":
-        all_candidates, selected, selected_provider_tuple = collect_candidates_sequential(
-            provider_list,
-            title,
-            creator,
-            min_title_score,
-            creator_weight,
-            max_candidates_per_provider,
-        )
-    else:
-        # collect_and_select: search all providers, then choose best
-        all_candidates = collect_candidates_all(
-            provider_list,
-            title,
-            creator,
-            creator_weight,
-            max_candidates_per_provider,
-        )
-        selected, selected_provider_tuple = select_best_candidate(
-            all_candidates,
-            provider_list,
-            min_title_score,
-        )
-
-    if not all_candidates:
+    if not prep.all_candidates:
         logger.info("No items found for '%s' across all enabled APIs.", title)
         try:
             clear_current_work()
@@ -659,81 +660,26 @@ def process_work(
             pass
         return {"status": "failed", "item_url": "", "provider": "", "reason": "no_candidates"}
 
-    # Create work directory (work_dir_name computed earlier for resume check)
-    work_id = compute_work_id(title, creator)
-    os.makedirs(work_dir, exist_ok=True)
-    
-    # Use work_dir_name as the naming stem for files
-    work_stem = work_dir_name
+    os.makedirs(prep.work_dir, exist_ok=True)
 
-    # Set per-work context for centralized download budgeting
-    set_current_work(work_id)
-    # Configure naming for this work and reset per-work counters
+    set_current_work(prep.work_id)
     set_current_entry(entry_id)
-    set_current_name_stem(work_stem)
+    set_current_name_stem(prep.work_stem)
     try:
         reset_counters()
     except Exception:
         pass
 
-    selected_dir = None
-    selected_source_id = None
-    if selected and selected_provider_tuple:
-        selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
-        # For the new structure we pass the parent directory; utils will route to 'objects/'
-        selected_dir = work_dir
-
-    # Persist work.json summarizing decision
-    work_json_path = os.path.join(work_dir, "work.json")
-    work_meta: Dict[str, Any] = {
-        "input": {"title": title, "creator": creator, "entry_id": entry_id},
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "selection": sel_cfg,
-        "candidates": [
-            {
-                "provider": sr.provider,
-                "provider_key": sr.provider_key,
-                "title": sr.title,
-                "creators": sr.creators,
-                "date": sr.date,
-                "source_id": sr.source_id,
-                "item_url": sr.item_url,
-                "iiif_manifest": sr.iiif_manifest,
-                "scores": sr.raw.get("__matching__", {}),
-            }
-            for sr in all_candidates
-        ],
-        "selected": (
-            {
-                "provider": selected.provider if selected else None,
-                "provider_key": selected.provider_key if selected else None,
-                "source_id": selected_source_id,
-                "title": selected.title if selected else None,
-            }
-            if selected
-            else None
-        ),
-    }
-    try:
-        with open(work_json_path, "w", encoding="utf-8") as f:
-            json.dump(work_meta, f, indent=2, ensure_ascii=False)
-    except Exception:
-        logger.exception("Failed to write work.json to %s", work_json_path)
-
-    # Optionally persist non-selected metadata (SearchResult dict) for auditing into metadata/
-    if sel_cfg.get("keep_non_selected_metadata", True):
-        for sr in all_candidates:
+    selected_dir = prep.work_dir if (prep.selected and prep.selected_provider_tuple) else None
+    selected = prep.selected
+    _persist_work_json(prep, status="pending")
+    if prep.sel_cfg.get("keep_non_selected_metadata", True):
+        for sr in prep.all_candidates:
+            if not sr.provider_key:
+                continue
             try:
-                if not sr.provider_key:
-                    continue
-                try:
-                    set_current_provider(sr.provider_key)
-                    utils.save_json(sr.to_dict(include_raw=True), work_dir, "search_result")
-                finally:
-                    try:
-                        clear_current_provider()
-                    except Exception:
-                        pass
+                with provider_context(sr.provider_key):
+                    utils.save_json(sr.to_dict(include_raw=True), prep.work_dir, "search_result")
             except Exception:
                 logger.exception(
                     "Failed to persist candidate metadata for %s:%s",
@@ -742,10 +688,20 @@ def process_work(
                 )
 
     # Download according to strategy
-    download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
+    download_strategy = (prep.sel_cfg.get("download_strategy") or "selected_only").lower()
     download_deferred = False  # Track if download was deferred due to quota
     download_succeeded = False  # Track if download completed successfully
-    if not dry_run and selected and selected_provider_tuple and selected_dir:
+    if not dry_run and prep.selected and prep.selected_provider_tuple and selected_dir:
+        selected = prep.selected
+        selected_provider_tuple = prep.selected_provider_tuple
+        provider_list = prep.provider_list
+        provider_map = prep.provider_map
+        sel_cfg = prep.sel_cfg
+        all_candidates = prep.all_candidates
+        work_dir = prep.work_dir
+        work_json_path = prep.work_json_path
+        selected_source_id = prep.selected_source_id
+
         pkey, _search_func, download_func, pname = selected_provider_tuple
         try:
             logger.info("Downloading selected item from %s into %s", pname, selected_dir)
@@ -864,7 +820,7 @@ def process_work(
             update_work_status(work_json_path, "completed", {
                 "provider": selected.provider if selected else None,
                 "provider_key": selected.provider_key if selected else None,
-                "source_id": selected_source_id,
+                "source_id": prep.selected_source_id,
             })
         elif download_deferred:
             update_work_status(work_json_path, "deferred")
@@ -874,18 +830,28 @@ def process_work(
             update_work_status(work_json_path, "no_match")
 
     # Update index.csv summary (thread-safe)
-    row = {
-        "work_id": work_id,
-        "entry_id": entry_id,
-        "work_dir": work_dir,
-        "title": title,
-        "creator": creator,
-        "selected_provider": selected.provider if selected else None,
-        "selected_provider_key": selected.provider_key if selected else None,
-        "selected_source_id": selected_source_id,
-        "selected_dir": selected_dir,
-        "work_json": work_json_path,
-    }
+    final_status = None
+    if not dry_run:
+        if download_succeeded:
+            final_status = "completed"
+        elif download_deferred:
+            final_status = "deferred"
+        elif selected:
+            final_status = "failed"
+        else:
+            final_status = "no_match"
+    row = build_index_row(
+        work_id=prep.work_id,
+        entry_id=entry_id,
+        work_dir=prep.work_dir,
+        title=title,
+        creator=creator,
+        selected=prep.selected,
+        selected_source_id=prep.selected_source_id,
+        work_json_path=prep.work_json_path,
+        status=final_status,
+        item_url=(prep.selected.item_url if prep.selected else None),
+    )
     update_index_csv(base_output_dir, row)
 
     # Clear per-work context
@@ -902,9 +868,15 @@ def process_work(
     except Exception:
         pass
     
-    logger.info("Finished processing '%s'. Check '%s' for results.", title, work_dir)
+    logger.info("Finished processing '%s'. Check '%s' for results.", title, prep.work_dir)
     
     # Return result for unified CSV updates
+    if dry_run:
+        return {
+            "status": "dry_run",
+            "item_url": selected.item_url if selected else "",
+            "provider": selected.provider if selected else "",
+        }
     if download_succeeded:
         return {
             "status": "completed",

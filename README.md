@@ -577,7 +577,7 @@ Positional:
 
 Optional:
 - `--output_dir DIR`: Output directory (default: downloaded_works)
-- `--dry-run`: Search and score candidates without downloading
+- `--dry-run`: Search and select candidates, create work folders and work.json, but skip downloads
 - `--log-level LEVEL`: Set logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL; default: INFO)
 - `--config PATH`: Path to configuration JSON file (default: config.json)
 - `--interactive`: Force interactive mode regardless of config setting
@@ -714,10 +714,12 @@ A master index is maintained at `downloaded_works/index.csv` with columns:
 - `selected_source_id`: Provider's identifier for the work
 - `selected_dir`: Download directory
 - `work_json`: Path to work.json metadata file
- - `item_url`: Best-effort public URL for the selected item (typically a landing page; in some cases this may be an IIIF manifest URL)
- - `status`: Final status of the work (`completed`, `failed`, `deferred`)
+- `item_url`: Best-effort public URL for the selected item (typically a landing page; in some cases this may be an IIIF manifest URL)
+- `status`: Final status of the work (`completed`, `failed`, `deferred`, `no_match`)
 
 If `item_url` is missing for a given row, check the corresponding `work_json` file. The detailed candidate list stored there typically contains `item_url` and/or `iiif_manifest` links for provenance and reproducibility.
+
+Index writes are thread-safe and schema-tolerant: when appending to an existing `index.csv`, new rows are aligned to the file's existing header columns.
 
 #### Backfilling item_url for older index.csv files
 
@@ -749,10 +751,12 @@ python -c "import json, os; import pandas as pd; p='downloaded_works/index.csv';
 **work.json** contains:
 
 - Input parameters (title, creator, entry_id)
+- Current status (`pending` at creation, updated to `completed`, `failed`, `deferred`, or `no_match`)
 - All search candidates from all providers
 - Fuzzy match scores for each candidate
 - Selection decision and reasoning
-- Timestamp
+- Timestamps (`created_at`, `updated_at` when status changes)
+- Optional download summary (provider/source_id) when completed
 
 **Provider metadata files** (in metadata/) contain:
 
@@ -766,13 +770,15 @@ This comprehensive metadata enables auditing selection decisions, debugging fail
 
 ### Parallel Downloads
 
-ChronoDownloader supports parallel downloads to significantly speed up batch processing. When `max_parallel_downloads` is greater than 1, downloads run concurrently across multiple works while searches remain sequential.
+ChronoDownloader supports parallel downloads to significantly speed up batch processing. When `max_parallel_downloads` is greater than 1, downloads run concurrently across multiple works while works are queued sequentially.
 
 **How it works:**
-1. The main thread searches providers and selects candidates sequentially
+1. The main thread searches providers and selects candidates for one work at a time
 2. Download tasks are queued and executed by a pool of worker threads
 3. Per-provider semaphores limit concurrent downloads to each provider
 4. Thread-safe operations protect shared resources (index.csv, deferred downloads)
+
+Provider searches within a single work can still run in parallel, controlled by `selection.max_parallel_searches`.
 
 **Configuration example for parallel downloads:**
 
@@ -1231,7 +1237,7 @@ Solution:
 
 Cause: CSV missing required column or encoding issues
 
-Solution: Ensure CSV has a column named exactly `Title` (case-sensitive). Check file encoding (should be UTF-8).
+Solution: Ensure the CSV has columns named exactly `entry_id` and `short_title`. Check file encoding (UTF-8 recommended).
 
 ### Debug Mode
 

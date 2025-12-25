@@ -1,7 +1,6 @@
 """Connector for the Digital Public Library of America (DPLA) API."""
 
 import logging
-import os
 from typing import List, Union
 
 from .utils import (

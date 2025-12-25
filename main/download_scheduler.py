@@ -54,6 +54,9 @@ class DownloadTask:
         provider_map: Map of provider_key to (search_fn, download_fn, name)
         selection_config: Selection configuration dict
         base_output_dir: Base output directory
+        status: Optional[str] = None
+        item_url: Optional[str] = None
+        provider: Optional[str] = None
     """
     work_id: str
     entry_id: Optional[str]
@@ -69,6 +72,9 @@ class DownloadTask:
     provider_map: Dict[str, Tuple[Callable, Callable, str]] = field(default_factory=dict)
     selection_config: Dict[str, Any] = field(default_factory=dict)
     base_output_dir: str = "downloaded_works"
+    status: Optional[str] = None
+    item_url: Optional[str] = None
+    provider: Optional[str] = None
 
 
 class ProviderSemaphoreManager:
