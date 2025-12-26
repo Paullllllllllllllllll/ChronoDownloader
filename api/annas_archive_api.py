@@ -77,8 +77,11 @@ MIRRORS = [
     "https://annas-archive.li",
 ]
 
-# Rate limiting state file
-QUOTA_STATE_FILE = Path(os.getenv("ANNAS_QUOTA_STATE_FILE", ".annas_archive_quota.json"))
+# Import centralized quota manager
+def _get_quota_manager():
+    """Lazy import to avoid circular dependencies."""
+    from main.quota_manager import get_quota_manager
+    return get_quota_manager()
 
 
 def _get_quota_config() -> dict:
@@ -90,28 +93,10 @@ def _get_quota_config() -> dict:
     }
 
 
-def _load_quota_state() -> dict:
-    """Load quota tracking state from file."""
-    try:
-        if QUOTA_STATE_FILE.exists():
-            with open(QUOTA_STATE_FILE, "r") as f:
-                return json.load(f)
-    except Exception as e:
-        logger.debug("Could not load quota state: %s", e)
-    return {"downloads_today": 0, "last_reset": None, "quota_exhausted_at": None}
-
-
-def _save_quota_state(state: dict) -> None:
-    """Save quota tracking state to file."""
-    try:
-        with open(QUOTA_STATE_FILE, "w") as f:
-            json.dump(state, f)
-    except Exception as e:
-        logger.warning("Could not save quota state: %s", e)
-
-
 def _check_and_update_quota() -> Tuple[bool, Optional[float]]:
     """Check if we can use fast download and update quota.
+    
+    Uses the centralized QuotaManager for consistent tracking across all providers.
     
     Returns:
         Tuple of (can_download, wait_seconds_if_not)
@@ -119,76 +104,30 @@ def _check_and_update_quota() -> Tuple[bool, Optional[float]]:
         - wait_seconds_if_not: Seconds to wait for reset, or None if should fallback
     """
     config = _get_quota_config()
-    state = _load_quota_state()
-    now = datetime.utcnow()
+    quota_manager = _get_quota_manager()
     
-    # Check if we need to reset the daily counter
-    last_reset_str = state.get("last_reset")
-    if last_reset_str:
-        try:
-            last_reset = datetime.fromisoformat(last_reset_str)
-            hours_since_reset = (now - last_reset).total_seconds() / 3600
-            if hours_since_reset >= 24:
-                # Reset the counter
-                state = {"downloads_today": 0, "last_reset": now.isoformat(), "quota_exhausted_at": None}
-                _save_quota_state(state)
-                logger.info("Anna's Archive: Daily quota reset (24+ hours since last reset)")
-        except Exception:
-            pass
+    can_download, wait_seconds = quota_manager.can_download("annas_archive")
+    
+    if can_download:
+        return True, None
+    
+    # Quota exhausted - check if we should wait or fallback
+    if config["wait_for_reset"]:
+        return False, wait_seconds
     else:
-        # First run, initialize
-        state["last_reset"] = now.isoformat()
-        _save_quota_state(state)
-    
-    # Check if quota exhausted
-    downloads_today = state.get("downloads_today", 0)
-    daily_limit = config["daily_limit"]
-    
-    if downloads_today >= daily_limit:
-        # Quota exhausted
-        quota_exhausted_at = state.get("quota_exhausted_at")
-        if quota_exhausted_at:
-            try:
-                exhausted_time = datetime.fromisoformat(quota_exhausted_at)
-                wait_hours = config["reset_wait_hours"]
-                reset_time = exhausted_time + timedelta(hours=wait_hours)
-                if now >= reset_time:
-                    # Time to reset
-                    state = {"downloads_today": 0, "last_reset": now.isoformat(), "quota_exhausted_at": None}
-                    _save_quota_state(state)
-                    logger.info("Anna's Archive: Quota wait period complete, resetting counter")
-                    return True, None
-                else:
-                    # Still waiting
-                    wait_seconds = (reset_time - now).total_seconds()
-                    if config["wait_for_reset"]:
-                        return False, wait_seconds
-                    else:
-                        return False, None  # Signal to fallback to scraping
-            except Exception:
-                pass
-        else:
-            # Just hit the limit
-            state["quota_exhausted_at"] = now.isoformat()
-            _save_quota_state(state)
-            if config["wait_for_reset"]:
-                return False, config["reset_wait_hours"] * 3600
-            else:
-                return False, None
-    
-    return True, None
+        return False, None  # Signal to fallback to scraping
 
 
 def _record_fast_download() -> None:
     """Record that a fast download was used."""
-    state = _load_quota_state()
-    state["downloads_today"] = state.get("downloads_today", 0) + 1
-    if not state.get("last_reset"):
-        state["last_reset"] = datetime.utcnow().isoformat()
-    _save_quota_state(state)
+    quota_manager = _get_quota_manager()
+    remaining = quota_manager.record_download("annas_archive")
+    
     config = _get_quota_config()
-    remaining = config["daily_limit"] - state["downloads_today"]
-    logger.info("Anna's Archive: Fast download used. %d/%d remaining today.", remaining, config["daily_limit"])
+    logger.info(
+        "Anna's Archive: Fast download used. %d/%d remaining today.",
+        remaining, config["daily_limit"]
+    )
 
 
 def is_quota_available() -> bool:
@@ -219,26 +158,22 @@ def get_quota_reset_time() -> Optional[datetime]:
     if not api_key:
         return None  # No API key means scraping mode
     
-    config = _get_quota_config()
-    state = _load_quota_state()
-    now = datetime.utcnow()
+    quota_manager = _get_quota_manager()
+    status = quota_manager.get_quota_status("annas_archive")
     
-    downloads_today = state.get("downloads_today", 0)
-    if downloads_today < config["daily_limit"]:
+    if not status["is_exhausted"]:
         return None  # Quota not exhausted
     
-    quota_exhausted_at = state.get("quota_exhausted_at")
-    if quota_exhausted_at:
+    reset_time_str = status.get("reset_time")
+    if reset_time_str:
         try:
-            exhausted_time = datetime.fromisoformat(quota_exhausted_at)
-            reset_time = exhausted_time + timedelta(hours=config["reset_wait_hours"])
-            if now < reset_time:
-                return reset_time
+            return datetime.fromisoformat(reset_time_str)
         except Exception:
             pass
     
     # Fallback: reset time is reset_wait_hours from now
-    return now + timedelta(hours=config["reset_wait_hours"])
+    config = _get_quota_config()
+    return datetime.utcnow() + timedelta(hours=config["reset_wait_hours"])
 
 
 def _clean_title_candidate(text: str) -> str:

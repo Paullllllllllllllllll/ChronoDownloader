@@ -48,7 +48,7 @@ from api.core.context import (
 )
 from api.model import QuotaDeferredException, SearchResult
 from api.providers import PROVIDERS
-from main.deferred import add_deferred_download, get_deferred_downloads, clear_deferred_downloads, process_deferred_downloads
+from main.deferred_queue import DeferredItem, get_deferred_queue
 from main.index_manager import build_index_row, update_index_csv
 from main.selection import (
     collect_candidates_all,
@@ -531,20 +531,23 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
             except Exception:
                 logger.exception("Error while attempting fallback download candidates.")
     except QuotaDeferredException as qde:
-        # Quota exhausted for selected provider - defer for later retry
+        # Quota exhausted for selected provider - add to persistent deferred queue
         download_deferred = True
         logger.info("Download deferred for '%s': %s", task.title, qde.message)
-        add_deferred_download({
-            "title": task.title,
-            "creator": task.creator,
-            "entry_id": task.entry_id,
-            "base_output_dir": task.base_output_dir,
-            "selected": selected,
-            "provider_tuple": task.provider_tuple,
-            "work_dir": work_dir,
-            "reset_time": qde.reset_time,
-            "provider": qde.provider,
-        })
+        queue = get_deferred_queue()
+        queue.add(
+            title=task.title,
+            creator=task.creator,
+            entry_id=task.entry_id,
+            provider_key=pkey,
+            provider_name=pname,
+            source_id=selected_source_id,
+            work_dir=work_dir,
+            base_output_dir=task.base_output_dir,
+            item_url=selected.item_url,
+            reset_time=qde.reset_time,
+            raw_data=selected.raw,
+        )
     except Exception:
         logger.exception("Error during download for %s:%s", pkey, selected.source_id)
     
@@ -766,20 +769,23 @@ def process_work(
                 except Exception:
                     logger.exception("Error while attempting fallback download candidates.")
         except QuotaDeferredException as qde:
-            # Quota exhausted for selected provider - defer for later retry
+            # Quota exhausted for selected provider - add to persistent deferred queue
             download_deferred = True
             logger.info("Download deferred for '%s': %s", title, qde.message)
-            add_deferred_download({
-                "title": title,
-                "creator": creator,
-                "entry_id": entry_id,
-                "base_output_dir": base_output_dir,
-                "selected": selected,
-                "provider_tuple": selected_provider_tuple,
-                "work_dir": work_dir,
-                "reset_time": qde.reset_time,
-                "provider": qde.provider,
-            })
+            queue = get_deferred_queue()
+            queue.add(
+                title=title,
+                creator=creator,
+                entry_id=entry_id,
+                provider_key=pkey,
+                provider_name=pname,
+                source_id=selected_source_id,
+                work_dir=work_dir,
+                base_output_dir=base_output_dir,
+                item_url=selected.item_url if selected else None,
+                reset_time=qde.reset_time,
+                raw_data=selected.raw if selected else {},
+            )
         except Exception:
             logger.exception("Error during download for %s:%s", pkey, selected.source_id)
         # If 'all', also download other candidates into sources/ subfolders

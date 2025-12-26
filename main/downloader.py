@@ -31,6 +31,8 @@ from main import pipeline
 from main.mode_selector import run_with_mode_detection
 from main.interactive import run_interactive
 from main.execution import run_batch_downloads
+from main.background_scheduler import get_background_scheduler, stop_background_scheduler
+from main.deferred_queue import get_deferred_queue
 from main.unified_csv import (
     load_works_csv,
     get_pending_works,
@@ -203,6 +205,7 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
     
     # Use shared execution module for both parallel and sequential modes
     # Pass csv_path for status updates back to the source CSV
+    # Background scheduler handles deferred downloads automatically
     stats = run_batch_downloads(
         works_df=pending_df,
         output_dir=args.output_dir,
@@ -211,17 +214,40 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
         use_parallel=(max_parallel > 1),
         logger=logger,
         csv_path=csv_path,
+        enable_background_retry=True,
     )
     
-    # Process any deferred downloads (e.g., Anna's Archive quota-limited items)
-    deferred = pipeline.get_deferred_downloads()
-    if deferred:
-        logger.info(
-            "%d download(s) were deferred due to quota limits. "
-            "Processing deferred downloads after quota reset...",
-            len(deferred)
-        )
-        pipeline.process_deferred_downloads(wait_for_reset=True)
+    # Check for deferred downloads
+    queue = get_deferred_queue()
+    deferred_count = len(queue.get_pending())
+    
+    if deferred_count > 0:
+        scheduler = get_background_scheduler()
+        if scheduler.is_running():
+            logger.info(
+                "%d download(s) deferred due to quota limits. "
+                "Background scheduler is running and will retry when quotas reset.",
+                deferred_count
+            )
+            logger.info(
+                "You can safely exit - deferred queue is persisted to disk. "
+                "Run the downloader again to resume background retries."
+            )
+        else:
+            logger.info(
+                "%d download(s) deferred. Background scheduler not running. "
+                "Run the downloader again to process deferred items.",
+                deferred_count
+            )
+    
+    # Log final statistics
+    logger.info(
+        "Batch complete: %d processed, %d succeeded, %d failed, %d deferred",
+        stats.get("processed", 0),
+        stats.get("succeeded", 0),
+        stats.get("failed", 0),
+        stats.get("deferred", 0),
+    )
     
     logger.info("Downloader finished.")
 

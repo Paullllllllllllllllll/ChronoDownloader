@@ -34,6 +34,55 @@ from main.unified_csv import (
     mark_failed,
     mark_deferred,
 )
+from main.background_scheduler import (
+    BackgroundRetryScheduler,
+    get_background_scheduler,
+    start_background_scheduler,
+    stop_background_scheduler,
+)
+from main.deferred_queue import get_deferred_queue
+from api.providers import PROVIDERS
+
+
+def _setup_background_scheduler(
+    config: Dict[str, Any],
+    logger: logging.Logger,
+) -> Optional[BackgroundRetryScheduler]:
+    """Set up and start the background retry scheduler.
+    
+    Args:
+        config: Configuration dictionary
+        logger: Logger instance
+        
+    Returns:
+        BackgroundRetryScheduler instance if started, None if disabled
+    """
+    deferred_cfg = config.get("deferred", {})
+    if not deferred_cfg.get("background_enabled", True):
+        logger.debug("Background retry scheduler disabled in config")
+        return None
+    
+    scheduler = get_background_scheduler()
+    
+    # Register download functions for all providers
+    for provider_key, (search_fn, download_fn, provider_name) in PROVIDERS.items():
+        scheduler.set_provider_download_fn(provider_key, download_fn)
+    
+    # Set up callbacks for logging
+    def on_success(item):
+        logger.info("Background retry succeeded: '%s'", item.title)
+    
+    def on_failure(item, error):
+        logger.warning("Background retry failed: '%s' - %s", item.title, error)
+    
+    scheduler.set_callbacks(on_success=on_success, on_failure=on_failure)
+    
+    # Start the scheduler
+    if scheduler.start():
+        logger.info("Background retry scheduler started")
+        return scheduler
+    
+    return None
 
 
 def run_batch_downloads(
@@ -47,6 +96,7 @@ def run_batch_downloads(
     on_submit: Optional[Callable[[DownloadTask], None]] = None,
     on_complete: Optional[Callable[[DownloadTask, bool, Optional[Exception]], None]] = None,
     csv_path: Optional[str] = None,
+    enable_background_retry: bool = True,
 ) -> Dict[str, int]:
     """Run batch downloads with automatic mode selection.
     
@@ -73,18 +123,42 @@ def run_batch_downloads(
     if logger is None:
         logger = logging.getLogger(__name__)
     
-    # Determine effective parallel settings
-    dl_config = config.get("download", {})
-    max_parallel = max_workers_override or int(dl_config.get("max_parallel_downloads", 1) or 1)
+    # Start background retry scheduler if enabled
+    bg_scheduler: Optional[BackgroundRetryScheduler] = None
+    if enable_background_retry and not dry_run:
+        bg_scheduler = _setup_background_scheduler(config, logger)
     
-    # Use parallel mode only when configured and not dry-run
-    if use_parallel and max_parallel > 1 and not dry_run:
-        return _run_parallel(
-            works_df, output_dir, config, max_workers_override, logger,
-            on_submit, on_complete, csv_path
-        )
-    else:
-        return _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
+    try:
+        # Determine effective parallel settings
+        dl_config = config.get("download", {})
+        max_parallel = max_workers_override or int(dl_config.get("max_parallel_downloads", 1) or 1)
+        
+        # Use parallel mode only when configured and not dry-run
+        if use_parallel and max_parallel > 1 and not dry_run:
+            stats = _run_parallel(
+                works_df, output_dir, config, max_workers_override, logger,
+                on_submit, on_complete, csv_path
+            )
+        else:
+            stats = _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
+        
+        # Add deferred count to stats
+        queue = get_deferred_queue()
+        deferred_count = len(queue.get_pending())
+        stats["deferred"] = deferred_count
+        
+        if deferred_count > 0:
+            logger.info(
+                "%d download(s) deferred due to quota limits. "
+                "Background scheduler will retry when quotas reset.",
+                deferred_count
+            )
+        
+        return stats
+    finally:
+        # Don't stop the background scheduler here - let it continue running
+        # It will be stopped by the main downloader when appropriate
+        pass
 
 
 def _run_sequential(

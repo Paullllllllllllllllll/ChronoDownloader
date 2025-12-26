@@ -1,231 +1,206 @@
 """Deferred download management for ChronoDownloader.
 
-This module handles tracking and retrying downloads that were deferred
-due to quota exhaustion (e.g., Anna's Archive daily limits).
+DEPRECATED: This module is kept for backwards compatibility.
+New code should use main.deferred_queue and main.background_scheduler instead.
+
+The new system provides:
+- Persistent queue (survives script restarts)
+- Background scheduler (non-blocking retry)
+- Centralized quota management
 """
 from __future__ import annotations
 
 import logging
-import threading
-import time
-from datetime import datetime, timezone
+import warnings
 from typing import Any, Dict, List
 
-from api.core.context import clear_current_provider, set_current_provider
-from api.model import QuotaDeferredException
+from main.deferred_queue import DeferredQueue, DeferredItem, get_deferred_queue
+from main.background_scheduler import get_background_scheduler
 
 logger = logging.getLogger(__name__)
 
-# Thread-safe deferred downloads tracking
-# Structure: List of dicts with keys: title, creator, entry_id, base_output_dir,
-#           selected, provider_tuple, work_dir, reset_time, provider
-_deferred_downloads: List[Dict[str, Any]] = []
-_deferred_downloads_lock = threading.Lock()
-
 
 def add_deferred_download(item: Dict[str, Any]) -> None:
-    """Thread-safe addition to deferred downloads list.
+    """DEPRECATED: Add a deferred download item.
+    
+    This function is kept for backwards compatibility.
+    New code should use get_deferred_queue().add() instead.
     
     Args:
-        item: Deferred download info dict with keys:
-            - title, creator, entry_id, base_output_dir
-            - selected (SearchResult)
-            - provider_tuple (key, search_fn, download_fn, name)
-            - work_dir, reset_time, provider
+        item: Deferred download info dict (legacy format)
     """
-    with _deferred_downloads_lock:
-        _deferred_downloads.append(item)
+    warnings.warn(
+        "add_deferred_download is deprecated. Use get_deferred_queue().add() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    queue = get_deferred_queue()
+    
+    # Extract fields from legacy format
+    title = item.get("title", "Unknown")
+    creator = item.get("creator")
+    entry_id = item.get("entry_id")
+    provider_tuple = item.get("provider_tuple")
+    work_dir = item.get("work_dir", "")
+    base_output_dir = item.get("base_output_dir", "downloaded_works")
+    reset_time = item.get("reset_time")
+    selected = item.get("selected")
+    
+    # Extract provider info
+    provider_key = "unknown"
+    provider_name = "Unknown"
+    if provider_tuple and len(provider_tuple) >= 4:
+        provider_key = provider_tuple[0]
+        provider_name = provider_tuple[3]
+    
+    # Extract source_id from selected
+    source_id = None
+    item_url = None
+    raw_data = {}
+    if selected:
+        source_id = getattr(selected, "source_id", None)
+        item_url = getattr(selected, "item_url", None)
+        raw_data = getattr(selected, "raw", {})
+    
+    queue.add(
+        title=title,
+        creator=creator,
+        entry_id=entry_id,
+        provider_key=provider_key,
+        provider_name=provider_name,
+        source_id=source_id,
+        work_dir=work_dir,
+        base_output_dir=base_output_dir,
+        item_url=item_url,
+        reset_time=reset_time,
+        raw_data=raw_data,
+    )
 
 
 def get_deferred_downloads() -> List[Dict[str, Any]]:
-    """Get the list of deferred downloads waiting for quota reset.
+    """DEPRECATED: Get list of deferred downloads.
     
-    Thread-safe.
+    This function is kept for backwards compatibility.
+    New code should use get_deferred_queue().get_pending() instead.
     
     Returns:
-        List of deferred download info dicts (copy)
+        List of deferred items (converted to legacy format)
     """
-    with _deferred_downloads_lock:
-        return list(_deferred_downloads)
+    warnings.warn(
+        "get_deferred_downloads is deprecated. Use get_deferred_queue().get_pending() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    queue = get_deferred_queue()
+    pending = queue.get_pending()
+    
+    # Convert to legacy format for backwards compatibility
+    legacy_items = []
+    for item in pending:
+        legacy_items.append({
+            "title": item.title,
+            "creator": item.creator,
+            "entry_id": item.entry_id,
+            "work_dir": item.work_dir,
+            "base_output_dir": item.base_output_dir,
+            "reset_time": item.get_reset_datetime(),
+            "provider": item.provider_name,
+            "_deferred_item": item,  # Reference to new item for internal use
+        })
+    
+    return legacy_items
 
 
 def clear_deferred_downloads() -> None:
-    """Clear the deferred downloads list.
+    """DEPRECATED: Clear all deferred downloads.
     
-    Thread-safe.
+    This function is kept for backwards compatibility.
+    New code should use get_deferred_queue().clear_all() instead.
     """
-    with _deferred_downloads_lock:
-        _deferred_downloads.clear()
+    warnings.warn(
+        "clear_deferred_downloads is deprecated. Use get_deferred_queue().clear_all() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    queue = get_deferred_queue()
+    queue.clear_all()
 
 
 def remove_deferred_download(item: Dict[str, Any]) -> bool:
-    """Remove a specific item from the deferred downloads list.
+    """DEPRECATED: Remove a specific deferred download.
     
-    Thread-safe.
+    This function is kept for backwards compatibility.
+    New code should use get_deferred_queue().remove() instead.
     
     Args:
-        item: The item to remove
+        item: The item to remove (legacy format)
         
     Returns:
-        True if item was found and removed, False otherwise
+        True if removed, False otherwise
     """
-    with _deferred_downloads_lock:
-        try:
-            _deferred_downloads.remove(item)
-            return True
-        except ValueError:
-            return False
+    warnings.warn(
+        "remove_deferred_download is deprecated. Use get_deferred_queue().remove() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    # Try to get the underlying DeferredItem reference
+    deferred_item = item.get("_deferred_item")
+    if deferred_item and hasattr(deferred_item, "id"):
+        queue = get_deferred_queue()
+        return queue.remove(deferred_item.id)
+    
+    return False
 
 
 def process_deferred_downloads(wait_for_reset: bool = True) -> int:
-    """Process downloads that were deferred due to quota exhaustion.
+    """DEPRECATED: Process deferred downloads synchronously.
     
-    This function loops until all deferred downloads are complete (or permanently
-    failed). After each pass, if quota-limited items remain, it waits for the
-    quota reset time before retrying.
+    This function is kept for backwards compatibility but now simply
+    checks if the background scheduler is running and returns the
+    count of pending items.
     
-    Thread-safe.
+    New code should rely on the BackgroundRetryScheduler which handles
+    retries automatically in the background.
     
     Args:
-        wait_for_reset: If True, wait for the quota reset time before retrying.
-                       If False, only retry items whose reset time has passed.
+        wait_for_reset: Ignored (background scheduler handles waiting)
     
     Returns:
-        Number of successfully processed deferred downloads
+        Number of pending deferred downloads
     """
-    total_processed = 0
-    pass_number = 0
-    permanent_failures: set = set()  # Track items that failed for non-quota reasons
+    warnings.warn(
+        "process_deferred_downloads is deprecated. "
+        "The BackgroundRetryScheduler now handles retries automatically.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
-    while True:
-        pass_number += 1
-        
-        # Get current deferred downloads (excluding permanent failures)
-        with _deferred_downloads_lock:
-            pending = [
-                item for item in _deferred_downloads
-                if id(item) not in permanent_failures
-            ]
-            if not pending:
-                if pass_number == 1:
-                    logger.info("No deferred downloads to process.")
-                break
-        
-        logger.info(
-            "Deferred downloads pass %d: %d item(s) to process...",
-            pass_number, len(pending)
-        )
-        
-        # Find the earliest reset time among pending items
-        earliest_reset = None
-        for item in pending:
-            reset_time = item.get("reset_time")
-            if reset_time and (earliest_reset is None or reset_time < earliest_reset):
-                earliest_reset = reset_time
-        
-        # Wait for quota reset if needed
-        if wait_for_reset and earliest_reset:
-            now = datetime.now(timezone.utc)
-            # Handle naive datetime from Anna's Archive
-            if earliest_reset.tzinfo is None:
-                earliest_reset = earliest_reset.replace(tzinfo=timezone.utc)
-            
-            wait_seconds = (earliest_reset - now).total_seconds()
-            if wait_seconds > 0:
-                wait_hours = wait_seconds / 3600
-                logger.info(
-                    "Waiting %.1f hours for quota reset before processing deferred downloads...",
-                    wait_hours
-                )
-                # Sleep in chunks and log progress
-                remaining = wait_seconds
-                while remaining > 0:
-                    sleep_time = min(remaining, 3600)  # Sleep max 1 hour at a time
-                    logger.info(
-                        "Deferred downloads: %.1f hours remaining until quota reset...",
-                        remaining / 3600
-                    )
-                    time.sleep(sleep_time)
-                    remaining -= sleep_time
-                logger.info("Quota reset time reached. Retrying deferred downloads...")
-        
-        # Process pending items in this pass
-        pass_processed = 0
-        quota_limited = []
-        
-        for item in pending:
-            title = item.get("title")
-            selected = item.get("selected")
-            provider_tuple = item.get("provider_tuple")
-            work_dir = item.get("work_dir")
-            
-            if not selected or not provider_tuple or not work_dir:
-                logger.warning("Incomplete deferred download info for '%s', skipping.", title)
-                permanent_failures.add(id(item))
-                continue
-            
-            pkey, _search_func, download_func, pname = provider_tuple
-            logger.info("Retrying deferred download for '%s' from %s", title, pname)
-            
-            try:
-                set_current_provider(pkey)
-                ok = download_func(selected, work_dir)
-                if ok:
-                    logger.info("Deferred download succeeded for '%s'", title)
-                    pass_processed += 1
-                    total_processed += 1
-                    # Remove from deferred list
-                    remove_deferred_download(item)
-                else:
-                    logger.warning("Deferred download failed for '%s' (non-quota reason)", title)
-                    permanent_failures.add(id(item))
-            except QuotaDeferredException as qde:
-                logger.info(
-                    "Deferred download for '%s' quota-limited: %s",
-                    title, qde.message
-                )
-                # Update reset time for next pass
-                item["reset_time"] = qde.reset_time
-                quota_limited.append(item)
-            except Exception:
-                logger.exception("Error retrying deferred download for '%s'", title)
-                permanent_failures.add(id(item))
-            finally:
-                try:
-                    clear_current_provider()
-                except Exception:
-                    pass
-        
-        logger.info(
-            "Pass %d complete: %d succeeded, %d quota-limited, %d permanently failed",
-            pass_number, pass_processed, len(quota_limited), len(permanent_failures)
-        )
-        
-        # If no quota-limited items remain, we're done
-        if not quota_limited:
-            break
-        
-        # Check if we should continue waiting for quota resets
-        if not wait_for_reset:
-            logger.info(
-                "wait_for_reset=False; %d quota-limited items will remain deferred.",
-                len(quota_limited)
-            )
-            break
+    queue = get_deferred_queue()
+    scheduler = get_background_scheduler()
     
-    # Final summary
-    with _deferred_downloads_lock:
-        remaining = len(_deferred_downloads)
+    pending = queue.get_pending()
+    if not pending:
+        logger.info("No deferred downloads to process.")
+        return 0
     
-    if remaining > 0:
+    if scheduler.is_running():
         logger.info(
-            "Deferred downloads complete: %d succeeded, %d still pending.",
-            total_processed, remaining
+            "%d deferred download(s) queued. "
+            "Background scheduler is running and will retry when quotas reset.",
+            len(pending)
         )
     else:
-        logger.info("All deferred downloads processed: %d succeeded.", total_processed)
+        logger.info(
+            "%d deferred download(s) queued. "
+            "Start the background scheduler to process them.",
+            len(pending)
+        )
     
-    return total_processed
+    return len(pending)
 
 
 __all__ = [

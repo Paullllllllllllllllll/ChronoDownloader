@@ -231,5 +231,13 @@
     },
     "on_exceed": "stop"
   },
+  "deferred": {
+    "background_enabled": true,
+    "queue_file": ".deferred_queue.json",
+    "quota_state_file": ".quota_state.json",
+    "check_interval_minutes": 15,
+    "max_retries": 5,
+    "_note": "Background scheduler monitors quota-limited downloads and retries when quotas reset"
+  },
   "_csv_format_note": "Expects sampling notebook format: entry_id, short_title, main_author, retrievable, link columns"
 }
