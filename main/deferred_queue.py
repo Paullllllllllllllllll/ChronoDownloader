@@ -1,0 +1,551 @@
+"""Persistent deferred download queue.
+
+This module provides a thread-safe, JSON-persisted queue for tracking
+downloads that were deferred due to quota exhaustion or other temporary
+failures.
+
+Features:
+- Automatic JSON persistence (survives script restarts)
+- Thread-safe operations
+- Retry tracking with configurable max retries
+- Provider-based filtering for selective retry
+"""
+from __future__ import annotations
+
+import json
+import logging
+import threading
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterator, List, Optional
+
+from api.core.config import get_config
+
+logger = logging.getLogger(__name__)
+
+# Default queue file
+DEFAULT_QUEUE_FILE = ".deferred_queue.json"
+
+
+@dataclass
+class DeferredItem:
+    """A single deferred download item.
+    
+    Attributes:
+        id: Unique identifier for this deferred item
+        title: Work title
+        creator: Optional creator/author
+        entry_id: Entry ID from CSV
+        provider_key: Provider that caused the deferral
+        provider_name: Human-readable provider name
+        source_id: Provider-specific item ID (e.g., MD5 for Anna's Archive)
+        work_dir: Target directory for download
+        base_output_dir: Base output directory
+        item_url: URL to the item
+        deferred_at: When the item was deferred (ISO format)
+        reset_time: When quota is expected to reset (ISO format)
+        retry_count: Number of retry attempts
+        last_retry_at: Last retry attempt time (ISO format)
+        status: Current status (pending, retrying, completed, failed)
+        error_message: Last error message if any
+        raw_data: Additional raw data from SearchResult
+    """
+    id: str
+    title: str
+    creator: Optional[str]
+    entry_id: Optional[str]
+    provider_key: str
+    provider_name: str
+    source_id: Optional[str]
+    work_dir: str
+    base_output_dir: str
+    item_url: Optional[str] = None
+    deferred_at: Optional[str] = None
+    reset_time: Optional[str] = None
+    retry_count: int = 0
+    last_retry_at: Optional[str] = None
+    status: str = "pending"
+    error_message: Optional[str] = None
+    raw_data: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DeferredItem":
+        """Create from dictionary."""
+        return cls(
+            id=data.get("id", str(uuid.uuid4())),
+            title=data.get("title", "Unknown"),
+            creator=data.get("creator"),
+            entry_id=data.get("entry_id"),
+            provider_key=data.get("provider_key", "unknown"),
+            provider_name=data.get("provider_name", "Unknown"),
+            source_id=data.get("source_id"),
+            work_dir=data.get("work_dir", ""),
+            base_output_dir=data.get("base_output_dir", "downloaded_works"),
+            item_url=data.get("item_url"),
+            deferred_at=data.get("deferred_at"),
+            reset_time=data.get("reset_time"),
+            retry_count=int(data.get("retry_count", 0)),
+            last_retry_at=data.get("last_retry_at"),
+            status=data.get("status", "pending"),
+            error_message=data.get("error_message"),
+            raw_data=data.get("raw_data", {}),
+        )
+    
+    def get_reset_datetime(self) -> Optional[datetime]:
+        """Get reset time as datetime.
+        
+        Returns:
+            Reset datetime (UTC) or None
+        """
+        if not self.reset_time:
+            return None
+        try:
+            dt = datetime.fromisoformat(self.reset_time)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return None
+    
+    def is_ready_for_retry(self) -> bool:
+        """Check if item is ready to retry (reset time has passed).
+        
+        Returns:
+            True if ready for retry
+        """
+        if self.status not in ("pending", "retrying"):
+            return False
+        
+        reset_dt = self.get_reset_datetime()
+        if not reset_dt:
+            return True  # No reset time specified, assume ready
+        
+        now = datetime.now(timezone.utc)
+        return now >= reset_dt
+    
+    def seconds_until_ready(self) -> float:
+        """Get seconds until item is ready for retry.
+        
+        Returns:
+            Seconds until ready, or 0 if ready now
+        """
+        reset_dt = self.get_reset_datetime()
+        if not reset_dt:
+            return 0.0
+        
+        now = datetime.now(timezone.utc)
+        delta = (reset_dt - now).total_seconds()
+        return max(0.0, delta)
+
+
+class DeferredQueue:
+    """Thread-safe, persistent queue for deferred downloads.
+    
+    Manages a queue of downloads that were deferred due to quota exhaustion
+    or other temporary failures. Automatically persists to JSON.
+    """
+    
+    _instance: Optional["DeferredQueue"] = None
+    _lock = threading.Lock()
+    
+    def __new__(cls, queue_file: Optional[str] = None) -> "DeferredQueue":
+        """Singleton pattern - only one DeferredQueue instance."""
+        with cls._lock:
+            if cls._instance is None:
+                instance = super().__new__(cls)
+                instance._initialized = False
+                cls._instance = instance
+            return cls._instance
+    
+    def __init__(self, queue_file: Optional[str] = None):
+        """Initialize the deferred queue.
+        
+        Args:
+            queue_file: Path to queue file (uses config default if None)
+        """
+        if getattr(self, "_initialized", False):
+            return
+        
+        self._items: Dict[str, DeferredItem] = {}
+        self._data_lock = threading.RLock()
+        self._save_lock = threading.Lock()
+        
+        # Determine queue file path
+        if queue_file:
+            self._queue_file = Path(queue_file)
+        else:
+            cfg = get_config()
+            deferred_cfg = cfg.get("deferred", {})
+            self._queue_file = Path(
+                deferred_cfg.get("queue_file", DEFAULT_QUEUE_FILE)
+            )
+        
+        # Get max retries from config
+        cfg = get_config()
+        deferred_cfg = cfg.get("deferred", {})
+        self._max_retries = int(deferred_cfg.get("max_retries", 5))
+        
+        # Load existing queue
+        self._load_queue()
+        self._initialized = True
+        logger.debug("DeferredQueue initialized with file: %s", self._queue_file)
+    
+    def _load_queue(self) -> None:
+        """Load queue from disk."""
+        if not self._queue_file.exists():
+            logger.debug("No existing deferred queue file found")
+            return
+        
+        try:
+            with open(self._queue_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            for item_data in data.get("items", []):
+                item = DeferredItem.from_dict(item_data)
+                self._items[item.id] = item
+            
+            # Count by status
+            pending = sum(1 for i in self._items.values() if i.status == "pending")
+            logger.info(
+                "Loaded %d deferred item(s) from queue (%d pending)",
+                len(self._items), pending
+            )
+        except Exception as e:
+            logger.warning("Failed to load deferred queue: %s", e)
+    
+    def _save_queue(self) -> None:
+        """Save queue to disk."""
+        with self._save_lock:
+            try:
+                data = {
+                    "items": [item.to_dict() for item in self._items.values()],
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                }
+                with open(self._queue_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+            except Exception as e:
+                logger.warning("Failed to save deferred queue: %s", e)
+    
+    def add(
+        self,
+        title: str,
+        creator: Optional[str],
+        entry_id: Optional[str],
+        provider_key: str,
+        provider_name: str,
+        source_id: Optional[str],
+        work_dir: str,
+        base_output_dir: str,
+        item_url: Optional[str] = None,
+        reset_time: Optional[datetime] = None,
+        raw_data: Optional[Dict[str, Any]] = None,
+    ) -> DeferredItem:
+        """Add a new item to the deferred queue.
+        
+        Args:
+            title: Work title
+            creator: Optional creator/author
+            entry_id: Entry ID from CSV
+            provider_key: Provider that caused deferral
+            provider_name: Human-readable provider name
+            source_id: Provider-specific item ID
+            work_dir: Target directory for download
+            base_output_dir: Base output directory
+            item_url: URL to the item
+            reset_time: When quota is expected to reset
+            raw_data: Additional raw data
+            
+        Returns:
+            Created DeferredItem
+        """
+        with self._data_lock:
+            # Check for duplicate (same entry_id and provider)
+            for existing in self._items.values():
+                if (existing.entry_id == entry_id and 
+                    existing.provider_key == provider_key and
+                    existing.status == "pending"):
+                    logger.debug(
+                        "Item already in queue: %s from %s",
+                        title, provider_name
+                    )
+                    # Update reset time if newer
+                    if reset_time:
+                        existing.reset_time = reset_time.isoformat()
+                        self._save_queue()
+                    return existing
+            
+            item = DeferredItem(
+                id=str(uuid.uuid4()),
+                title=title,
+                creator=creator,
+                entry_id=entry_id,
+                provider_key=provider_key,
+                provider_name=provider_name,
+                source_id=source_id,
+                work_dir=work_dir,
+                base_output_dir=base_output_dir,
+                item_url=item_url,
+                deferred_at=datetime.now(timezone.utc).isoformat(),
+                reset_time=reset_time.isoformat() if reset_time else None,
+                status="pending",
+                raw_data=raw_data or {},
+            )
+            
+            self._items[item.id] = item
+            self._save_queue()
+            
+            logger.info(
+                "Added to deferred queue: '%s' from %s (reset in %.1f hours)",
+                title, provider_name,
+                item.seconds_until_ready() / 3600 if item.seconds_until_ready() > 0 else 0
+            )
+            
+            return item
+    
+    def remove(self, item_id: str) -> bool:
+        """Remove an item from the queue.
+        
+        Args:
+            item_id: Item ID to remove
+            
+        Returns:
+            True if removed, False if not found
+        """
+        with self._data_lock:
+            if item_id in self._items:
+                del self._items[item_id]
+                self._save_queue()
+                return True
+            return False
+    
+    def mark_completed(self, item_id: str) -> bool:
+        """Mark an item as successfully completed.
+        
+        Args:
+            item_id: Item ID
+            
+        Returns:
+            True if marked, False if not found
+        """
+        with self._data_lock:
+            if item_id in self._items:
+                self._items[item_id].status = "completed"
+                self._save_queue()
+                logger.info("Deferred item completed: %s", self._items[item_id].title)
+                return True
+            return False
+    
+    def mark_failed(self, item_id: str, error_message: Optional[str] = None) -> bool:
+        """Mark an item as permanently failed.
+        
+        Args:
+            item_id: Item ID
+            error_message: Error description
+            
+        Returns:
+            True if marked, False if not found
+        """
+        with self._data_lock:
+            if item_id in self._items:
+                item = self._items[item_id]
+                item.status = "failed"
+                item.error_message = error_message
+                self._save_queue()
+                logger.warning(
+                    "Deferred item failed: %s - %s",
+                    item.title, error_message or "Unknown error"
+                )
+                return True
+            return False
+    
+    def mark_retrying(
+        self,
+        item_id: str,
+        new_reset_time: Optional[datetime] = None
+    ) -> bool:
+        """Mark an item as being retried (increment retry count).
+        
+        If max retries exceeded, marks as failed instead.
+        
+        Args:
+            item_id: Item ID
+            new_reset_time: New reset time if quota hit again
+            
+        Returns:
+            True if can continue retrying, False if max retries exceeded
+        """
+        with self._data_lock:
+            if item_id not in self._items:
+                return False
+            
+            item = self._items[item_id]
+            item.retry_count += 1
+            item.last_retry_at = datetime.now(timezone.utc).isoformat()
+            
+            if item.retry_count >= self._max_retries:
+                item.status = "failed"
+                item.error_message = f"Max retries ({self._max_retries}) exceeded"
+                self._save_queue()
+                logger.warning(
+                    "Deferred item exceeded max retries: %s (%d attempts)",
+                    item.title, item.retry_count
+                )
+                return False
+            
+            item.status = "retrying"
+            if new_reset_time:
+                item.reset_time = new_reset_time.isoformat()
+            
+            self._save_queue()
+            logger.info(
+                "Deferred item retry %d/%d: %s",
+                item.retry_count, self._max_retries, item.title
+            )
+            return True
+    
+    def get(self, item_id: str) -> Optional[DeferredItem]:
+        """Get an item by ID.
+        
+        Args:
+            item_id: Item ID
+            
+        Returns:
+            DeferredItem or None
+        """
+        with self._data_lock:
+            return self._items.get(item_id)
+    
+    def get_pending(self) -> List[DeferredItem]:
+        """Get all pending items (not completed or failed).
+        
+        Returns:
+            List of pending DeferredItems
+        """
+        with self._data_lock:
+            return [
+                item for item in self._items.values()
+                if item.status in ("pending", "retrying")
+            ]
+    
+    def get_ready(self) -> List[DeferredItem]:
+        """Get items that are ready for retry (reset time passed).
+        
+        Returns:
+            List of ready DeferredItems
+        """
+        with self._data_lock:
+            return [
+                item for item in self._items.values()
+                if item.is_ready_for_retry()
+            ]
+    
+    def get_by_provider(self, provider_key: str) -> List[DeferredItem]:
+        """Get pending items for a specific provider.
+        
+        Args:
+            provider_key: Provider identifier
+            
+        Returns:
+            List of DeferredItems for the provider
+        """
+        with self._data_lock:
+            return [
+                item for item in self._items.values()
+                if item.provider_key == provider_key and item.status in ("pending", "retrying")
+            ]
+    
+    def get_next_ready_time(self) -> Optional[datetime]:
+        """Get the earliest reset time among pending items.
+        
+        Returns:
+            Earliest reset datetime or None if no pending items
+        """
+        with self._data_lock:
+            earliest: Optional[datetime] = None
+            
+            for item in self._items.values():
+                if item.status not in ("pending", "retrying"):
+                    continue
+                
+                reset_dt = item.get_reset_datetime()
+                if reset_dt and (earliest is None or reset_dt < earliest):
+                    earliest = reset_dt
+            
+            return earliest
+    
+    def count_by_status(self) -> Dict[str, int]:
+        """Get count of items by status.
+        
+        Returns:
+            Dictionary of status -> count
+        """
+        with self._data_lock:
+            counts: Dict[str, int] = {}
+            for item in self._items.values():
+                counts[item.status] = counts.get(item.status, 0) + 1
+            return counts
+    
+    def __len__(self) -> int:
+        """Get total number of items in queue."""
+        with self._data_lock:
+            return len(self._items)
+    
+    def __iter__(self) -> Iterator[DeferredItem]:
+        """Iterate over all items."""
+        with self._data_lock:
+            return iter(list(self._items.values()))
+    
+    def clear_completed(self) -> int:
+        """Remove all completed items from queue.
+        
+        Returns:
+            Number of items removed
+        """
+        with self._data_lock:
+            to_remove = [
+                item_id for item_id, item in self._items.items()
+                if item.status == "completed"
+            ]
+            for item_id in to_remove:
+                del self._items[item_id]
+            
+            if to_remove:
+                self._save_queue()
+                logger.info("Cleared %d completed item(s) from queue", len(to_remove))
+            
+            return len(to_remove)
+    
+    def clear_all(self) -> int:
+        """Remove all items from queue.
+        
+        Returns:
+            Number of items removed
+        """
+        with self._data_lock:
+            count = len(self._items)
+            self._items.clear()
+            self._save_queue()
+            logger.info("Cleared all %d item(s) from queue", count)
+            return count
+
+
+def get_deferred_queue() -> DeferredQueue:
+    """Get the singleton DeferredQueue instance.
+    
+    Returns:
+        DeferredQueue instance
+    """
+    return DeferredQueue()
+
+
+__all__ = [
+    "DeferredQueue",
+    "DeferredItem",
+    "get_deferred_queue",
+]
