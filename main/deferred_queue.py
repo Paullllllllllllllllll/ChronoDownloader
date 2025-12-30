@@ -4,6 +4,11 @@ This module provides a thread-safe, JSON-persisted queue for tracking
 downloads that were deferred due to quota exhaustion or other temporary
 failures.
 
+Quota-Limited Providers:
+- Only providers with daily/hourly quotas (e.g., Anna's Archive) defer downloads
+- Unlimited providers (MDZ, Gallica) use rate limiting and never defer
+- Deferred items include reset_time to indicate when quota will be available again
+
 Features:
 - Automatic JSON persistence (survives script restarts)
 - Thread-safe operations

@@ -85,7 +85,20 @@ def _get_quota_manager():
 
 
 def _get_quota_config() -> dict:
-    """Get Anna's Archive quota configuration."""
+    """Get Anna's Archive quota configuration.
+    
+    Supports both new quota.* structure and legacy config for backward compatibility.
+    """
+    # Try new quota config structure first
+    quota_config = get_provider_setting("annas_archive", "quota", {})
+    if isinstance(quota_config, dict) and quota_config.get("enabled"):
+        return {
+            "daily_limit": quota_config.get("daily_limit", 75),
+            "wait_for_reset": quota_config.get("wait_for_reset", True),
+            "reset_wait_hours": quota_config.get("reset_hours", 24),
+        }
+    
+    # Fallback to legacy config
     return {
         "daily_limit": get_provider_setting("annas_archive", "daily_fast_download_limit", 10),
         "wait_for_reset": get_provider_setting("annas_archive", "wait_for_quota_reset", True),

@@ -24,6 +24,7 @@
     "mdz": {
       "max_pages": 0,
       "min_title_score": 45,
+      "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
         "delay_ms": 300,
         "jitter_ms": 150,
@@ -37,6 +38,7 @@
     "gallica": {
       "max_pages": 0,
       "min_title_score": 45,
+      "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
         "delay_ms": 4000,
         "jitter_ms": 800,
@@ -150,6 +152,13 @@
     "annas_archive": {
       "max_pages": 0,
       "min_title_score": 70,
+      "quota": {
+        "enabled": true,
+        "daily_limit": 75,
+        "reset_hours": 24,
+        "wait_for_reset": true,
+        "_note": "Anna's Archive fast download API has a daily quota (member feature)"
+      },
       "daily_fast_download_limit": 75,
       "wait_for_quota_reset": true,
       "quota_reset_wait_hours": 24,
@@ -160,7 +169,8 @@
         "base_backoff_s": 2.0,
         "backoff_multiplier": 2.0,
         "max_backoff_s": 45.0,
-        "timeout_s": 45
+        "timeout_s": 45,
+        "_note": "Rate limiting delays (applies to all requests, separate from quota)"
       }
     }
   },

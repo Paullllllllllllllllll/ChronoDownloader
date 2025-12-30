@@ -10,13 +10,19 @@ The pipeline supports both sequential and parallel download modes:
 - Sequential (default): process_work() handles search and download in one call
 - Parallel: search_and_select() returns a DownloadTask, execute_download() runs in workers
 
+Quota Handling:
+- QuotaDeferredException is raised by quota-limited providers (e.g., Anna's Archive)
+- Pipeline catches the exception and adds work to deferred queue for later retry
+- Unlimited providers (MDZ, Gallica) never raise quota exceptions, only use rate limiting
+
 The CLI in main/downloader.py is now a thin wrapper that parses arguments
 and delegates to functions in this module.
 
 Refactored modules:
 - main.work_manager: Work directory and status management
 - main.index_manager: Index CSV operations
-- main.deferred: Deferred download tracking
+- main.deferred_queue: Deferred download tracking
+- main.quota_manager: Quota state for quota-limited providers
 """
 from __future__ import annotations
 

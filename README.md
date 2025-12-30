@@ -362,13 +362,27 @@ Seven main sections:
 
 ### 3. Provider Settings and Rate Limiting
 
-Per-provider rate limiting, retry policies, download limits:
+Per-provider rate limiting, retry policies, download limits, and quota management:
 
 ```json
 {
   "provider_settings": {
+    "mdz": {
+      "max_pages": 0,
+      "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 25,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
     "gallica": {
       "max_pages": 15,
+      "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
         "delay_ms": 1500,
         "jitter_ms": 400,
@@ -376,6 +390,26 @@ Per-provider rate limiting, retry policies, download limits:
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.6,
         "timeout_s": 30
+      }
+    },
+    "annas_archive": {
+      "max_pages": 0,
+      "quota": {
+        "enabled": true,
+        "daily_limit": 75,
+        "reset_hours": 24,
+        "wait_for_reset": true,
+        "_note": "Anna's Archive fast download API has a daily quota (member feature)"
+      },
+      "network": {
+        "delay_ms": 800,
+        "jitter_ms": 300,
+        "max_attempts": 5,
+        "base_backoff_s": 2.0,
+        "backoff_multiplier": 2.0,
+        "max_backoff_s": 45.0,
+        "timeout_s": 45,
+        "_note": "Rate limiting delays (applies to all requests, separate from quota)"
       }
     },
     "google_books": {
@@ -399,7 +433,29 @@ Per-provider rate limiting, retry policies, download limits:
 }
 ```
 
-**Network Parameters**:
+#### Quota vs Rate Limiting
+
+ChronoDownloader distinguishes between two types of download restrictions:
+
+**Quota Limits** (Daily/Hourly Hard Caps):
+- **Anna's Archive**: 75 fast downloads per day (member API feature)
+- When quota is exhausted, downloads are **deferred** to a persistent queue
+- Background scheduler automatically retries when quota resets
+- Configure with `quota` section in provider settings
+
+**Rate Limiting** (Request Delays):
+- **All providers**: Configurable delays, jitter, exponential backoff
+- **MDZ, Gallica, etc.**: Unlimited downloads with rate limiting only
+- No deferrals - downloads continue with appropriate delays
+- Configure with `network` section in provider settings
+
+**Quota Parameters** (for quota-limited providers only):
+- `quota.enabled`: Enable quota tracking for this provider
+- `quota.daily_limit`: Maximum downloads per reset period
+- `quota.reset_hours`: Hours until quota resets (typically 24)
+- `quota.wait_for_reset`: If true, defer downloads when quota exhausted; if false, fallback to alternative download method
+
+**Network Parameters** (all providers):
 - `delay_ms`: Minimum delay between requests (milliseconds)
 - `jitter_ms`: Random jitter added to delay
 - `max_attempts`: Maximum retry attempts

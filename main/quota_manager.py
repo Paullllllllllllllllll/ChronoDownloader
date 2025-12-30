@@ -1,13 +1,22 @@
-"""Centralized quota management for all providers.
+"""Centralized quota management for quota-limited providers.
 
 This module provides unified quota tracking across providers that have
 daily/hourly download limits (e.g., Anna's Archive fast downloads).
 
+IMPORTANT: This system is ONLY for providers with daily/hourly quotas.
+Providers with unlimited downloads (MDZ, Gallica, etc.) use network rate
+limiting instead, which is handled separately via the network config.
+
+Quota vs Rate Limiting:
+- Quota: Daily/hourly hard limit (e.g., 75 downloads/day for Anna's Archive)
+- Rate Limiting: Request delays and backoff (applies to all providers)
+
 Features:
 - Persistent quota state (survives script restarts)
 - Thread-safe operations
-- Provider-agnostic design
+- Provider-agnostic design for any quota-limited provider
 - Configurable limits and reset periods
+- Auto-detection of quota-enabled providers from config
 """
 from __future__ import annotations
 
@@ -183,6 +192,10 @@ class QuotaManager:
     def _get_or_create_quota(self, provider_key: str) -> ProviderQuota:
         """Get or create quota tracking for a provider.
         
+        Only creates quota tracking for providers with quota.enabled = true in config.
+        For unlimited providers, this will still create a quota object but it won't
+        be enforced (use has_quota() to check first).
+        
         Args:
             provider_key: Provider identifier
             
@@ -190,14 +203,23 @@ class QuotaManager:
             ProviderQuota instance
         """
         if provider_key not in self._quotas:
-            # Get provider-specific settings
-            daily_limit = get_provider_setting(
-                provider_key, "daily_download_limit",
-                get_provider_setting(provider_key, "daily_fast_download_limit", 10)
-            )
-            reset_hours = get_provider_setting(
-                provider_key, "quota_reset_hours", 24
-            )
+            # Check for new quota config structure first
+            quota_config = get_provider_setting(provider_key, "quota", {})
+            
+            if isinstance(quota_config, dict) and quota_config.get("enabled"):
+                # New config structure with quota.enabled = true
+                daily_limit = quota_config.get("daily_limit", 10)
+                reset_hours = quota_config.get("reset_hours", 24)
+            else:
+                # Fallback to legacy config for backward compatibility
+                daily_limit = get_provider_setting(
+                    provider_key, "daily_download_limit",
+                    get_provider_setting(provider_key, "daily_fast_download_limit", 10)
+                )
+                reset_hours = get_provider_setting(
+                    provider_key, "quota_reset_hours",
+                    get_provider_setting(provider_key, "quota_reset_wait_hours", 24)
+                )
             
             self._quotas[provider_key] = ProviderQuota(
                 provider_key=provider_key,
@@ -206,6 +228,10 @@ class QuotaManager:
                 period_start=datetime.now(timezone.utc).isoformat(),
             )
             self._save_state()
+            logger.debug(
+                "Initialized quota tracking for %s: %d downloads per %d hours",
+                provider_key, int(daily_limit), int(reset_hours)
+            )
         
         return self._quotas[provider_key]
     
@@ -382,6 +408,43 @@ class QuotaManager:
                 quota.period_start = datetime.now(timezone.utc).isoformat()
             self._save_state()
             logger.info("All quotas reset")
+    
+    def has_quota(self, provider_key: str) -> bool:
+        """Check if a provider has quota limits enabled.
+        
+        Args:
+            provider_key: Provider identifier
+            
+        Returns:
+            True if provider has quotas, False if unlimited
+        """
+        # Check new config structure
+        quota_config = get_provider_setting(provider_key, "quota", {})
+        if isinstance(quota_config, dict):
+            return quota_config.get("enabled", False)
+        
+        # For legacy configs, assume quota exists if daily_limit setting exists
+        daily_limit = get_provider_setting(
+            provider_key, "daily_download_limit",
+            get_provider_setting(provider_key, "daily_fast_download_limit", None)
+        )
+        return daily_limit is not None
+    
+    def get_quota_limited_providers(self) -> List[str]:
+        """Get list of all providers with quota limits enabled.
+        
+        Returns:
+            List of provider keys that have quotas
+        """
+        cfg = get_config()
+        provider_settings = cfg.get("provider_settings", {})
+        quota_providers = []
+        
+        for provider_key in provider_settings.keys():
+            if self.has_quota(provider_key):
+                quota_providers.append(provider_key)
+        
+        return quota_providers
 
 
 def get_quota_manager() -> QuotaManager:
