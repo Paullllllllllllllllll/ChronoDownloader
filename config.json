@@ -170,7 +170,8 @@
         "backoff_multiplier": 2.0,
         "max_backoff_s": 45.0,
         "timeout_s": 45,
-        "_note": "Rate limiting delays (applies to all requests, separate from quota)"
+        "ssl_error_policy": "retry_insecure_once",
+        "_note": "Rate limiting delays (applies to all requests, separate from quota). SSL policy allows retry without verification due to frequent certificate issues."
       }
     }
   },
