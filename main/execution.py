@@ -213,15 +213,24 @@ def _run_sequential(
         # Update CSV status if path provided
         if csv_path and not dry_run:
             if result and isinstance(result, dict):
-                # Success - result contains item_url and provider
-                item_url = result.get("item_url", "")
-                provider = result.get("provider", "")
-                mark_success(csv_path, str(entry_id), item_url, provider)
-                succeeded += 1
-            elif result is False:
-                # Explicit failure
-                mark_failed(csv_path, str(entry_id))
-                failed += 1
+                status = result.get("status", "")
+                if status == "completed":
+                    # Success - result contains item_url and provider
+                    item_url = result.get("item_url", "")
+                    provider = result.get("provider", "")
+                    if mark_success(csv_path, str(entry_id), item_url, provider):
+                        logger.debug("Marked entry %s as success in source CSV", entry_id)
+                    else:
+                        logger.warning("Failed to mark entry %s as success in source CSV", entry_id)
+                    succeeded += 1
+                elif status == "failed":
+                    # Explicit failure
+                    if mark_failed(csv_path, str(entry_id)):
+                        logger.debug("Marked entry %s as failed in source CSV", entry_id)
+                    else:
+                        logger.warning("Failed to mark entry %s as failed in source CSV", entry_id)
+                    failed += 1
+                # Other statuses (dry_run, no_match) - don't update CSV
             # result is None means deferred/skipped - don't update CSV
         
         processed += 1
@@ -292,12 +301,25 @@ def _run_parallel(
         
         # Update CSV status if path provided
         if csv_path and task.entry_id:
-            if success:
-                item_url = getattr(task, "item_url", "") or ""
-                provider = getattr(task, "provider", "") or ""
-                mark_success(csv_path, task.entry_id, item_url, provider)
-            else:
-                mark_failed(csv_path, task.entry_id)
+            try:
+                if success:
+                    item_url = getattr(task, "item_url", "") or ""
+                    provider = getattr(task, "provider", "") or ""
+                    if mark_success(csv_path, task.entry_id, item_url, provider):
+                        logger.debug("Marked entry %s as success in source CSV", task.entry_id)
+                    else:
+                        logger.warning("Failed to mark entry %s as success in source CSV", task.entry_id)
+                else:
+                    if mark_failed(csv_path, task.entry_id):
+                        logger.debug("Marked entry %s as failed in source CSV", task.entry_id)
+                    else:
+                        logger.warning("Failed to mark entry %s as failed in source CSV", task.entry_id)
+            except Exception as csv_err:
+                logger.error("Exception updating source CSV for entry %s: %s", task.entry_id, csv_err)
+        elif not csv_path:
+            logger.debug("No csv_path provided, skipping source CSV update")
+        elif not task.entry_id:
+            logger.warning("Task has no entry_id, cannot update source CSV for '%s'", task.title)
     
     # Use provided callbacks or defaults
     submit_callback = on_submit or default_on_submit

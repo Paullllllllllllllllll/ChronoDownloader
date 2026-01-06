@@ -23,7 +23,7 @@
   "provider_settings": {
     "mdz": {
       "max_pages": 0,
-      "min_title_score": 45,
+      "min_title_score": 35,
       "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
         "delay_ms": 300,
@@ -37,7 +37,7 @@
     },
     "gallica": {
       "max_pages": 0,
-      "min_title_score": 45,
+      "min_title_score": 35,
       "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
         "delay_ms": 4000,
@@ -151,10 +151,10 @@
     },
     "annas_archive": {
       "max_pages": 0,
-      "min_title_score": 70,
+      "min_title_score": 60,
       "quota": {
         "enabled": true,
-        "daily_limit": 75,
+        "daily_limit": 875,
         "reset_hours": 24,
         "wait_for_reset": true,
         "_note": "Anna's Archive fast download API has a daily quota (member feature)"
@@ -183,14 +183,14 @@
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
     "overwrite_existing": false,
     "include_metadata": true,
-    "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp", ".bmp", ".gif"],
+    "allowed_object_extensions": [".pdf", ".epub", ".zip", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp", ".bmp", ".gif"],
     "save_disallowed_to_metadata": true,
     "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects", "resume_from_csv"],
     "_resume_mode_note": "resume_from_csv uses the retrievable column in the source CSV for resume logic",
     "max_parallel_downloads": 10,
     "provider_concurrency": {
       "default": 5,
-      "annas_archive": 1,
+      "annas_archive": 3,
       "bnf_gallica": 1,
       "google_books": 1,
       "internet_archive": 3,
@@ -217,7 +217,7 @@
       "polona",
       "hathitrust"
     ],
-    "min_title_score": 50,
+    "min_title_score": 40,
     "creator_weight": 0.2,
     "year_tolerance": 2,
     "max_candidates_per_provider": 5,
