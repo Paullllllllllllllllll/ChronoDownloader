@@ -23,7 +23,7 @@
   "provider_settings": {
     "mdz": {
       "max_pages": 0,
-      "min_title_score": 35,
+      "min_title_score": 30,
       "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
         "delay_ms": 300,
@@ -37,15 +37,15 @@
     },
     "gallica": {
       "max_pages": 0,
-      "min_title_score": 35,
+      "min_title_score": 30,
       "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
-        "delay_ms": 4000,
-        "jitter_ms": 800,
+        "delay_ms": 8000,
+        "jitter_ms": 2000,
         "max_attempts": 25,
-        "base_backoff_s": 2.0,
-        "backoff_multiplier": 1.6,
-        "max_backoff_s": 90.0,
+        "base_backoff_s": 3.0,
+        "backoff_multiplier": 1.8,
+        "max_backoff_s": 120.0,
         "timeout_s": 30
       }
     },
@@ -151,7 +151,7 @@
     },
     "annas_archive": {
       "max_pages": 0,
-      "min_title_score": 60,
+      "min_title_score": 55,
       "quota": {
         "enabled": true,
         "daily_limit": 875,
@@ -217,7 +217,7 @@
       "polona",
       "hathitrust"
     ],
-    "min_title_score": 40,
+    "min_title_score": 35,
     "creator_weight": 0.2,
     "year_tolerance": 2,
     "max_candidates_per_provider": 5,

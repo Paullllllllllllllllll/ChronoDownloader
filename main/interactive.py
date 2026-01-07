@@ -21,6 +21,7 @@ from api.core.config import get_config, get_download_config
 from api.providers import PROVIDERS
 from main import pipeline
 from main.console_ui import ConsoleUI, DownloadConfiguration
+from main.deferred import get_deferred_downloads, process_deferred_downloads
 from main.mode_selector import get_general_config
 from main.unified_csv import (
     load_works_csv,
@@ -602,14 +603,14 @@ def run_interactive_session(config: DownloadConfiguration) -> None:
             processed = 1
     
     # Handle deferred downloads
-    deferred = pipeline.get_deferred_downloads()
+    deferred = get_deferred_downloads()
     if deferred:
         log.info(
             "%d download(s) were deferred due to quota limits.",
             len(deferred)
         )
         if ConsoleUI.prompt_yes_no("Process deferred downloads now?", default=False):
-            pipeline.process_deferred_downloads(wait_for_reset=True)
+            process_deferred_downloads(wait_for_reset=True)
     
     # Display completion summary
     print()

@@ -251,6 +251,7 @@ def _build_standardized_filename(
     ext: str,
     stem: str,
     prov_slug: str,
+    max_stem_len: int = 50,
 ) -> str:
     """Build a standardized filename with provider slug and sequence number.
     
@@ -258,10 +259,18 @@ def _build_standardized_filename(
         ext: File extension (lowercase, with dot)
         stem: Base name stem
         prov_slug: Provider slug
+        max_stem_len: Maximum length for the stem portion (default 50 to avoid
+                      exceeding Windows MAX_PATH when combined with folder names)
         
     Returns:
         Sanitized filename
     """
+    # Truncate stem to avoid exceeding Windows MAX_PATH (260 chars)
+    # The full path includes: base_dir + work_dir + objects/ + filename
+    # Limiting stem to 50 chars ensures reasonable total path lengths
+    if len(stem) > max_stem_len:
+        stem = stem[:max_stem_len].rstrip("_")
+    
     # Determine type key for numbering
     type_key = "image" if ext in _IMAGE_EXTENSIONS else (ext.lstrip(".") or "bin")
     
