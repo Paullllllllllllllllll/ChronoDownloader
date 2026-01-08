@@ -292,14 +292,22 @@ def _run_parallel(
         submitted_count += 1
         logger.debug("Queued download %d: '%s'", submitted_count, task.title)
     
-    def default_on_complete(task: DownloadTask, success: bool, error: Optional[Exception]) -> None:
-        status = "completed" if success else "failed"
-        if error:
-            logger.warning("Download %s for '%s': %s", status, task.title, error)
-        else:
-            logger.info("Download %s for '%s'", status, task.title)
-        
-        # Update CSV status if path provided
+    # Note: CSV sync is handled in wrapped_complete, not in callbacks
+    # This default is only used for logging when no custom callback provided
+    
+    # Use provided callbacks or defaults
+    submit_callback = on_submit or default_on_submit
+    complete_callback = on_complete if on_complete else None
+    
+    # Wrap callbacks to track stats while calling user callbacks
+    actual_submitted = [0]
+    
+    def wrapped_submit(task: DownloadTask) -> None:
+        actual_submitted[0] += 1
+        submit_callback(task)
+    
+    def wrapped_complete(task: DownloadTask, success: bool, error: Optional[Exception]) -> None:
+        # Always perform CSV sync (critical for resume functionality)
         if csv_path and task.entry_id:
             try:
                 if success:
@@ -316,24 +324,16 @@ def _run_parallel(
                         logger.warning("Failed to mark entry %s as failed in source CSV", task.entry_id)
             except Exception as csv_err:
                 logger.error("Exception updating source CSV for entry %s: %s", task.entry_id, csv_err)
-        elif not csv_path:
-            logger.debug("No csv_path provided, skipping source CSV update")
-        elif not task.entry_id:
-            logger.warning("Task has no entry_id, cannot update source CSV for '%s'", task.title)
-    
-    # Use provided callbacks or defaults
-    submit_callback = on_submit or default_on_submit
-    complete_callback = on_complete or default_on_complete
-    
-    # Wrap callbacks to track stats while calling user callbacks
-    actual_submitted = [0]
-    
-    def wrapped_submit(task: DownloadTask) -> None:
-        actual_submitted[0] += 1
-        submit_callback(task)
-    
-    def wrapped_complete(task: DownloadTask, success: bool, error: Optional[Exception]) -> None:
-        complete_callback(task, success, error)
+        
+        # Call custom callback if provided, otherwise use default logging
+        if complete_callback:
+            complete_callback(task, success, error)
+        else:
+            status = "completed" if success else "failed"
+            if error:
+                logger.warning("Download %s for '%s': %s", status, task.title, error)
+            else:
+                logger.info("Download %s for '%s'", status, task.title)
     
     # Initialize scheduler
     scheduler = DownloadScheduler(
