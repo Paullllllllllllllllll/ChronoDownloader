@@ -21,7 +21,8 @@ from api.core.config import get_config, get_download_config
 from api.providers import PROVIDERS
 from main import pipeline
 from main.console_ui import ConsoleUI, DownloadConfiguration
-from main.deferred import get_deferred_downloads, process_deferred_downloads
+from main.deferred_queue import get_deferred_queue
+from main.background_scheduler import get_background_scheduler
 from main.mode_selector import get_general_config
 from main.unified_csv import (
     load_works_csv,
@@ -603,14 +604,19 @@ def run_interactive_session(config: DownloadConfiguration) -> None:
             processed = 1
     
     # Handle deferred downloads
-    deferred = get_deferred_downloads()
-    if deferred:
+    deferred_queue = get_deferred_queue()
+    pending = deferred_queue.get_pending()
+    if pending:
         log.info(
             "%d download(s) were deferred due to quota limits.",
-            len(deferred)
+            len(pending)
         )
-        if ConsoleUI.prompt_yes_no("Process deferred downloads now?", default=False):
-            process_deferred_downloads(wait_for_reset=True)
+        if ConsoleUI.prompt_yes_no("Start background scheduler to retry when quotas reset?", default=False):
+            scheduler = get_background_scheduler()
+            if scheduler.start():
+                log.info("Background scheduler started. Deferred downloads will be retried automatically.")
+            else:
+                log.info("Background scheduler is already running or disabled.")
     
     # Display completion summary
     print()

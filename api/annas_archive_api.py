@@ -13,7 +13,7 @@ Download:
     * Handles HTTP 200 (success), 204 (no fast download), and errors
     * Logs quota information and remaining downloads
     * Provides specific error messages (quota, invalid key, invalid MD5)
-    * Rate limited to 10 fast downloads per day (configurable)
+    * Rate limited to 875 fast downloads per day (configurable)
     * Raises QuotaDeferredException when quota exhausted (allows pipeline to continue)
   - Without API key: Scrapes download links from MD5 page
 
@@ -21,7 +21,7 @@ API Key Configuration:
   Set ANNAS_ARCHIVE_API_KEY environment variable for member fast downloads.
 
 Rate Limiting Configuration (provider_settings.annas_archive):
-  - daily_fast_download_limit: Max fast downloads per day (default: 10)
+  - daily_fast_download_limit: Max fast downloads per day (default: 875)
   - wait_for_quota_reset: If true, raises QuotaDeferredException; if false, fall back to scraping (default: true)
   - quota_reset_wait_hours: Hours until quota resets (default: 24)
 
@@ -93,14 +93,14 @@ def _get_quota_config() -> dict:
     quota_config = get_provider_setting("annas_archive", "quota", {})
     if isinstance(quota_config, dict) and quota_config.get("enabled"):
         return {
-            "daily_limit": quota_config.get("daily_limit", 75),
+            "daily_limit": quota_config.get("daily_limit", 875),
             "wait_for_reset": quota_config.get("wait_for_reset", True),
             "reset_wait_hours": quota_config.get("reset_hours", 24),
         }
     
     # Fallback to legacy config
     return {
-        "daily_limit": get_provider_setting("annas_archive", "daily_fast_download_limit", 10),
+        "daily_limit": get_provider_setting("annas_archive", "daily_fast_download_limit", 875),
         "wait_for_reset": get_provider_setting("annas_archive", "wait_for_quota_reset", True),
         "reset_wait_hours": get_provider_setting("annas_archive", "quota_reset_wait_hours", 24),
     }
@@ -533,7 +533,7 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
     
     Anna's Archive aggregates files from multiple sources. This function:
     1. If API key is available: Uses fast download API for direct downloads (member feature)
-       - Rate limited to 10 downloads/day (configurable)
+       - Rate limited to 875 downloads/day (configurable)
        - Raises QuotaDeferredException when quota exhausted (allows pipeline to continue)
        - Falls back to scraping if wait_for_quota_reset is False
     2. Otherwise: Fetches the MD5 page to scrape download links

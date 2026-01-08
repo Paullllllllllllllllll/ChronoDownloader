@@ -33,6 +33,7 @@ from main.interactive import run_interactive
 from main.execution import run_batch_downloads
 from main.background_scheduler import get_background_scheduler, stop_background_scheduler
 from main.deferred_queue import get_deferred_queue
+from main.quota_manager import get_quota_manager
 from main.unified_csv import (
     load_works_csv,
     get_pending_works,
@@ -111,6 +112,18 @@ Examples:
         "--cli",
         action="store_true",
         help="Force CLI mode regardless of config setting."
+    )
+    
+    parser.add_argument(
+        "--quota-status",
+        action="store_true",
+        help="Display quota and deferred queue status, then exit."
+    )
+    
+    parser.add_argument(
+        "--cleanup-deferred",
+        action="store_true",
+        help="Remove completed items from deferred queue, then exit."
     )
     
     return parser
@@ -262,9 +275,111 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
     logger.info("Downloader finished.")
 
 
+def show_quota_status() -> None:
+    """Display quota and deferred queue status."""
+    from datetime import datetime, timezone
+    
+    print("\n" + "=" * 60)
+    print("QUOTA & DEFERRED QUEUE STATUS")
+    print("=" * 60)
+    
+    # Quota status
+    quota_manager = get_quota_manager()
+    quota_providers = quota_manager.get_quota_limited_providers()
+    
+    if quota_providers:
+        print("\n[QUOTA STATUS]")
+        for provider_key in quota_providers:
+            status = quota_manager.get_quota_status(provider_key)
+            remaining = status["remaining"]
+            daily_limit = status["daily_limit"]
+            used = status["downloads_used"]
+            
+            if status["is_exhausted"]:
+                reset_secs = status["seconds_until_reset"]
+                hours = reset_secs / 3600
+                print(f"  * {provider_key}: {used}/{daily_limit} used (EXHAUSTED - resets in {hours:.1f}h)")
+            else:
+                print(f"  * {provider_key}: {used}/{daily_limit} used ({remaining} remaining)")
+    else:
+        print("\n[QUOTA STATUS] No quota-limited providers configured.")
+    
+    # Deferred queue status
+    queue = get_deferred_queue()
+    counts = queue.count_by_status()
+    pending = counts.get("pending", 0) + counts.get("retrying", 0)
+    completed = counts.get("completed", 0)
+    failed = counts.get("failed", 0)
+    
+    print("\n[DEFERRED QUEUE]")
+    print(f"  * Pending: {pending}")
+    print(f"  * Completed: {completed}")
+    print(f"  * Failed: {failed}")
+    
+    if pending > 0:
+        next_ready = queue.get_next_ready_time()
+        if next_ready:
+            now = datetime.now(timezone.utc)
+            delta = (next_ready - now).total_seconds()
+            if delta > 0:
+                hours = delta / 3600
+                print(f"  * Next retry in: {hours:.1f} hours")
+            else:
+                print(f"  * Ready for retry NOW")
+        
+        # Show pending items
+        print("\n  Pending items:")
+        for item in queue.get_pending()[:10]:  # Show first 10
+            title_display = item.title[:50] if len(item.title) > 50 else item.title
+            print(f"    - {title_display} ({item.provider_name})")
+        if pending > 10:
+            print(f"    ... and {pending - 10} more")
+    
+    # Background scheduler status
+    scheduler = get_background_scheduler()
+    print("\n[BACKGROUND SCHEDULER]")
+    if scheduler.is_running():
+        stats = scheduler.get_stats()
+        print(f"  * Status: RUNNING")
+        print(f"  * Checks: {stats.get('checks', 0)}")
+        print(f"  * Retries attempted: {stats.get('retries_attempted', 0)}")
+        print(f"  * Retries succeeded: {stats.get('retries_succeeded', 0)}")
+    else:
+        print(f"  * Status: STOPPED")
+    
+    print("\n" + "=" * 60 + "\n")
+
+
+def cleanup_deferred_queue() -> None:
+    """Remove completed items from deferred queue."""
+    queue = get_deferred_queue()
+    
+    counts_before = queue.count_by_status()
+    completed_before = counts_before.get("completed", 0)
+    
+    removed = queue.clear_completed()
+    
+    print(f"Cleaned up {removed} completed item(s) from deferred queue.")
+    
+    # Show remaining counts
+    counts_after = queue.count_by_status()
+    pending = counts_after.get("pending", 0) + counts_after.get("retrying", 0)
+    failed = counts_after.get("failed", 0)
+    print(f"Remaining: {pending} pending, {failed} failed")
+
+
 def main() -> None:
     """Main entry point supporting both interactive and CLI modes."""
     try:
+        # Quick check for status commands before full mode detection
+        if "--quota-status" in sys.argv:
+            show_quota_status()
+            return
+        
+        if "--cleanup-deferred" in sys.argv:
+            cleanup_deferred_queue()
+            return
+        
         # Use centralized mode detection
         config, interactive_mode, args = run_with_mode_detection(
             interactive_handler=run_interactive,

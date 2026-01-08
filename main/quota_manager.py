@@ -8,11 +8,11 @@ Providers with unlimited downloads (MDZ, Gallica, etc.) use network rate
 limiting instead, which is handled separately via the network config.
 
 Quota vs Rate Limiting:
-- Quota: Daily/hourly hard limit (e.g., 75 downloads/day for Anna's Archive)
+- Quota: Daily/hourly hard limit (e.g., 875 downloads/day for Anna's Archive)
 - Rate Limiting: Request delays and backoff (applies to all providers)
 
 Features:
-- Persistent quota state (survives script restarts)
+- Persistent quota state via unified StateManager
 - Thread-safe operations
 - Provider-agnostic design for any quota-limited provider
 - Configurable limits and reset periods
@@ -20,20 +20,15 @@ Features:
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from api.core.config import get_config, get_provider_setting
 
 logger = logging.getLogger(__name__)
-
-# Default quota state file
-DEFAULT_QUOTA_STATE_FILE = ".quota_state.json"
 
 
 @dataclass
@@ -72,18 +67,20 @@ class ProviderQuota:
         )
     
     def get_reset_time(self) -> Optional[datetime]:
-        """Get the datetime when quota will reset.
+        """Get the datetime when quota period will reset.
+        
+        Uses period_start + reset_hours for consistent rolling window behavior.
         
         Returns:
-            Reset datetime (UTC) or None if not exhausted
+            Reset datetime (UTC) or None if period_start not set
         """
-        if not self.exhausted_at:
+        if not self.period_start:
             return None
         try:
-            exhausted = datetime.fromisoformat(self.exhausted_at)
-            if exhausted.tzinfo is None:
-                exhausted = exhausted.replace(tzinfo=timezone.utc)
-            return exhausted + timedelta(hours=self.reset_hours)
+            start = datetime.fromisoformat(self.period_start)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            return start + timedelta(hours=self.reset_hours)
         except Exception:
             return None
     
@@ -106,9 +103,15 @@ class ProviderQuota:
         Returns:
             True if quota exhausted and reset time not yet reached
         """
-        if self.downloads_used < self.daily_limit:
-            return False
-        return self.seconds_until_reset() > 0
+        return self.downloads_used >= self.daily_limit and self.seconds_until_reset() > 0
+    
+    def is_period_expired(self) -> bool:
+        """Check if the quota period has expired and should reset.
+        
+        Returns:
+            True if period has expired
+        """
+        return self.seconds_until_reset() <= 0
 
 
 class QuotaManager:
@@ -134,58 +137,50 @@ class QuotaManager:
         """Initialize the quota manager.
         
         Args:
-            state_file: Path to quota state file (uses config default if None)
+            state_file: Ignored (kept for backward compatibility)
         """
         if getattr(self, "_initialized", False):
             return
         
         self._quotas: Dict[str, ProviderQuota] = {}
         self._data_lock = threading.RLock()
-        
-        # Determine state file path
-        if state_file:
-            self._state_file = Path(state_file)
-        else:
-            cfg = get_config()
-            deferred_cfg = cfg.get("deferred", {})
-            self._state_file = Path(
-                deferred_cfg.get("quota_state_file", DEFAULT_QUOTA_STATE_FILE)
-            )
+        self._state_manager = None  # Lazy init to avoid circular imports
         
         # Load existing state
         self._load_state()
         self._initialized = True
-        logger.debug("QuotaManager initialized with state file: %s", self._state_file)
+        logger.debug("QuotaManager initialized")
+    
+    def _get_state_manager(self):
+        """Get the StateManager instance (lazy init)."""
+        if self._state_manager is None:
+            from main.state_manager import get_state_manager
+            self._state_manager = get_state_manager()
+        return self._state_manager
     
     def _load_state(self) -> None:
-        """Load quota state from disk."""
-        if not self._state_file.exists():
-            logger.debug("No existing quota state file found")
-            return
-        
+        """Load quota state from StateManager."""
         try:
-            with open(self._state_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            state_manager = self._get_state_manager()
+            quotas_data = state_manager.get_quotas()
             
-            for provider_key, quota_data in data.get("quotas", {}).items():
+            for provider_key, quota_data in quotas_data.items():
                 self._quotas[provider_key] = ProviderQuota.from_dict(quota_data)
             
-            logger.info(
-                "Loaded quota state for %d provider(s) from %s",
-                len(self._quotas), self._state_file
-            )
+            if self._quotas:
+                logger.info(
+                    "Loaded quota state for %d provider(s)",
+                    len(self._quotas)
+                )
         except Exception as e:
             logger.warning("Failed to load quota state: %s", e)
     
     def _save_state(self) -> None:
-        """Save quota state to disk."""
+        """Save quota state to StateManager."""
         try:
-            data = {
-                "quotas": {k: v.to_dict() for k, v in self._quotas.items()},
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            }
-            with open(self._state_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            state_manager = self._get_state_manager()
+            quotas_data = {k: v.to_dict() for k, v in self._quotas.items()}
+            state_manager.update_quotas(quotas_data)
         except Exception as e:
             logger.warning("Failed to save quota state: %s", e)
     
@@ -208,7 +203,7 @@ class QuotaManager:
             
             if isinstance(quota_config, dict) and quota_config.get("enabled"):
                 # New config structure with quota.enabled = true
-                daily_limit = quota_config.get("daily_limit", 10)
+                daily_limit = quota_config.get("daily_limit", 875)
                 reset_hours = quota_config.get("reset_hours", 24)
             else:
                 # Fallback to legacy config for backward compatibility
@@ -258,12 +253,16 @@ class QuotaManager:
             
             if hours_elapsed >= quota.reset_hours:
                 # Reset the period
+                old_used = quota.downloads_used
                 quota.downloads_used = 0
                 quota.period_start = now.isoformat()
                 quota.exhausted_at = None
+                self._save_state()
+                
+                # Enhanced notification logging
                 logger.info(
-                    "Quota reset for %s (%.1f hours elapsed)",
-                    quota.provider_key, hours_elapsed
+                    "QUOTA RESET: %s - %d downloads now available (was %d/%d used, %.1f hours elapsed)",
+                    quota.provider_key, quota.daily_limit, old_used, quota.daily_limit, hours_elapsed
                 )
                 return True
         except Exception as e:

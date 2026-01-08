@@ -1,8 +1,9 @@
 """Persistent deferred download queue.
 
-This module provides a thread-safe, JSON-persisted queue for tracking
-downloads that were deferred due to quota exhaustion or other temporary
-failures.
+This module provides a thread-safe queue for tracking downloads that were
+deferred due to quota exhaustion or other temporary failures.
+
+Persistence is handled via the unified StateManager.
 
 Quota-Limited Providers:
 - Only providers with daily/hourly quotas (e.g., Anna's Archive) defer downloads
@@ -10,27 +11,26 @@ Quota-Limited Providers:
 - Deferred items include reset_time to indicate when quota will be available again
 
 Features:
-- Automatic JSON persistence (survives script restarts)
+- Automatic persistence via StateManager (survives script restarts)
 - Thread-safe operations
 - Retry tracking with configurable max retries
 - Provider-based filtering for selective retry
+- Auto-cleanup of old completed/failed items
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterator, List, Optional
 
 from api.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Default queue file
+# Legacy constant (kept for backward compatibility)
 DEFAULT_QUEUE_FILE = ".deferred_queue.json"
 
 
@@ -172,7 +172,7 @@ class DeferredQueue:
         """Initialize the deferred queue.
         
         Args:
-            queue_file: Path to queue file (uses config default if None)
+            queue_file: Ignored (kept for backward compatibility)
         """
         if getattr(self, "_initialized", False):
             return
@@ -180,16 +180,7 @@ class DeferredQueue:
         self._items: Dict[str, DeferredItem] = {}
         self._data_lock = threading.RLock()
         self._save_lock = threading.Lock()
-        
-        # Determine queue file path
-        if queue_file:
-            self._queue_file = Path(queue_file)
-        else:
-            cfg = get_config()
-            deferred_cfg = cfg.get("deferred", {})
-            self._queue_file = Path(
-                deferred_cfg.get("queue_file", DEFAULT_QUEUE_FILE)
-            )
+        self._state_manager = None  # Lazy init to avoid circular imports
         
         # Get max retries from config
         cfg = get_config()
@@ -199,41 +190,45 @@ class DeferredQueue:
         # Load existing queue
         self._load_queue()
         self._initialized = True
-        logger.debug("DeferredQueue initialized with file: %s", self._queue_file)
+        logger.debug("DeferredQueue initialized")
+    
+    def _get_state_manager(self):
+        """Get the StateManager instance (lazy init)."""
+        if self._state_manager is None:
+            from main.state_manager import get_state_manager
+            self._state_manager = get_state_manager()
+        return self._state_manager
     
     def _load_queue(self) -> None:
-        """Load queue from disk."""
-        if not self._queue_file.exists():
-            logger.debug("No existing deferred queue file found")
-            return
-        
+        """Load queue from StateManager."""
         try:
-            with open(self._queue_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            state_manager = self._get_state_manager()
+            items_data = state_manager.get_deferred_items()
             
-            for item_data in data.get("items", []):
+            for item_data in items_data:
                 item = DeferredItem.from_dict(item_data)
                 self._items[item.id] = item
             
-            # Count by status
-            pending = sum(1 for i in self._items.values() if i.status == "pending")
-            logger.info(
-                "Loaded %d deferred item(s) from queue (%d pending)",
-                len(self._items), pending
-            )
+            if self._items:
+                # Count by status
+                pending = sum(1 for i in self._items.values() if i.status == "pending")
+                logger.info(
+                    "Loaded %d deferred item(s) from queue (%d pending)",
+                    len(self._items), pending
+                )
+                
+                # Auto-cleanup old completed/failed items
+                self.cleanup_old_items(max_age_days=7)
         except Exception as e:
             logger.warning("Failed to load deferred queue: %s", e)
     
     def _save_queue(self) -> None:
-        """Save queue to disk."""
+        """Save queue to StateManager."""
         with self._save_lock:
             try:
-                data = {
-                    "items": [item.to_dict() for item in self._items.values()],
-                    "last_updated": datetime.now(timezone.utc).isoformat(),
-                }
-                with open(self._queue_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
+                state_manager = self._get_state_manager()
+                items_data = [item.to_dict() for item in self._items.values()]
+                state_manager.set_deferred_items(items_data)
             except Exception as e:
                 logger.warning("Failed to save deferred queue: %s", e)
     
@@ -523,6 +518,49 @@ class DeferredQueue:
             if to_remove:
                 self._save_queue()
                 logger.info("Cleared %d completed item(s) from queue", len(to_remove))
+            
+            return len(to_remove)
+    
+    def cleanup_old_items(self, max_age_days: int = 7) -> int:
+        """Remove completed and failed items older than max_age_days.
+        
+        This is called automatically on queue load to prevent unbounded growth.
+        
+        Args:
+            max_age_days: Maximum age in days for completed/failed items
+            
+        Returns:
+            Number of items removed
+        """
+        with self._data_lock:
+            now = datetime.now(timezone.utc)
+            cutoff = now - timedelta(days=max_age_days)
+            
+            to_remove = []
+            for item_id, item in self._items.items():
+                if item.status not in ("completed", "failed"):
+                    continue
+                
+                # Check deferred_at timestamp
+                if item.deferred_at:
+                    try:
+                        deferred = datetime.fromisoformat(item.deferred_at)
+                        if deferred.tzinfo is None:
+                            deferred = deferred.replace(tzinfo=timezone.utc)
+                        if deferred < cutoff:
+                            to_remove.append(item_id)
+                    except Exception:
+                        pass
+            
+            for item_id in to_remove:
+                del self._items[item_id]
+            
+            if to_remove:
+                self._save_queue()
+                logger.info(
+                    "Auto-cleanup: Removed %d old item(s) (older than %d days)",
+                    len(to_remove), max_age_days
+                )
             
             return len(to_remove)
     
