@@ -132,7 +132,7 @@ Install with `pip install -r requirements.txt`. Exact versions ensure reproducib
 ### Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Paullllllllllllllllll/ChronoDownloader.git
 cd ChronoDownloader
 ```
 
@@ -197,7 +197,7 @@ python main/downloader.py --help
 **Step 1: Install Dependencies**
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Paullllllllllllllllll/ChronoDownloader.git
 cd ChronoDownloader
 
 python -m venv .venv
@@ -883,6 +883,22 @@ Provider searches within a single work can run in parallel via `selection.max_pa
 
 ### Large-Scale Processing
 
+For batch processing, performance varies by scale and provider mix:
+
+| Scale | Time Estimate | Expected Success Rate | Recommended Approach |
+|-------|--------------|----------------------|---------------------|
+| 1-10 items | 2-10 minutes | 70-80% | Quick validation |
+| 11-25 items | 10-30 minutes | 65-75% | Single batch |
+| 26-50 items | 30-90 minutes | 60-70% | Consider splitting |
+| 51-100 items | 1-3 hours | 60-70% | Multiple batches |
+| 100+ items | 3+ hours | 60-70% | Batch processing, run overnight |
+
+**Key principles**:
+- Test with 5-10 items before scaling to validate configuration
+- Use `--dry-run` first to verify matching without downloading
+- Enable `resume_mode: skip_if_has_objects` for safe interruption handling
+- Monitor logs for rate limiting (429 errors) and adjust delays
+
 For very large jobs (thousands of works):
 
 **1. Split CSV into batches**:
@@ -920,7 +936,41 @@ print(f"Total works processed: {len(combined)}")
 print(f"By provider: {combined['selected_provider'].value_counts()}")
 ```
 
+### Monitoring and Recovery
+
+**Real-time log monitoring** (PowerShell):
+
+```powershell
+Get-Content download.log -Wait -Tail 50
+```
+
+**Check progress from index.csv**:
+
+```powershell
+Import-Csv output/index.csv | Group-Object status | Select-Object Name, Count
+```
+
+**Identify failures for retry**:
+
+```powershell
+Import-Csv output/index.csv | Where-Object { $_.status -eq "failed" } | Select-Object entry_id, title
+```
+
+**Recovery strategy**:
+1. Check `index.csv` to identify failed items
+2. Review `work.json` files for failure reasons (network, no match, rate limiting)
+3. Adjust configuration (lower `min_title_score`, change provider hierarchy)
+4. Re-run with same CSV (resume mode automatically skips completed items)
+
 ### Custom Provider Configuration
+
+**config_small.json** (single provider for testing):
+
+Use the included `config_small.json` to isolate a single provider (Internet Archive) for debugging:
+
+```bash
+python main/downloader.py works.csv --config config_small.json
+```
 
 **config_fast.json** (prioritize speed):
 
@@ -1137,12 +1187,18 @@ ChronoDownloader/
 
 **Q: Which providers should I enable?**
 
-A: Depends on your collection:
-- **General historical materials**: Internet Archive, BnF Gallica, Library of Congress
-- **European sources**: BnF Gallica, Europeana, MDZ, British Library
-- **German materials**: MDZ, DDB
-- **Fast downloads**: Internet Archive, Google Books (with API key)
-- **No API key needed**: Internet Archive, BnF Gallica, LOC, British Library, MDZ, Wellcome
+A: Depends on your collection. Provider selection matrix:
+
+| Content Type | Primary Providers | Secondary Providers |
+|-------------|------------------|---------------------|
+| German materials | MDZ, DDB | Internet Archive, Google Books |
+| French materials | BnF Gallica | Internet Archive, Google Books |
+| Italian materials | MDZ, Internet Archive | Google Books |
+| English materials | Internet Archive, Google Books | Library of Congress, HathiTrust |
+| Medical/Scientific | Wellcome | Internet Archive, MDZ |
+| General/Mixed | Internet Archive, Google Books | MDZ, Gallica, LoC |
+
+**No API key needed**: Internet Archive, BnF Gallica, LOC, British Library, MDZ, Polona, Wellcome
 
 **Q: How much does it cost?**
 
@@ -1340,9 +1396,15 @@ Provide:
 
 ### Recent Updates
 
-For complete release history and detailed documentation, see WORKFLOW_GUIDE.md and CONFIG_GUIDE.md.
-
-**Latest**: Multi-provider support, parallel downloads, circuit breaker, unified CSV system, interactive mode, fuzzy matching improvements.
+**Latest Features**:
+- Multi-provider search across 14 digital libraries
+- Parallel downloads with per-provider concurrency limits
+- Adaptive circuit breaker for rate-limited providers
+- Unified CSV system (input and output in single file)
+- Dual-mode operation (interactive and CLI)
+- Fuzzy matching with configurable thresholds
+- Quota management with deferred download queue
+- Background scheduler for automatic retry
 
 ## License
 
