@@ -396,7 +396,7 @@ Per-provider rate limiting, retry policies, download limits, and quota managemen
       "max_pages": 0,
       "quota": {
         "enabled": true,
-        "daily_limit": 75,
+        "daily_limit": 875,
         "reset_hours": 24,
         "wait_for_reset": true,
         "_note": "Anna's Archive fast download API has a daily quota (member feature)"
@@ -438,10 +438,12 @@ Per-provider rate limiting, retry policies, download limits, and quota managemen
 ChronoDownloader distinguishes between two types of download restrictions:
 
 **Quota Limits** (Daily/Hourly Hard Caps):
-- **Anna's Archive**: 75 fast downloads per day (member API feature)
+- **Anna's Archive**: 875 fast downloads per day (member API feature)
 - When quota is exhausted, downloads are **deferred** to a persistent queue
 - Background scheduler automatically retries when quota resets
+- Deferred queue automatically cleans up completed/failed items older than 7 days
 - Configure with `quota` section in provider settings
+- Use `--quota-status` to check current quota usage and deferred items
 
 **Rate Limiting** (Request Delays):
 - **All providers**: Configurable delays, jitter, exponential backoff
@@ -670,6 +672,8 @@ python main/downloader.py my_books.csv --config config_small.json
 - `--config PATH`: Path to configuration JSON file (default: config.json)
 - `--interactive`: Force interactive mode
 - `--cli`: Force CLI mode
+- `--quota-status`: Display quota usage and deferred queue status, then exit
+- `--cleanup-deferred`: Remove completed items from deferred queue, then exit
 
 ### Interactive Mode
 
@@ -709,6 +713,45 @@ python main/downloader.py --cli sample_works.csv
 # With options
 python main/downloader.py --cli works.csv --output_dir results --dry-run --log-level DEBUG
 ```
+
+### Quota and Deferred Queue Management
+
+ChronoDownloader provides built-in tools for monitoring quota usage and managing deferred downloads.
+
+**Check Quota Status**:
+
+```bash
+python main/downloader.py --quota-status
+```
+
+Displays:
+- Current quota usage for quota-limited providers (e.g., Anna's Archive: 48/875 used)
+- Deferred queue statistics (pending, completed, failed items)
+- Background scheduler status
+- Next retry time for deferred downloads
+
+**Clean Up Deferred Queue**:
+
+```bash
+python main/downloader.py --cleanup-deferred
+```
+
+Removes completed items from the deferred queue. The queue automatically cleans items older than 7 days.
+
+**How Deferred Downloads Work**:
+
+1. When a quota-limited provider (e.g., Anna's Archive) exhausts its daily quota, downloads are deferred instead of failing
+2. Deferred items are saved to persistent queue (survives script restarts)
+3. Background scheduler automatically retries when quotas reset
+4. You can continue processing other works while deferred downloads wait
+5. Run `--quota-status` to see when deferred items will be retried
+
+**State Persistence**:
+
+All quota and deferred queue state is stored in `.downloader_state.json`:
+- Quota usage tracking per provider
+- Deferred download queue with retry metadata
+- Automatic migration from legacy state files on first run
 
 ### Programmatic Usage
 
