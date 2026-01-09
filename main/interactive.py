@@ -653,9 +653,8 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
         ConsoleUI.print_error("No providers are enabled. Check your configuration.")
         return
     
-    # Get provider names for summary
-    provider_names = [name for _, (_, _, name) in zip(range(len(providers)), 
-                      [(k, PROVIDERS[k]) for k in providers.keys() if k in PROVIDERS])]
+    # Get provider names for summary (providers is a list of tuples: key, search, download, name)
+    provider_names = [name for _, _, _, name in providers]
     
     ConsoleUI.print_header("DOWNLOAD IN PROGRESS", "Please wait...")
     print(f"  {ConsoleUI.DIM}Processing with {len(providers)} provider(s)...{ConsoleUI.RESET}\n")

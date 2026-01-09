@@ -176,6 +176,12 @@ def mark_success(
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
             
+            # Ensure columns have compatible dtype for mixed values
+            if STATUS_COL in df.columns:
+                df[STATUS_COL] = df[STATUS_COL].astype(object)
+            if LINK_COL in df.columns:
+                df[LINK_COL] = df[LINK_COL].astype(object)
+            
             # Update status and link
             df.loc[mask, STATUS_COL] = True
             df.loc[mask, LINK_COL] = item_url
@@ -226,6 +232,10 @@ def mark_failed(
             if not mask.any():
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
+            
+            # Ensure column has compatible dtype for mixed values
+            if STATUS_COL in df.columns:
+                df[STATUS_COL] = df[STATUS_COL].astype(object)
             
             # Update status
             df.loc[mask, STATUS_COL] = False

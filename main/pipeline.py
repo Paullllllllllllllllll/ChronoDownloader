@@ -829,17 +829,17 @@ def process_work(
     # Update work.json status based on outcome
     if not dry_run:
         if download_succeeded:
-            update_work_status(work_json_path, "completed", {
+            update_work_status(prep.work_json_path, "completed", {
                 "provider": selected.provider if selected else None,
                 "provider_key": selected.provider_key if selected else None,
                 "source_id": prep.selected_source_id,
             })
         elif download_deferred:
-            update_work_status(work_json_path, "deferred")
+            update_work_status(prep.work_json_path, "deferred")
         elif selected:
-            update_work_status(work_json_path, "failed")
+            update_work_status(prep.work_json_path, "failed")
         else:
-            update_work_status(work_json_path, "no_match")
+            update_work_status(prep.work_json_path, "no_match")
 
     # Update index.csv summary (thread-safe)
     final_status = None
