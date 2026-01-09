@@ -43,6 +43,9 @@ class DownloadConfiguration:
     
     # Selected items for processing
     selected_works: list[dict[str, Any]] = field(default_factory=list)
+    
+    # Session statistics (populated after processing)
+    stats: dict[str, Any] = field(default_factory=dict)
 
 
 class ConsoleUI:
@@ -217,6 +220,113 @@ class ConsoleUI:
                 
             except EOFError:
                 raise KeyboardInterrupt()
+    
+    @staticmethod
+    def print_config_summary(config_data: dict, title: str = "Configuration") -> None:
+        """Print a formatted configuration summary.
+        
+        Args:
+            config_data: Dictionary of config key-value pairs to display
+            title: Section title
+        """
+        print(f"\n  {ConsoleUI.BOLD}{title}:{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", 70)
+        for key, value in config_data.items():
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} {key}: {value}")
+        ConsoleUI.print_separator(".", 70)
+    
+    @staticmethod
+    def print_session_summary(
+        processed: int,
+        succeeded: int,
+        failed: int,
+        deferred: int,
+        output_dir: str,
+        dry_run: bool = False,
+        duration_seconds: float | None = None,
+        providers_used: list[str] | None = None,
+    ) -> None:
+        """Print a detailed session summary.
+        
+        Args:
+            processed: Total works processed
+            succeeded: Works successfully downloaded
+            failed: Works that failed
+            deferred: Works deferred due to quota
+            output_dir: Output directory path
+            dry_run: Whether this was a dry run
+            duration_seconds: Optional session duration
+            providers_used: Optional list of providers that were used
+        """
+        width = 70
+        print()
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}{'=' * width}{ConsoleUI.RESET}")
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}  SESSION COMPLETE{ConsoleUI.RESET}")
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}{'=' * width}{ConsoleUI.RESET}")
+        print()
+        
+        # Statistics
+        print(f"  {ConsoleUI.BOLD}Results:{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", width)
+        
+        if dry_run:
+            print(f"    {ConsoleUI.YELLOW}* Mode: DRY RUN (no files downloaded){ConsoleUI.RESET}")
+        
+        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Works processed: {processed}")
+        
+        if succeeded > 0:
+            print(f"    {ConsoleUI.GREEN}*{ConsoleUI.RESET} Succeeded: {ConsoleUI.GREEN}{succeeded}{ConsoleUI.RESET}")
+        else:
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Succeeded: {succeeded}")
+        
+        if failed > 0:
+            print(f"    {ConsoleUI.RED}*{ConsoleUI.RESET} Failed: {ConsoleUI.RED}{failed}{ConsoleUI.RESET}")
+        else:
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Failed: {failed}")
+        
+        if deferred > 0:
+            print(f"    {ConsoleUI.YELLOW}*{ConsoleUI.RESET} Deferred (quota): {ConsoleUI.YELLOW}{deferred}{ConsoleUI.RESET}")
+        else:
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Deferred: {deferred}")
+        
+        if duration_seconds is not None:
+            if duration_seconds >= 3600:
+                hours = duration_seconds / 3600
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Duration: {hours:.1f} hours")
+            elif duration_seconds >= 60:
+                minutes = duration_seconds / 60
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Duration: {minutes:.1f} minutes")
+            else:
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Duration: {duration_seconds:.1f} seconds")
+        
+        ConsoleUI.print_separator(".", width)
+        
+        # Output location
+        print(f"\n  {ConsoleUI.BOLD}Output:{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", width)
+        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Directory: {output_dir}")
+        ConsoleUI.print_separator(".", width)
+        
+        # Providers used
+        if providers_used:
+            print(f"\n  {ConsoleUI.BOLD}Providers Used:{ConsoleUI.RESET}")
+            ConsoleUI.print_separator(".", width)
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} {', '.join(providers_used)}")
+            ConsoleUI.print_separator(".", width)
+        
+        # Next steps for deferred
+        if deferred > 0:
+            print(f"\n  {ConsoleUI.BOLD}Next Steps:{ConsoleUI.RESET}")
+            ConsoleUI.print_separator(".", width)
+            print(f"    {ConsoleUI.DIM}* Run again to retry deferred downloads when quotas reset{ConsoleUI.RESET}")
+            print(f"    {ConsoleUI.DIM}* Use --quota-status to check quota status{ConsoleUI.RESET}")
+            ConsoleUI.print_separator(".", width)
+        
+        print()
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}{'=' * width}{ConsoleUI.RESET}")
+        print(f"  {ConsoleUI.GREEN}Thank you for using ChronoDownloader!{ConsoleUI.RESET}")
+        print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}{'=' * width}{ConsoleUI.RESET}")
+        print()
 
 
 __all__ = ["ConsoleUI", "DownloadConfiguration"]

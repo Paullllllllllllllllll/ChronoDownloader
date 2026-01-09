@@ -2,12 +2,18 @@
 
 This module provides interactive prompts and workflows for users who want
 to configure and run downloads without using command-line arguments.
+
+Improved to offer feature parity with CLI mode, including:
+- Custom config file selection
+- Detailed provider and settings information
+- Comprehensive session summaries
 """
 from __future__ import annotations
 
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -46,6 +52,7 @@ class InteractiveWorkflow:
         ConsoleUI.enable_ansi()
         self.config = DownloadConfiguration()
         self.app_config: Dict[str, Any] = {}
+        self.start_time: float = 0.0
     
     def display_welcome(self) -> None:
         """Display welcome banner."""
@@ -56,29 +63,128 @@ class InteractiveWorkflow:
         print("  Download historical sources from digital libraries including:")
         print("  Internet Archive, BnF Gallica, MDZ, Google Books, and more.\n")
     
+    def configure_config_file(self) -> bool:
+        """Configure which config file to use.
+        
+        Returns:
+            True if configured, False to quit
+        """
+        # Find available config files
+        config_files = list(Path(".").glob("*.json"))
+        config_files = [f for f in config_files if "config" in f.name.lower() 
+                        and not f.name.startswith(".")]
+        
+        # Sort with config.json first
+        config_files.sort(key=lambda x: (x.name != "config.json", x.name))
+        
+        if not config_files:
+            ConsoleUI.print_warning("No config files found. Using default config.json")
+            self.config.config_path = "config.json"
+            return True
+        
+        # Build options list
+        options: List[Tuple[str, str]] = []
+        for f in config_files:
+            try:
+                import json
+                with open(f, 'r', encoding='utf-8') as fp:
+                    cfg_data = json.load(fp)
+                
+                # Extract useful info for display
+                providers = cfg_data.get("providers", {})
+                enabled_count = sum(1 for v in providers.values() if v)
+                
+                # Check for notable settings
+                notes = []
+                if enabled_count > 0:
+                    notes.append(f"{enabled_count} providers")
+                
+                download_cfg = cfg_data.get("download", {})
+                if download_cfg.get("prefer_pdf_over_images"):
+                    notes.append("PDF preferred")
+                
+                budget_cfg = cfg_data.get("budget", {})
+                if budget_cfg.get("enabled"):
+                    max_dl = budget_cfg.get("max_total_downloads", 0)
+                    if max_dl:
+                        notes.append(f"limit: {max_dl}")
+                
+                note_str = f" ({', '.join(notes)})" if notes else ""
+                display = f"{f.name}{note_str}"
+                
+            except Exception:
+                display = f.name
+            
+            options.append((str(f), display))
+        
+        ConsoleUI.print_info("CONFIG FILE SELECTION")
+        print("  Choose which configuration file to use for this session.")
+        print(f"  {ConsoleUI.DIM}(Config files control providers, download settings, and limits){ConsoleUI.RESET}\n")
+        
+        result = ConsoleUI.prompt_select(
+            "Select a configuration file:",
+            options,
+            allow_back=False
+        )
+        
+        if result:
+            self.config.config_path = result
+            
+            # Reload config with new path
+            os.environ["CHRONO_CONFIG_PATH"] = result
+            self.app_config = get_config(force_reload=True)
+            
+            ConsoleUI.print_success(f"Using config: {result}")
+            return True
+        return False
+    
     def display_provider_status(self) -> None:
-        """Display status of available providers."""
+        """Display status of available providers with details."""
         ConsoleUI.print_separator()
         ConsoleUI.print_info("ENABLED PROVIDERS")
         ConsoleUI.print_separator()
         
         cfg = get_config()
         providers_cfg = cfg.get("providers", {})
+        provider_settings = cfg.get("provider_settings", {})
         
         enabled = []
         disabled = []
         
         for key, (_, _, name) in PROVIDERS.items():
             if providers_cfg.get(key, False):
-                enabled.append(name)
+                # Check for quota info
+                settings = provider_settings.get(key, {})
+                quota = settings.get("quota", {})
+                if quota.get("enabled"):
+                    daily_limit = quota.get("daily_limit", "?")
+                    enabled.append(f"{name} (quota: {daily_limit}/day)")
+                else:
+                    enabled.append(name)
             else:
                 disabled.append(name)
         
         if enabled:
-            print(f"  {ConsoleUI.GREEN}Enabled:{ConsoleUI.RESET} {', '.join(enabled)}")
+            print(f"  {ConsoleUI.GREEN}Enabled:{ConsoleUI.RESET}")
+            for p in enabled:
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} {p}")
         if disabled:
             print(f"  {ConsoleUI.DIM}Disabled: {', '.join(disabled)}{ConsoleUI.RESET}")
         print()
+        
+        # Show key download settings
+        dl_config = cfg.get("download", {})
+        if dl_config:
+            key_settings = {}
+            if dl_config.get("prefer_pdf_over_images"):
+                key_settings["Format preference"] = "PDF over images"
+            if dl_config.get("max_total_size_gb"):
+                key_settings["Max total size"] = f"{dl_config['max_total_size_gb']} GB"
+            if dl_config.get("max_parallel_downloads", 1) > 1:
+                key_settings["Parallel downloads"] = dl_config["max_parallel_downloads"]
+            
+            if key_settings:
+                ConsoleUI.print_config_summary(key_settings, "Download Settings")
     
     def get_mode_options(self) -> List[Tuple[str, str]]:
         """Get download mode options."""
@@ -94,10 +200,13 @@ class InteractiveWorkflow:
         Returns:
             True if configured, False to go back
         """
+        ConsoleUI.print_info("DOWNLOAD MODE")
+        print("  Choose how you want to specify which works to download.\n")
+        
         result = ConsoleUI.prompt_select(
             "How would you like to specify works to download?",
             self.get_mode_options(),
-            allow_back=False
+            allow_back=True
         )
         
         if result:
@@ -325,36 +434,73 @@ class InteractiveWorkflow:
         Returns:
             True to proceed, False to go back
         """
-        ConsoleUI.print_header("CONFIGURATION SUMMARY", "Review your settings")
+        ConsoleUI.print_header("CONFIGURATION SUMMARY", "Review your settings before proceeding")
         
-        print(f"  {ConsoleUI.BOLD}Mode:{ConsoleUI.RESET} {self.config.mode.upper()}")
+        # Config file section
+        print(f"  {ConsoleUI.BOLD}Configuration:{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", 70)
+        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Config file: {self.config.config_path}")
+        ConsoleUI.print_separator(".", 70)
+        
+        # Source section
+        print(f"\n  {ConsoleUI.BOLD}Source:{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", 70)
+        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Mode: {self.config.mode.upper()}")
         
         if self.config.mode == "csv":
-            print(f"  {ConsoleUI.BOLD}CSV File:{ConsoleUI.RESET} {self.config.csv_path}")
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} CSV File: {self.config.csv_path}")
+            # Show CSV stats if available
+            try:
+                stats = get_stats(self.config.csv_path)
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Works: {stats['total']} total ({stats['pending']} pending)")
+            except Exception:
+                pass
         elif self.config.mode == "single":
-            print(f"  {ConsoleUI.BOLD}Title:{ConsoleUI.RESET} {self.config.single_title}")
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Title: {self.config.single_title}")
             if self.config.single_creator:
-                print(f"  {ConsoleUI.BOLD}Creator:{ConsoleUI.RESET} {self.config.single_creator}")
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Creator: {self.config.single_creator}")
         elif self.config.mode == "collection":
-            print(f"  {ConsoleUI.BOLD}Collection:{ConsoleUI.RESET} {self.config.collection_name}")
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Collection: {self.config.collection_name}")
+        ConsoleUI.print_separator(".", 70)
         
-        print(f"  {ConsoleUI.BOLD}Output Directory:{ConsoleUI.RESET} {self.config.output_dir}")
-        print(f"  {ConsoleUI.BOLD}Dry Run:{ConsoleUI.RESET} {'Yes' if self.config.dry_run else 'No'}")
+        # Output section
+        print(f"\n  {ConsoleUI.BOLD}Output:{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", 70)
+        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Directory: {self.config.output_dir}")
+        if self.config.dry_run:
+            print(f"    {ConsoleUI.YELLOW}*{ConsoleUI.RESET} {ConsoleUI.YELLOW}DRY RUN - No files will be downloaded{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", 70)
         
-        # Show parallel settings for batch modes
+        # Processing section
+        print(f"\n  {ConsoleUI.BOLD}Processing:{ConsoleUI.RESET}")
+        ConsoleUI.print_separator(".", 70)
+        
         if self.config.mode in ("csv", "collection"):
             if self.config.use_parallel and not self.config.dry_run:
                 workers = self.config.max_workers_override
                 if workers:
-                    print(f"  {ConsoleUI.BOLD}Parallel Downloads:{ConsoleUI.RESET} {workers} workers")
+                    print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Parallel downloads: {workers} workers")
                 else:
                     dl_config = get_download_config()
                     workers = int(dl_config.get("max_parallel_downloads", 1) or 1)
-                    print(f"  {ConsoleUI.BOLD}Parallel Downloads:{ConsoleUI.RESET} {workers} workers (from config)")
+                    print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Parallel downloads: {workers} workers (from config)")
             else:
-                print(f"  {ConsoleUI.BOLD}Parallel Downloads:{ConsoleUI.RESET} Sequential")
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Parallel downloads: Sequential")
         
-        print(f"  {ConsoleUI.BOLD}Log Level:{ConsoleUI.RESET} {self.config.log_level}")
+        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Log level: {self.config.log_level}")
+        ConsoleUI.print_separator(".", 70)
+        
+        # Enabled providers (quick list)
+        cfg = get_config()
+        providers_cfg = cfg.get("providers", {})
+        enabled = [name for key, (_, _, name) in PROVIDERS.items() if providers_cfg.get(key, False)]
+        if enabled:
+            print(f"\n  {ConsoleUI.BOLD}Providers:{ConsoleUI.RESET}")
+            ConsoleUI.print_separator(".", 70)
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} {', '.join(enabled[:5])}")
+            if len(enabled) > 5:
+                print(f"    {ConsoleUI.DIM}    ... and {len(enabled) - 5} more{ConsoleUI.RESET}")
+            ConsoleUI.print_separator(".", 70)
         
         print()
         return ConsoleUI.prompt_yes_no("Proceed with these settings?", default=True)
@@ -366,18 +512,24 @@ class InteractiveWorkflow:
             DownloadConfiguration if completed, None if cancelled
         """
         self.display_welcome()
-        self.display_provider_status()
         
-        # State machine for navigation
-        current_step = "mode"
+        # State machine for navigation - now starts with config selection
+        current_step = "config_file"
         
         while True:
             try:
-                if current_step == "mode":
+                if current_step == "config_file":
+                    if self.configure_config_file():
+                        self.display_provider_status()
+                        current_step = "mode"
+                    else:
+                        return None
+                
+                elif current_step == "mode":
                     if self.configure_mode():
                         current_step = f"configure_{self.config.mode}"
                     else:
-                        return None
+                        current_step = "config_file"
                 
                 elif current_step == "configure_csv":
                     if self.configure_csv_mode():
@@ -411,6 +563,7 @@ class InteractiveWorkflow:
                 
                 elif current_step == "summary":
                     if self.display_summary():
+                        self.start_time = time.time()
                         return self.config
                     else:
                         current_step = "options"
@@ -423,92 +576,6 @@ class InteractiveWorkflow:
 # =============================================================================
 # Processing Functions
 # =============================================================================
-
-def process_csv_batch(
-    csv_path: str,
-    output_dir: str,
-    config_path: str,
-    dry_run: bool,
-    log: logging.Logger,
-    use_parallel: bool = True,
-    max_workers_override: Optional[int] = None
-) -> int:
-    """Process works from a CSV file.
-    
-    Supports both parallel and sequential processing modes.
-    Uses unified CSV system with notebook column format.
-    
-    Args:
-        csv_path: Path to CSV file (expects sampling notebook format)
-        output_dir: Output directory
-        config_path: Path to config file
-        dry_run: Whether to skip downloads
-        log: Logger instance
-        use_parallel: Whether to use parallel downloads
-        max_workers_override: Override for max_parallel_downloads config
-        
-    Returns:
-        Number of works processed
-    """
-    from main.execution import run_batch_downloads, create_interactive_callbacks
-    
-    # Load CSV using unified CSV system
-    abs_csv_path = os.path.abspath(csv_path)
-    try:
-        works_df = load_works_csv(abs_csv_path)
-    except FileNotFoundError:
-        log.error("CSV file not found at %s", abs_csv_path)
-        return 0
-    except ValueError as e:
-        log.error("CSV validation error: %s", e)
-        return 0
-    except Exception as e:
-        log.error("Error reading CSV file: %s", e)
-        return 0
-    
-    # Validate required column
-    if TITLE_COL not in works_df.columns:
-        log.error("CSV file must contain a '%s' column (sampling notebook format).", TITLE_COL)
-        return 0
-    
-    # Filter to pending works only (resume support)
-    initial_stats = get_stats(abs_csv_path)
-    pending_df = get_pending_works(works_df)
-    
-    log.info("CSV status: %d total, %d completed, %d failed, %d pending",
-             initial_stats["total"], initial_stats["completed"],
-             initial_stats["failed"], initial_stats["pending"])
-    
-    if len(pending_df) == 0:
-        log.info("No pending works to process. All items already have a status.")
-        return 0
-    
-    log.info("Starting downloader. Output directory: %s", output_dir)
-    log.info("Works to process: %d (pending)", len(pending_df))
-    
-    # Get config for execution
-    config = get_config()
-    
-    # Create interactive-friendly callbacks for parallel mode
-    on_submit, on_complete = create_interactive_callbacks(log)
-    
-    # Use shared execution module for both parallel and sequential
-    # Pass csv_path for status updates back to the source CSV
-    stats = run_batch_downloads(
-        works_df=pending_df,
-        output_dir=output_dir,
-        config=config,
-        dry_run=dry_run,
-        use_parallel=use_parallel,
-        max_workers_override=max_workers_override,
-        logger=log,
-        on_submit=on_submit,
-        on_complete=on_complete,
-        csv_path=abs_csv_path,
-    )
-    
-    return stats.get("processed", 0)
-
 
 def process_single_work(
     title: str,
@@ -544,13 +611,21 @@ def process_single_work(
     return True
 
 
-def run_interactive_session(config: DownloadConfiguration) -> None:
+def run_interactive_session(config: DownloadConfiguration, start_time: float = 0.0) -> None:
     """Execute download session based on interactive configuration.
     
     Args:
         config: DownloadConfiguration from interactive workflow
+        start_time: Session start timestamp for duration calculation
     """
-    # Configure logging
+    # Configure logging with UTF-8 encoding for Windows
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, OSError):
+            pass
+    
     logging.basicConfig(
         level=getattr(logging, config.log_level),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
@@ -578,12 +653,23 @@ def run_interactive_session(config: DownloadConfiguration) -> None:
         ConsoleUI.print_error("No providers are enabled. Check your configuration.")
         return
     
-    ConsoleUI.print_header("DOWNLOAD IN PROGRESS", "Please wait...")
+    # Get provider names for summary
+    provider_names = [name for _, (_, _, name) in zip(range(len(providers)), 
+                      [(k, PROVIDERS[k]) for k in providers.keys() if k in PROVIDERS])]
     
-    processed = 0
+    ConsoleUI.print_header("DOWNLOAD IN PROGRESS", "Please wait...")
+    print(f"  {ConsoleUI.DIM}Processing with {len(providers)} provider(s)...{ConsoleUI.RESET}\n")
+    
+    # Track statistics
+    stats = {
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "deferred": 0,
+    }
     
     if config.mode == "csv" or config.mode == "collection":
-        processed = process_csv_batch(
+        result_stats = process_csv_batch_with_stats(
             config.csv_path or "",
             config.output_dir,
             config.config_path,
@@ -592,6 +678,7 @@ def run_interactive_session(config: DownloadConfiguration) -> None:
             use_parallel=config.use_parallel,
             max_workers_override=config.max_workers_override,
         )
+        stats.update(result_stats)
     elif config.mode == "single":
         if process_single_work(
             config.single_title or "",
@@ -601,15 +688,22 @@ def run_interactive_session(config: DownloadConfiguration) -> None:
             config.dry_run,
             log
         ):
-            processed = 1
+            stats["processed"] = 1
+            stats["succeeded"] = 1
+        else:
+            stats["processed"] = 1
+            stats["failed"] = 1
     
     # Handle deferred downloads
     deferred_queue = get_deferred_queue()
     pending = deferred_queue.get_pending()
+    deferred_count = len(pending)
+    stats["deferred"] = deferred_count
+    
     if pending:
         log.info(
             "%d download(s) were deferred due to quota limits.",
-            len(pending)
+            deferred_count
         )
         if ConsoleUI.prompt_yes_no("Start background scheduler to retry when quotas reset?", default=False):
             scheduler = get_background_scheduler()
@@ -618,15 +712,106 @@ def run_interactive_session(config: DownloadConfiguration) -> None:
             else:
                 log.info("Background scheduler is already running or disabled.")
     
-    # Display completion summary
-    print()
-    ConsoleUI.print_separator("=")
-    ConsoleUI.print_success(f"Download session complete!")
-    print(f"  Works processed: {processed}")
-    print(f"  Output directory: {config.output_dir}")
-    if config.dry_run:
-        print(f"  {ConsoleUI.YELLOW}(Dry run - no files downloaded){ConsoleUI.RESET}")
-    ConsoleUI.print_separator("=")
+    # Calculate duration
+    duration = None
+    if start_time > 0:
+        duration = time.time() - start_time
+    
+    # Display detailed completion summary
+    ConsoleUI.print_session_summary(
+        processed=stats.get("processed", 0),
+        succeeded=stats.get("succeeded", 0),
+        failed=stats.get("failed", 0),
+        deferred=stats.get("deferred", 0),
+        output_dir=config.output_dir,
+        dry_run=config.dry_run,
+        duration_seconds=duration,
+        providers_used=provider_names if provider_names else None,
+    )
+
+
+def process_csv_batch_with_stats(
+    csv_path: str,
+    output_dir: str,
+    config_path: str,
+    dry_run: bool,
+    log: logging.Logger,
+    use_parallel: bool = True,
+    max_workers_override: Optional[int] = None
+) -> Dict[str, int]:
+    """Process works from a CSV file and return statistics.
+    
+    Args:
+        csv_path: Path to CSV file
+        output_dir: Output directory
+        config_path: Path to config file
+        dry_run: Whether to skip downloads
+        log: Logger instance
+        use_parallel: Whether to use parallel downloads
+        max_workers_override: Override for max_parallel_downloads config
+        
+    Returns:
+        Dictionary with processing statistics
+    """
+    from main.execution import run_batch_downloads, create_interactive_callbacks
+    
+    stats = {"processed": 0, "succeeded": 0, "failed": 0, "deferred": 0}
+    
+    # Load CSV using unified CSV system
+    abs_csv_path = os.path.abspath(csv_path)
+    try:
+        works_df = load_works_csv(abs_csv_path)
+    except FileNotFoundError:
+        log.error("CSV file not found at %s", abs_csv_path)
+        return stats
+    except ValueError as e:
+        log.error("CSV validation error: %s", e)
+        return stats
+    except Exception as e:
+        log.error("Error reading CSV file: %s", e)
+        return stats
+    
+    # Validate required column
+    if TITLE_COL not in works_df.columns:
+        log.error("CSV file must contain a '%s' column (sampling notebook format).", TITLE_COL)
+        return stats
+    
+    # Filter to pending works only (resume support)
+    initial_stats = get_stats(abs_csv_path)
+    pending_df = get_pending_works(works_df)
+    
+    log.info("CSV status: %d total, %d completed, %d failed, %d pending",
+             initial_stats["total"], initial_stats["completed"],
+             initial_stats["failed"], initial_stats["pending"])
+    
+    if len(pending_df) == 0:
+        log.info("No pending works to process. All items already have a status.")
+        return stats
+    
+    log.info("Starting downloader. Output directory: %s", output_dir)
+    log.info("Works to process: %d (pending)", len(pending_df))
+    
+    # Get config for execution
+    config = get_config()
+    
+    # Create interactive-friendly callbacks for parallel mode
+    on_submit, on_complete = create_interactive_callbacks(log)
+    
+    # Use shared execution module
+    result_stats = run_batch_downloads(
+        works_df=pending_df,
+        output_dir=output_dir,
+        config=config,
+        dry_run=dry_run,
+        use_parallel=use_parallel,
+        max_workers_override=max_workers_override,
+        logger=log,
+        on_submit=on_submit,
+        on_complete=on_complete,
+        csv_path=abs_csv_path,
+    )
+    
+    return result_stats
 
 
 def run_interactive() -> None:
@@ -635,6 +820,6 @@ def run_interactive() -> None:
     config = workflow.run_workflow()
     
     if config:
-        run_interactive_session(config)
+        run_interactive_session(config, start_time=workflow.start_time)
     else:
         print("\nDownload cancelled.")
