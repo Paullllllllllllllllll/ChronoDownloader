@@ -255,6 +255,24 @@ class TestGetStats:
         assert stats["completed"] == 0
         assert stats["failed"] == 0
         assert stats["pending"] == 0
+    
+    def test_handles_missing_status_column(self, temp_dir: str):
+        """Test handling of CSV without status column (all works are pending)."""
+        # Create CSV without retrievable column (like essential_monographies CSVs)
+        csv_path = os.path.join(temp_dir, "no_status.csv")
+        df = pd.DataFrame({
+            "entry_id": ["E0001", "E0002", "E0003"],
+            "short_title": ["Book One", "Book Two", "Book Three"],
+            "main_author": ["Author A", "Author B", "Author C"],
+        })
+        df.to_csv(csv_path, index=False)
+        
+        stats = get_stats(csv_path)
+        
+        assert stats["total"] == 3
+        assert stats["completed"] == 0
+        assert stats["failed"] == 0
+        assert stats["pending"] == 3  # All pending when no status column
 
 
 class TestColumnConstants:

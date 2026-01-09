@@ -298,6 +298,16 @@ def get_stats(csv_path: str) -> dict:
         df = pd.read_csv(csv_path)
         total = len(df)
         
+        # Handle CSVs that don't have the status column yet
+        if STATUS_COL not in df.columns:
+            # All works are pending if no status column exists
+            return {
+                "total": total,
+                "completed": 0,
+                "failed": 0,
+                "pending": total,
+            }
+        
         def classify(val):
             if pd.isna(val):
                 return "pending"
