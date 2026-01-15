@@ -66,15 +66,15 @@ from .model import QuotaDeferredException, SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
 
-SEARCH_URL = "https://annas-archive.se/search"
-MD5_PAGE_URL = "https://annas-archive.se/md5/{md5}"
-FAST_DOWNLOAD_API_URL = "https://annas-archive.se/dyn/api/fast_download.json"
+SEARCH_URL = "https://annas-archive.li/search"
+MD5_PAGE_URL = "https://annas-archive.li/md5/{md5}"
+FAST_DOWNLOAD_API_URL = "https://annas-archive.li/dyn/api/fast_download.json"
 
-# Mirror list for fallback
+# Mirror list for fallback (current working domains as of Jan 2026)
 MIRRORS = [
-    "https://annas-archive.se",
     "https://annas-archive.li",
-    "https://annas-archive.org",
+    "https://annas-archive.pm",
+    "https://annas-archive.in",
 ]
 
 # Import centralized quota manager
@@ -766,7 +766,7 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
         # Build full URL
         full_url = href
         if href.startswith("/"):
-            full_url = f"https://annas-archive.se{href}"
+            full_url = f"https://annas-archive.li{href}"
         elif not href.startswith("http"):
             continue
         

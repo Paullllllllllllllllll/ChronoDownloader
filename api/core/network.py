@@ -201,7 +201,7 @@ PROVIDER_HOST_MAP: Dict[str, tuple[str, ...]] = {
     "internet_archive": ("archive.org", "archivelab.org", "iiif.archivelab.org"),
     "google_books": ("www.googleapis.com", "books.google.com", "books.googleusercontent.com", "play.google.com"),
     "hathitrust": ("catalog.hathitrust.org", "babel.hathitrust.org"),
-    "annas_archive": ("annas-archive.org", "annas-archive.se", "annas-archive.li"),
+    "annas_archive": ("annas-archive.li", "annas-archive.pm", "annas-archive.in"),
 }
 
 
