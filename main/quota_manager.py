@@ -352,7 +352,7 @@ class QuotaManager:
                 "downloads_used": quota.downloads_used,
                 "remaining": max(0, quota.daily_limit - quota.downloads_used),
                 "is_exhausted": quota.is_exhausted(),
-                "reset_time": quota.get_reset_time().isoformat() if quota.get_reset_time() else None,
+                "reset_time": (rt.isoformat() if (rt := quota.get_reset_time()) else None),
                 "seconds_until_reset": quota.seconds_until_reset(),
             }
     

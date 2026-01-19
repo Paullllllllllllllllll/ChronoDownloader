@@ -1,6 +1,7 @@
 """Connector for the Digital Public Library of America (DPLA) API."""
 
 import logging
+import os
 from typing import List, Union
 
 from .utils import (
@@ -45,7 +46,9 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
     data = make_request(f"{API_BASE_URL}items", params=params)
 
     results: List[SearchResult] = []
-    if data and data.get("docs"):
+    if not isinstance(data, dict):
+        return results
+    if data.get("docs"):
         for doc in data["docs"]:
             # Try to discover a IIIF manifest URL from common DPLA fields
             def _extract_manifest(d: dict) -> str | None:
@@ -75,8 +78,8 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
                         return u
                 return None
 
-            iiif_manifest = _extract_manifest(doc)
-            src = doc.get("sourceResource", {}) if isinstance(doc.get("sourceResource", {}), dict) else {}
+            iiif_manifest = _extract_manifest(doc) if isinstance(doc, dict) else None
+            src = doc.get("sourceResource", {}) if isinstance(doc, dict) and isinstance(doc.get("sourceResource", {}), dict) else {}
             title_text = src.get("title")
             if isinstance(title_text, list):
                 title_text = title_text[0] if title_text else "N/A"
@@ -115,7 +118,7 @@ def download_dpla_work(item_data: Union[SearchResult, dict], output_folder: str)
     key = _api_key()
     params = {"api_key": key} if key else None
     item_details = make_request(f"{API_BASE_URL}items/{item_id}", params=params)
-    if not item_details:
+    if not isinstance(item_details, dict):
         return False
 
     save_json(item_details, output_folder, f"dpla_{item_id}_metadata")
@@ -160,7 +163,7 @@ def download_dpla_work(item_data: Union[SearchResult, dict], output_folder: str)
     ok_any = False
     if manifest_url:
         manifest = make_request(manifest_url)
-        if manifest:
+        if isinstance(manifest, dict):
             save_json(manifest, output_folder, f"dpla_{item_id}_iiif_manifest")
 
             # Prefer manifest-level renderings (PDF/EPUB) when available
@@ -173,7 +176,7 @@ def download_dpla_work(item_data: Union[SearchResult, dict], output_folder: str)
                 logger.exception("DPLA: error while downloading manifest renderings for %s", item_id)
 
             # Extract IIIF Image API service bases (v2/v3)
-            service_bases: List[str] = extract_image_service_bases(manifest)
+            service_bases = extract_image_service_bases(manifest)
 
             if service_bases:
                 # Use shared helper to try full-size image candidates per canvas

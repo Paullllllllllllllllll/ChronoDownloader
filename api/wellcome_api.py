@@ -129,7 +129,7 @@ def download_wellcome_work(item_data: Union[SearchResult, Dict], output_folder: 
     else:
         work_id = item_data.get("id")
         services = item_data.get("image_services", [])
-        title = item_data.get("title")
+        title = item_data.get("title") or ""
 
     # Refetch work if needed
     if work_id and not services:

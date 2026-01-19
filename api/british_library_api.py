@@ -63,7 +63,7 @@ def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> Lis
         data = None
     results: List[SearchResult] = []
     try:
-        bindings = (data or {}).get("results", {}).get("bindings", [])
+        bindings = (data if isinstance(data, dict) else {}).get("results", {}).get("bindings", [])
         for b in bindings:
             def _val(name: str) -> str | None:
                 v = b.get(name)
@@ -195,7 +195,7 @@ def download_british_library_work(item_data: Union[SearchResult, dict], output_f
                         manifest_url = alt_manifest
         except Exception:
             logger.exception("BL: error while attempting viewer-based manifest discovery for %s", identifier)
-    if not manifest:
+    if not isinstance(manifest, dict):
         return False
 
     # Save manifest for reproducibility
@@ -211,7 +211,7 @@ def download_british_library_work(item_data: Union[SearchResult, dict], output_f
         logger.exception("BL: error while downloading manifest renderings for %s", identifier)
 
     # Extract IIIF Image API service bases from v2 or v3
-    service_bases: List[str] = extract_image_service_bases(manifest)
+    service_bases = extract_image_service_bases(manifest)
 
     if not service_bases:
         logger.info("No IIIF image services found in BL manifest for %s", identifier)

@@ -43,9 +43,13 @@ def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> 
     # Prefer the Books collection endpoint first; fall back to the generic search if needed
     books_url = urllib.parse.urljoin(LOC_API_BASE_URL, "books/")
     data = make_request(books_url, params=params, headers=headers)
-    if not data or not (data.get("results") or (data.get("content") and data["content"].get("results"))):
+    if not isinstance(data, dict) or not (data.get("results") or (data.get("content") and data["content"].get("results"))):
         search_url = urllib.parse.urljoin(LOC_API_BASE_URL, "search/")
         data = make_request(search_url, params=params, headers=headers)
+    
+    if not isinstance(data, dict):
+        return []
+    
     results: List[SearchResult] = []
 
     def _extract_iiif_manifest(item: dict) -> str | None:
@@ -75,9 +79,9 @@ def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> 
         return convert_to_searchresult("Library of Congress", raw)
 
     items = None
-    if data and data.get("results"):
+    if data.get("results"):
         items = data.get("results")
-    elif data and data.get("content") and data["content"].get("results"):
+    elif data.get("content") and data["content"].get("results"):
         items = data["content"].get("results")
 
     if items:
@@ -110,76 +114,75 @@ def download_loc_work(item_data: Union[SearchResult, dict], output_folder: str) 
     logger.info("Fetching LOC item JSON: %s", item_json_url)
     headers = {"Accept": "application/json"}
     item_full_json = make_request(item_json_url, headers=headers)
-    if item_full_json:
-        save_json(item_full_json, output_folder, f"loc_{item_id}_item_details")
-        iiif_manifest_url = iiif_manifest_hint
-        if not iiif_manifest_url and item_full_json.get("item") and item_full_json["item"].get("resources"):
-            for res in item_full_json["item"]["resources"]:
-                if res.get("iiif_manifest"):
-                    iiif_manifest_url = res.get("iiif_manifest")
-                    break
-        elif not iiif_manifest_url and item_full_json.get("resources"):
-            for res in item_full_json["resources"]:
-                if isinstance(res, dict) and res.get("iiif_manifest"):
-                    iiif_manifest_url = res.get("iiif_manifest")
-                    break
-        if iiif_manifest_url:
-            logger.info("Fetching LOC IIIF manifest: %s", iiif_manifest_url)
-            iiif_manifest_data = make_request(iiif_manifest_url)
-            if iiif_manifest_data:
-                save_json(iiif_manifest_data, output_folder, f"loc_{item_id}_iiif_manifest")
-
-                # Prefer manifest-level renderings (PDF/EPUB) when available
-                try:
-                    renders = download_iiif_renderings(iiif_manifest_data, output_folder, filename_prefix=f"loc_{item_id}_")
-                    if renders > 0 and prefer_pdf_over_images():
-                        logger.info("LOC: downloaded %d rendering(s); skipping image downloads per config.", renders)
-                        return True
-                except Exception:
-                    logger.exception("LOC: error while downloading manifest renderings for %s", item_id)
-
-                # Extract IIIF Image service bases (v2/v3)
-                service_bases: List[str] = extract_image_service_bases(iiif_manifest_data)
-
-                if service_bases:
-                    # Use shared helper to attempt per-canvas image downloads
-
-                    max_pages = get_max_pages("loc")
-                    total = len(service_bases)
-                    to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
-                    logger.info("LOC: downloading %d/%d page images for %s", len(to_download), total, item_id)
-                    ok_any = False
-                    for idx, svc in enumerate(to_download, start=1):
-                        try:
-                            fname = f"loc_{item_id}_p{idx:05d}.jpg"
-                            if download_one_from_service(svc, output_folder, fname):
-                                ok_any = True
-                            else:
-                                logger.warning("Failed to download LOC image from %s", svc)
-                        except Exception:
-                            logger.exception("Error downloading LOC image for %s from %s", item_id, svc)
-                    return ok_any
-                else:
-                    logger.info("No IIIF image services in manifest for LOC item %s; falling back to single image if available.", item_id)
-            else:
-                logger.warning("Failed to fetch IIIF manifest from %s", iiif_manifest_url)
-        else:
-            logger.info("No IIIF manifest URL found for LOC item: %s", item_id)
-        # Fallback: try downloading a single representative image
-        image_url = None
-        if item_full_json.get("item") and item_full_json["item"].get("image_url"):
-            if isinstance(item_full_json["item"]["image_url"], dict):
-                image_url = item_full_json["item"]["image_url"].get("medium") or item_full_json["item"]["image_url"].get("full")
-            elif isinstance(item_full_json["item"]["image_url"], str):
-                image_url = item_full_json["item"]["image_url"]
-        if image_url:
-            if image_url.startswith("//"):
-                image_url = "https:" + image_url
-            elif not image_url.startswith("http"):
-                image_url = "https://www.loc.gov" + image_url
-            download_file(image_url, output_folder, f"loc_{item_id}_sample_image.jpg")
-            return True
-        return False
-    else:
+    if not isinstance(item_full_json, dict):
         logger.error("Failed to fetch item JSON from %s", item_json_url)
+        return False
+    
+    save_json(item_full_json, output_folder, f"loc_{item_id}_item_details")
+    iiif_manifest_url = iiif_manifest_hint
+    if not iiif_manifest_url and item_full_json.get("item") and item_full_json["item"].get("resources"):
+        for res in item_full_json["item"]["resources"]:
+            if res.get("iiif_manifest"):
+                iiif_manifest_url = res.get("iiif_manifest")
+                break
+    if not iiif_manifest_url and item_full_json.get("resources"):
+        for res in item_full_json["resources"]:
+            if isinstance(res, dict) and res.get("iiif_manifest"):
+                iiif_manifest_url = res.get("iiif_manifest")
+                break
+    if iiif_manifest_url:
+        logger.info("Fetching LOC IIIF manifest: %s", iiif_manifest_url)
+        iiif_manifest_data = make_request(iiif_manifest_url)
+        if isinstance(iiif_manifest_data, dict):
+            save_json(iiif_manifest_data, output_folder, f"loc_{item_id}_iiif_manifest")
+
+            # Prefer manifest-level renderings (PDF/EPUB) when available
+            try:
+                renders = download_iiif_renderings(iiif_manifest_data, output_folder, filename_prefix=f"loc_{item_id}_")
+                if renders > 0 and prefer_pdf_over_images():
+                    logger.info("LOC: downloaded %d rendering(s); skipping image downloads per config.", renders)
+                    return True
+            except Exception:
+                logger.exception("LOC: error while downloading manifest renderings for %s", item_id)
+
+            # Extract IIIF Image service bases (v2/v3)
+            service_bases = extract_image_service_bases(iiif_manifest_data)
+
+            if service_bases:
+                max_pages = get_max_pages("loc")
+                total = len(service_bases)
+                to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
+                logger.info("LOC: downloading %d/%d page images for %s", len(to_download), total, item_id)
+                ok_any = False
+                for idx, svc in enumerate(to_download, start=1):
+                    try:
+                        fname = f"loc_{item_id}_p{idx:05d}.jpg"
+                        if download_one_from_service(svc, output_folder, fname):
+                            ok_any = True
+                        else:
+                            logger.warning("Failed to download LOC image from %s", svc)
+                    except Exception:
+                        logger.exception("Error downloading LOC image for %s from %s", item_id, svc)
+                return ok_any
+            else:
+                logger.info("No IIIF image services in manifest for LOC item %s; falling back to single image if available.", item_id)
+        else:
+            logger.warning("Failed to fetch IIIF manifest from %s", iiif_manifest_url)
+    else:
+        logger.info("No IIIF manifest URL found for LOC item: %s", item_id)
+    
+    # Fallback: try downloading a single representative image
+    image_url = None
+    if item_full_json.get("item") and item_full_json["item"].get("image_url"):
+        if isinstance(item_full_json["item"]["image_url"], dict):
+            image_url = item_full_json["item"]["image_url"].get("medium") or item_full_json["item"]["image_url"].get("full")
+        elif isinstance(item_full_json["item"]["image_url"], str):
+            image_url = item_full_json["item"]["image_url"]
+    if image_url:
+        if image_url.startswith("//"):
+            image_url = "https:" + image_url
+        elif not image_url.startswith("http"):
+            image_url = "https://www.loc.gov" + image_url
+        download_file(image_url, output_folder, f"loc_{item_id}_sample_image.jpg")
+        return True
     return False

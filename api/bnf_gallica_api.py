@@ -118,7 +118,7 @@ def download_gallica_work(item_data: SearchResult | dict, output_folder: str) ->
     manifest_url = IIIF_MANIFEST_BASE_URL.format(ark_id=ark_id)
     logger.info("Fetching Gallica IIIF manifest: %s", manifest_url)
     manifest = make_request(manifest_url)
-    if not manifest:
+    if not isinstance(manifest, dict):
         return False
 
     # Save manifest for reproducibility
@@ -134,7 +134,7 @@ def download_gallica_work(item_data: SearchResult | dict, output_folder: str) ->
         logger.exception("Gallica: error while downloading manifest renderings for %s", ark_id)
 
     # Extract image service bases from IIIF v2 or v3
-    image_service_bases: list[str] = extract_image_service_bases(manifest)
+    image_service_bases = extract_image_service_bases(manifest)
 
     if not image_service_bases:
         logger.info("No IIIF image services found in Gallica manifest for %s", ark_id)

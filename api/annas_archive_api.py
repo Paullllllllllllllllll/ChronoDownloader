@@ -400,9 +400,10 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
                         continue
                     
                     href = md5_link.get("href", "")
+                    href_str = str(href) if href else ""
                     
                     # Extract MD5 from URL
-                    parts = href.split("/md5/")
+                    parts = href_str.split("/md5/")
                     if len(parts) < 2:
                         continue
                     
@@ -468,7 +469,8 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
                 if len(results) >= max_results:
                     break
 
-                href = link.get("href", "")
+                href_attr = link.get("href", "")
+                href = str(href_attr) if href_attr else ""
 
                 # Match MD5 links: /md5/<32-char-hex>
                 if "/md5/" in href:
@@ -485,7 +487,8 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
                                     continue
                                 seen_md5s.add(md5)
 
-                                snippets = [link.get_text(" ", strip=True), link.get("title", "")]
+                                title_attr = link.get("title", "")
+                                snippets = [link.get_text(" ", strip=True), str(title_attr) if title_attr else ""]
 
                                 parent = link.find_parent()
                                 if parent:
@@ -493,7 +496,7 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
                                     for elem in parent.find_all(['div', 'span', 'h1', 'h2', 'h3', 'h4', 'p']):
                                         snippets.append(elem.get_text(" ", strip=True))
 
-                                title_candidates = _collect_title_candidates(snippets)
+                                title_candidates = _collect_title_candidates([str(s) for s in snippets if s])
                                 best_title, title_scores = _select_best_title(title, title_candidates)
 
                                 if not best_title and title_candidates:
@@ -626,21 +629,22 @@ def _download_with_api(md5: str, api_key: str, output_folder: str) -> bool:
     try:
         response = make_request(FAST_DOWNLOAD_API_URL, params=params)
         
-        if not response:
+        if not isinstance(response, dict):
             logger.warning("No response from Anna's Archive fast download API")
             return False
         
         # Check for errors (invalid MD5, invalid key, quota exceeded, etc.)
         if response.get("error"):
-            error_msg = response.get("error")
+            error_msg = str(response.get("error") or "")
             logger.warning("Anna's Archive API error: %s", error_msg)
             
             # Specific error handling
-            if "quota" in error_msg.lower() or "limit" in error_msg.lower():
+            error_lower = error_msg.lower() if error_msg else ""
+            if "quota" in error_lower or "limit" in error_lower:
                 logger.error("Download quota reached. Wait for daily reset.")
-            elif "invalid key" in error_msg.lower():
+            elif "invalid key" in error_lower:
                 logger.error("Invalid API key. Check ANNAS_ARCHIVE_API_KEY configuration.")
-            elif "invalid md5" in error_msg.lower():
+            elif "invalid md5" in error_lower:
                 logger.error("Invalid MD5 hash: %s", md5)
             
             return False
@@ -746,7 +750,8 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
     
     # Find all links
     for link in soup.find_all("a", href=True):
-        href = link.get("href", "").strip()
+        href_val = link.get("href", "")
+        href = str(href_val).strip() if href_val else ""
         text = link.get_text(strip=True).lower()
         
         if not href:
