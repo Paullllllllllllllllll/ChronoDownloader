@@ -47,7 +47,9 @@ def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> 
     data = make_request(SEARCH_API_URL, params=params)
 
     results: List[SearchResult] = []
-    if data and data.get("results") and data["results"].get("bindings"):
+    if not isinstance(data, dict):
+        return results
+    if data.get("results") and isinstance(data["results"], dict) and data["results"].get("bindings"):
         for b in data["results"]["bindings"]:
             item_id = b.get("id", {}).get("value")
             item_title = b.get("title", {}).get("value")
@@ -86,11 +88,11 @@ def download_bne_work(item_data: Union[SearchResult, dict], output_folder) -> bo
         candidate = pattern.format(item_id=item_identifier)
         logger.info("Fetching BNE IIIF manifest: %s", candidate)
         manifest = make_request(candidate)
-        if manifest:
+        if isinstance(manifest, dict):
             manifest_url = candidate
             break
 
-    if not manifest:
+    if not isinstance(manifest, dict):
         return False
 
     # Save manifest
@@ -106,7 +108,7 @@ def download_bne_work(item_data: Union[SearchResult, dict], output_folder) -> bo
         logger.exception("BNE: error while downloading manifest renderings for %s", item_identifier)
 
     # Extract IIIF Image API service bases from v2 or v3
-    service_bases: List[str] = extract_image_service_bases(manifest)
+    service_bases = extract_image_service_bases(manifest)
 
     if not service_bases:
         logger.info("No IIIF image services found in BNE manifest for %s", item_identifier)

@@ -197,7 +197,7 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
     params = {"key": key} if key else None
     volume_data = make_request(f"{API_BASE_URL}/{volume_id}", params=params)
 
-    if not volume_data:
+    if not isinstance(volume_data, dict):
         return False
         
     save_json(volume_data, output_folder, f"google_{volume_id}_metadata")

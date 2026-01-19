@@ -85,7 +85,9 @@ def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> 
     data = make_request(f"{API_BASE_URL}search", params=params)
 
     results: List[SearchResult] = []
-    if data and data.get("results"):
+    if not isinstance(data, dict):
+        return results
+    if data.get("results"):
         # DDB API returns nested structure: results[].docs[]
         for result_group in data["results"]:
             docs = result_group.get("docs", [])
@@ -140,7 +142,7 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder: str) 
     params = {"oauth_consumer_key": key} if key else None
     item_meta = make_request(f"{API_BASE_URL}items/{item_id}", params=params)
 
-    if not item_meta:
+    if not isinstance(item_meta, dict):
         return False
 
     save_json(item_meta, output_folder, f"ddb_{item_id}_metadata")
@@ -184,7 +186,7 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder: str) 
         logger.info("DDB: Fetching IIIF manifest: %s", manifest_url)
         manifest = make_request(manifest_url)
     
-    if not manifest:
+    if not isinstance(manifest, dict):
         # Fall back to downloading isShownBy image directly
         if is_shown_by:
             logger.info("DDB: No IIIF manifest, falling back to isShownBy image: %s", is_shown_by)
@@ -206,7 +208,7 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder: str) 
         logger.exception("DDB: error while downloading manifest renderings for %s", item_id)
 
     # Extract IIIF image service bases from v2 or v3
-    image_service_bases: List[str] = extract_image_service_bases(manifest)
+    image_service_bases = extract_image_service_bases(manifest)
 
     if not image_service_bases:
         logger.info("No IIIF image services found in DDB manifest for %s", item_id)

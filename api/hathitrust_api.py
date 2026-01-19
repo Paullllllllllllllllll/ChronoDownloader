@@ -148,7 +148,7 @@ def search_hathitrust(title: str, creator: str | None = None, max_results: int =
             else:
                 url = _bib_url(id_type, val)
                 data = make_request(url)
-                if data:
+                if isinstance(data, dict):
                     results.extend(_records_to_results(data))
             if len(results) >= max_results:
                 break

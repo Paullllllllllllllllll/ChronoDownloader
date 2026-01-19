@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 from urllib.parse import urlparse
 
 import requests
@@ -564,4 +564,30 @@ def make_request(
         cb.record_failure(provider or "unknown")
     
     logger.error("Giving up after %d attempts for %s", max_attempts, url)
+    return None
+
+
+def make_json_request(
+    url: str,
+    params: Optional[Dict] = None,
+    headers: Optional[Dict] = None,
+    timeout: int = 15,
+) -> Dict[str, Any] | None:
+    """HTTP GET expecting a JSON response, with type-safe return.
+    
+    This is a convenience wrapper around make_request() that returns only
+    dict or None, making it suitable for API calls where JSON is expected.
+    
+    Args:
+        url: URL to request
+        params: Query parameters
+        headers: Additional headers
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Parsed JSON dict or None on error/non-JSON response
+    """
+    result = make_request(url, params=params, headers=headers, timeout=timeout)
+    if isinstance(result, dict):
+        return result
     return None

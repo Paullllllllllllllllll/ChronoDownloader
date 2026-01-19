@@ -70,7 +70,9 @@ def search_europeana(title: str, creator: str | None = None, max_results: int = 
     logger.info("Searching Europeana for: %s", title)
     data = make_request(API_BASE_URL, params=params)
     results: List[SearchResult] = []
-    if data and data.get("success") and data.get("items"):
+    if not isinstance(data, dict):
+        return results
+    if data.get("success") and data.get("items"):
         for item in data["items"]:
             item_title = item.get("title", ["N/A"]) 
             if isinstance(item_title, list):
@@ -145,63 +147,59 @@ def download_europeana_work(item_data: Union[SearchResult, dict], output_folder:
 
     logger.info("Fetching Europeana IIIF manifest: %s", iiif_manifest_url)
     manifest_data = make_request(iiif_manifest_url)
-    if not manifest_data:
+    if not isinstance(manifest_data, dict):
         logger.warning("Failed to fetch IIIF manifest from %s", iiif_manifest_url)
-        # Continue to fallback below
-        manifest_data = None
+        return False
 
-    if manifest_data:
-        save_json(manifest_data, output_folder, f"europeana_{item_id}_iiif_manifest")
+    save_json(manifest_data, output_folder, f"europeana_{item_id}_iiif_manifest")
 
     # Try manifest-level renderings (PDF/EPUB) first
-    if manifest_data:
-        try:
-            renders = download_iiif_renderings(manifest_data, output_folder, filename_prefix=f"europeana_{item_id}_")
-            if renders > 0 and prefer_pdf_over_images():
-                logger.info("Europeana: downloaded %d rendering(s); skipping image downloads per config.", renders)
-                return True
-        except Exception:
-            logger.exception("Europeana: error while downloading manifest renderings for %s", item_id)
+    try:
+        renders = download_iiif_renderings(manifest_data, output_folder, filename_prefix=f"europeana_{item_id}_")
+        if renders > 0 and prefer_pdf_over_images():
+            logger.info("Europeana: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            return True
+    except Exception:
+        logger.exception("Europeana: error while downloading manifest renderings for %s", item_id)
 
     # Extract IIIF Image API service bases and download images (v2/v3)
     ok_any = False
-    if manifest_data:
-        service_bases: List[str] = extract_image_service_bases(manifest_data)
+    service_bases = extract_image_service_bases(manifest_data)
 
-        if service_bases:
-            # Use shared helper to download a single image per canvas
+    if service_bases:
+        # Use shared helper to download a single image per canvas
+        max_pages = get_max_pages("europeana")
+        total = len(service_bases)
+        to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
+        logger.info("Europeana: downloading %d/%d page images for %s", len(to_download), total, item_id)
+        for idx, svc in enumerate(to_download, start=1):
+            try:
+                fname = f"europeana_{item_id}_p{idx:05d}.jpg"
+                if download_one_from_service(svc, output_folder, fname):
+                    ok_any = True
+                else:
+                    logger.warning("Failed to download Europeana image from %s", svc)
+            except Exception:
+                logger.exception("Error downloading Europeana image for %s from %s", item_id, svc)
+    else:
+        # Fallback: try direct image URLs (common in simplified IIIF v3 manifests)
+        direct_urls = extract_direct_image_urls(manifest_data)
+        if direct_urls:
             max_pages = get_max_pages("europeana")
-            total = len(service_bases)
-            to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
-            logger.info("Europeana: downloading %d/%d page images for %s", len(to_download), total, item_id)
-            for idx, svc in enumerate(to_download, start=1):
+            total = len(direct_urls)
+            to_download = direct_urls[:max_pages] if max_pages and max_pages > 0 else direct_urls
+            logger.info("Europeana: downloading %d/%d direct images for %s (no IIIF service)", len(to_download), total, item_id)
+            for idx, url in enumerate(to_download, start=1):
                 try:
-                    fname = f"europeana_{item_id}_p{idx:05d}.jpg"
-                    if download_one_from_service(svc, output_folder, fname):
+                    fname = f"europeana_{item_id}_p{idx:05d}"
+                    if download_file(url, output_folder, fname):
                         ok_any = True
                     else:
-                        logger.warning("Failed to download Europeana image from %s", svc)
+                        logger.warning("Failed to download Europeana direct image from %s", url)
                 except Exception:
-                    logger.exception("Error downloading Europeana image for %s from %s", item_id, svc)
+                    logger.exception("Error downloading Europeana direct image for %s from %s", item_id, url)
         else:
-            # Fallback: try direct image URLs (common in simplified IIIF v3 manifests)
-            direct_urls = extract_direct_image_urls(manifest_data)
-            if direct_urls:
-                max_pages = get_max_pages("europeana")
-                total = len(direct_urls)
-                to_download = direct_urls[:max_pages] if max_pages and max_pages > 0 else direct_urls
-                logger.info("Europeana: downloading %d/%d direct images for %s (no IIIF service)", len(to_download), total, item_id)
-                for idx, url in enumerate(to_download, start=1):
-                    try:
-                        fname = f"europeana_{item_id}_p{idx:05d}"
-                        if download_file(url, output_folder, fname):
-                            ok_any = True
-                        else:
-                            logger.warning("Failed to download Europeana direct image from %s", url)
-                    except Exception:
-                        logger.exception("Error downloading Europeana direct image for %s from %s", item_id, url)
-            else:
-                logger.info("No IIIF image services or direct images found in Europeana manifest for %s", item_id)
+            logger.info("No IIIF image services or direct images found in Europeana manifest for %s", item_id)
 
     if ok_any:
         return True

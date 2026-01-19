@@ -55,7 +55,7 @@ def download_iiif_manifest_and_images(
     logger.info("Fetching IIIF manifest: %s", manifest_url)
     manifest = make_request(manifest_url)
     
-    if not manifest:
+    if not isinstance(manifest, dict):
         logger.warning("Failed to fetch IIIF manifest from %s", manifest_url)
         return False
     

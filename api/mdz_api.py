@@ -75,7 +75,7 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
     if isinstance(html, str):
         soup = BeautifulSoup(html, "html.parser")
         for a in soup.find_all("a", href=True):
-            href = a["href"]
+            href = str(a["href"])
             m = re.search(r"/(?:en|de)?/view/([^/?#]+)", href)
             if not m:
                 continue
@@ -117,13 +117,13 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bo
     manifest_url_v2 = IIIF_MANIFEST_URL.format(object_id=object_id)
     logger.info("Fetching MDZ IIIF manifest v2: %s", manifest_url_v2)
     manifest = make_request(manifest_url_v2)
-    if not manifest:
+    if not isinstance(manifest, dict):
         # Try IIIF v3 manifest
         manifest_url_v3 = IIIF_MANIFEST_V3_URL.format(object_id=object_id)
         logger.info("Fetching MDZ IIIF manifest v3: %s", manifest_url_v3)
         manifest = make_request(manifest_url_v3)
 
-    if not manifest:
+    if not isinstance(manifest, dict):
         return False
 
     # Always save the manifest for reproducibility
@@ -139,7 +139,7 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bo
         logger.exception("MDZ: error while downloading manifest renderings for %s", object_id)
 
     # Extract per-canvas Image API service base URLs
-    image_service_bases: List[str] = extract_image_service_bases(manifest)
+    image_service_bases = extract_image_service_bases(manifest)
 
     if not image_service_bases:
         logger.info("No IIIF image services found in MDZ manifest for %s", object_id)

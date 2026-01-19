@@ -306,7 +306,8 @@ class BackgroundRetryScheduler:
                         second=new_reset.second + int(wait_seconds)
                     )
                     item.reset_time = new_reset.isoformat()
-                    self._queue._save_queue()
+                    if self._queue:
+                        self._queue._save_queue()
                 logger.debug(
                     "Quota still exhausted for %s, skipping %s",
                     provider_key, item.title
@@ -318,7 +319,8 @@ class BackgroundRetryScheduler:
         # Reconstruct SearchResult from stored data
         search_result = self._reconstruct_search_result(item)
         if not search_result:
-            self._queue.mark_failed(item.id, "Could not reconstruct search result")
+            if self._queue:
+                self._queue.mark_failed(item.id, "Could not reconstruct search result")
             with self._stats_lock:
                 self._stats["retries_failed"] += 1
             if self._on_retry_failure:
@@ -352,7 +354,8 @@ class BackgroundRetryScheduler:
                 if self._quota_manager:
                     self._quota_manager.record_download(provider_key)
                 
-                self._queue.mark_completed(item.id)
+                if self._queue:
+                    self._queue.mark_completed(item.id)
                 with self._stats_lock:
                     self._stats["retries_succeeded"] += 1
                 
@@ -364,7 +367,7 @@ class BackgroundRetryScheduler:
                 return True
             else:
                 # Download failed but not due to quota
-                can_retry = self._queue.mark_retrying(item.id)
+                can_retry = self._queue.mark_retrying(item.id) if self._queue else False
                 if not can_retry:
                     with self._stats_lock:
                         self._stats["retries_failed"] += 1
@@ -377,7 +380,8 @@ class BackgroundRetryScheduler:
             with self._stats_lock:
                 self._stats["retries_redeferred"] += 1
             
-            self._queue.mark_retrying(item.id, qde.reset_time)
+            if self._queue:
+                self._queue.mark_retrying(item.id, qde.reset_time)
             logger.info(
                 "Deferred download hit quota again: '%s' - %s",
                 item.title, qde.message
@@ -386,7 +390,7 @@ class BackgroundRetryScheduler:
             
         except Exception as e:
             logger.exception("Error retrying deferred download '%s': %s", item.title, e)
-            can_retry = self._queue.mark_retrying(item.id)
+            can_retry = self._queue.mark_retrying(item.id) if self._queue else False
             if not can_retry:
                 with self._stats_lock:
                     self._stats["retries_failed"] += 1

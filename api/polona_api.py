@@ -44,7 +44,7 @@ def search_polona(title: str, creator: str | None = None, max_results: int = 3) 
             href = a.get("href", "")
             # Expect /item/<numeric or uuid>/
             try:
-                path = href.split("?")[0]
+                path = str(href).split("?")[0] if href else ""
                 parts = [p for p in path.strip("/").split("/") if p]
                 if len(parts) >= 2 and parts[0] == "item":
                     item_id = parts[1]
@@ -82,7 +82,7 @@ def download_polona_work(item_data: Union[SearchResult, dict], output_folder) ->
     manifest_url = IIIF_MANIFEST_URL.format(item_id=item_id)
     logger.info("Fetching Polona IIIF manifest: %s", manifest_url)
     manifest = make_request(manifest_url)
-    if not manifest:
+    if not isinstance(manifest, dict):
         return False
 
     # Save manifest

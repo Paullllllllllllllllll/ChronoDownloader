@@ -144,8 +144,8 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
     # Ensure stdout/stderr use UTF-8 encoding for proper display of international characters
     if sys.platform == "win32":
         try:
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[union-attr]
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[union-attr]
         except (AttributeError, OSError):
             # Fallback for older Python or restricted environments
             pass

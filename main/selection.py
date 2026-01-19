@@ -49,10 +49,12 @@ def call_search_function(
             try:
                 if creator is not None:
                     return search_func(title, creator=creator)
+                return search_func(title)
             except TypeError:
                 return search_func(title)
     except Exception:
         raise
+    return []
 
 
 def prepare_search_result(
