@@ -9,7 +9,7 @@ import logging
 import os
 import csv
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Thread-safe lock for index.csv updates
 _index_csv_lock = threading.Lock()
+
+_index_header_cache: Dict[str, List[str]] = {}
 
 
 def update_index_csv(base_output_dir: str, row: Dict[str, Any]) -> None:
@@ -34,24 +36,45 @@ def update_index_csv(base_output_dir: str, row: Dict[str, Any]) -> None:
             os.makedirs(base_output_dir, exist_ok=True)
             index_path = os.path.join(base_output_dir, "index.csv")
 
-            if os.path.exists(index_path):
-                header_cols = None
+            file_exists = os.path.exists(index_path)
+            file_empty = False
+            if file_exists:
                 try:
-                    with open(index_path, "r", encoding="utf-8", newline="") as f:
-                        reader = csv.reader(f)
-                        header_cols = next(reader, None)
-                except Exception:
-                    header_cols = None
+                    file_empty = os.path.getsize(index_path) == 0
+                except OSError:
+                    file_empty = False
 
-                if header_cols:
-                    normalized = {col: row.get(col) for col in header_cols}
-                    df = pd.DataFrame([normalized], columns=header_cols)
-                    df.to_csv(index_path, mode="a", header=False, index=False)
-                    return
+            header_cols: Optional[List[str]] = _index_header_cache.get(index_path)
+            header_from_file = False
+            if header_cols is None:
+                header_cols = None
+                if file_exists and not file_empty:
+                    try:
+                        with open(index_path, "r", encoding="utf-8", newline="") as f:
+                            reader = csv.reader(f)
+                            hdr = next(reader, None)
+                            if hdr:
+                                header_cols = [str(c) for c in hdr]
+                                header_from_file = True
+                    except Exception:
+                        header_cols = None
 
-            df = pd.DataFrame([row])
-            header = not os.path.exists(index_path)
-            df.to_csv(index_path, mode="a", header=header, index=False)
+                if header_cols is None:
+                    header_cols = [str(k) for k in row.keys()]
+
+                _index_header_cache[index_path] = header_cols
+            else:
+                header_from_file = True
+
+            needs_header = (not file_exists) or file_empty
+            if file_exists and (not file_empty) and (not header_from_file):
+                needs_header = False
+
+            with open(index_path, "a", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=header_cols, extrasaction="ignore")
+                if needs_header:
+                    writer.writeheader()
+                writer.writerow(row)
         except Exception:
             logger.exception("Failed to update index.csv")
 

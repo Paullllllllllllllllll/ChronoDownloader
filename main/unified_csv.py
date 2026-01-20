@@ -16,7 +16,7 @@ import os
 import shutil
 import threading
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 # Thread-safe lock for CSV updates
 _csv_lock = threading.Lock()
+
+_csv_cache: Dict[str, Tuple[pd.DataFrame, float]] = {}
 
 # Column names from the sampling notebook
 ENTRY_ID_COL = "entry_id"
@@ -147,6 +149,33 @@ def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
     df.to_csv(csv_path, index=False, encoding="utf-8")
 
 
+def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
+    mtime = 0.0
+    try:
+        mtime = os.path.getmtime(csv_path)
+    except Exception:
+        mtime = 0.0
+
+    cached = _csv_cache.get(csv_path)
+    if cached is not None:
+        df, cached_mtime = cached
+        if cached_mtime == mtime:
+            return df
+
+    df = pd.read_csv(csv_path)
+    _csv_cache[csv_path] = (df, mtime)
+    return df
+
+
+def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
+    _save_csv(df, csv_path)
+    try:
+        mtime = os.path.getmtime(csv_path)
+    except Exception:
+        mtime = 0.0
+    _csv_cache[csv_path] = (df, mtime)
+
+
 def mark_success(
     csv_path: str,
     entry_id: str,
@@ -168,7 +197,7 @@ def mark_success(
     """
     with _csv_lock:
         try:
-            df = pd.read_csv(csv_path)
+            df = _load_csv_for_update(csv_path)
             
             # Find the row
             mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
@@ -197,7 +226,7 @@ def mark_success(
                 df[TIMESTAMP_COL] = pd.NA
             df.loc[mask, TIMESTAMP_COL] = datetime.now(timezone.utc).isoformat()
             
-            _save_csv(df, csv_path)
+            _save_csv_and_update_cache(df, csv_path)
             logger.debug("Marked entry %s as success", entry_id)
             return True
             
@@ -225,7 +254,7 @@ def mark_failed(
     """
     with _csv_lock:
         try:
-            df = pd.read_csv(csv_path)
+            df = _load_csv_for_update(csv_path)
             
             # Find the row
             mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
@@ -245,7 +274,7 @@ def mark_failed(
                 df[TIMESTAMP_COL] = pd.NA
             df.loc[mask, TIMESTAMP_COL] = datetime.now(timezone.utc).isoformat()
             
-            _save_csv(df, csv_path)
+            _save_csv_and_update_cache(df, csv_path)
             
             if reason:
                 logger.debug("Marked entry %s as failed: %s", entry_id, reason)
@@ -275,7 +304,7 @@ def mark_deferred(
     """
     with _csv_lock:
         try:
-            df = pd.read_csv(csv_path)
+            df = _load_csv_for_update(csv_path)
             
             # Find the row
             mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
@@ -286,7 +315,7 @@ def mark_deferred(
             # Leave status as NA (pending for retry)
             df.loc[mask, STATUS_COL] = pd.NA
             
-            _save_csv(df, csv_path)
+            _save_csv_and_update_cache(df, csv_path)
             logger.debug("Marked entry %s as deferred", entry_id)
             return True
             
