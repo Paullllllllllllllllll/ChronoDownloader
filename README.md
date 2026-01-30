@@ -1,6 +1,6 @@
 # ChronoDownloader
 
-A Python tool for discovering and downloading digitized historical sources from major digital libraries worldwide. ChronoDownloader automates searching, selecting, and downloading historical books, manuscripts, and documents from 14+ digital library providers.
+A Python tool for discovering and downloading digitized historical sources from major digital libraries worldwide. ChronoDownloader automates searching, selecting, and downloading historical books, manuscripts, and documents from 17+ digital library providers.
 
 Designed to integrate with [ChronoTranscriber](https://github.com/Paullllllllllllllllll/ChronoTranscriber) and [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) for a complete document retrieval, transcription, and data extraction pipeline.
 
@@ -37,7 +37,7 @@ ChronoDownloader supports two execution modes:
 
 ### Key Capabilities
 
-- **Multi-Provider Search**: Query 14 major digital libraries with configurable parallel searches
+- **Multi-Provider Search**: Query 17 major digital libraries with configurable parallel searches
 - **Parallel Downloads**: Concurrent download workers with per-provider concurrency limits
 - **Intelligent Selection**: Automatic fuzzy matching and scoring to select best candidate
 - **Flexible Strategies**: Download PDFs, EPUBs, or high-resolution page images
@@ -55,7 +55,7 @@ ChronoDownloader supports two execution modes:
 
 ### Multi-Provider Search
 
-- **14 Supported Providers**: Internet Archive, BnF Gallica, Library of Congress, Google Books, Europeana, DPLA, DDB, British Library, MDZ, Polona, BNE, HathiTrust, Wellcome Collection, Anna's Archive
+- **17 Supported Providers**: Internet Archive, BnF Gallica, Library of Congress, Google Books, Europeana, DPLA, DDB, British Library, MDZ, Polona, BNE, HathiTrust, Wellcome Collection, Anna's Archive, SLUB Dresden, e-rara, SBB Digital Collections
 - **Parallel Searches**: Configurable concurrent provider searches (up to 5x faster)
 - **Unified Results**: SearchResult objects for consistent handling across providers
 
@@ -89,7 +89,7 @@ ChronoDownloader supports two execution modes:
 
 ## Supported Providers
 
-ChronoDownloader supports 14 digital library providers:
+ChronoDownloader supports 17 digital library providers:
 
 | Provider | Region | API Key Required | IIIF Support |
 |----------|--------|------------------|-------------|
@@ -107,6 +107,9 @@ ChronoDownloader supports 14 digital library providers:
 | HathiTrust | US | Optional | Yes |
 | Wellcome Collection | UK | No | Yes |
 | Anna's Archive | Global (Aggregator) | Optional* | No |
+| SLUB Dresden | Germany | No | Yes |
+| e-rara | Switzerland | No | Yes |
+| SBB Digital Collections | Germany | No | No (METS) |
 
 \* Anna's Archive works without an API key using public download links. Member API key enables faster downloads.
 
@@ -1397,7 +1400,7 @@ Provide:
 ### Recent Updates
 
 **Latest Features**:
-- Multi-provider search across 14 digital libraries
+- Multi-provider search across 17 digital libraries
 - Parallel downloads with per-provider concurrency limits
 - Adaptive circuit breaker for rate-limited providers
 - Unified CSV system (input and output in single file)

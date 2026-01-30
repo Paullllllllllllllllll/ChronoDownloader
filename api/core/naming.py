@@ -24,6 +24,9 @@ PROVIDER_SLUGS = {
     "google_books": "gb",
     "hathitrust": "hathi",
     "annas_archive": "annas",
+    "slub": "slub",
+    "e_rara": "erara",
+    "sbb_digital": "sbb",
 }
 
 # Provider abbreviations for display/logging
@@ -45,6 +48,9 @@ PROVIDER_ABBREV = {
     "bnf_gallica": "GAL",
     "hathitrust": "HATHI",
     "annas_archive": "ANNAS",
+    "slub": "SLUB",
+    "e_rara": "ERARA",
+    "sbb_digital": "SBB",
 }
 
 

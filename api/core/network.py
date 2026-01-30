@@ -202,6 +202,14 @@ PROVIDER_HOST_MAP: Dict[str, tuple[str, ...]] = {
     "google_books": ("www.googleapis.com", "books.google.com", "books.googleusercontent.com", "play.google.com"),
     "hathitrust": ("catalog.hathitrust.org", "babel.hathitrust.org"),
     "annas_archive": ("annas-archive.li", "annas-archive.pm", "annas-archive.in"),
+    "slub": ("data.slub-dresden.de", "digital.slub-dresden.de", "iiif.slub-dresden.de"),
+    "e_rara": ("www.e-rara.ch", "e-rara.ch"),
+    "sbb_digital": (
+        "sru.gbv.de",
+        "digital.staatsbibliothek-berlin.de",
+        "content.staatsbibliothek-berlin.de",
+        "oai.sbb.berlin",
+    ),
 }
 
 

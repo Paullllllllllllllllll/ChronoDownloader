@@ -20,6 +20,9 @@ from . import google_books_api
 from . import hathitrust_api
 from . import wellcome_api
 from . import annas_archive_api
+from . import slub_api
+from . import e_rara_api
+from . import sbb_digital_api
 
 PROVIDERS: Dict[str, Tuple[Any, Any, str]] = {
     "bnf_gallica": (bnf_gallica_api.search_gallica, bnf_gallica_api.download_gallica_work, "BnF Gallica"),
@@ -44,6 +47,13 @@ PROVIDERS: Dict[str, Tuple[Any, Any, str]] = {
     "hathitrust": (hathitrust_api.search_hathitrust, hathitrust_api.download_hathitrust_work, "HathiTrust"),
     "wellcome": (wellcome_api.search_wellcome, wellcome_api.download_wellcome_work, "Wellcome Collection"),
     "annas_archive": (annas_archive_api.search_annas_archive, annas_archive_api.download_annas_archive_work, "Anna's Archive"),
+    "slub": (slub_api.search_slub, slub_api.download_slub_work, "SLUB Dresden"),
+    "e_rara": (e_rara_api.search_e_rara, e_rara_api.download_e_rara_work, "e-rara"),
+    "sbb_digital": (
+        sbb_digital_api.search_sbb_digital,
+        sbb_digital_api.download_sbb_digital_work,
+        "SBB Digital Collections",
+    ),
 }
 
 __all__ = ["PROVIDERS"]
