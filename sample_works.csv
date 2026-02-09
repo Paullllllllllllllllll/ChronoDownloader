@@ -1,16 +1,16 @@
-entry_id,short_title,main_author
-E0001,Le Morte d'Arthur,Thomas Malory
-E0002,The Raven,Edgar Allan Poe
-E0003,Philosophiæ Naturalis Principia Mathematica,Isaac Newton
-E0004,De revolutionibus orbium coelestium,Nicolaus Copernicus
-E0005,Discours de la méthode,René Descartes
-E0006,On the Origin of Species,Charles Darwin
-E0007,De Magnete,William Gilbert
-E0008,Principia Ethica,G. E. Moore
-E0009,Dialogo sopra i due massimi sistemi del mondo,Galileo Galilei
-E0010,De humani corporis fabrica,Andreas Vesalius
-E0011,Historia regum Britanniae,Geoffrey of Monmouth
-E0012,Divina Commedia,Dante Alighieri
-E0013,Charles Darwin ein Lebensbild,Wilhelm Bölsche
-E0014,Versuch über den Character des Grossen Arztes,Matthew Maty
-E0015,Die streitenden Knaben,Emma Müller
+entry_id,short_title,main_author,direct_link
+E0001,Le Morte d'Arthur,Thomas Malory,
+E0002,The Raven,Edgar Allan Poe,
+E0003,Philosophiæ Naturalis Principia Mathematica,Isaac Newton,
+E0004,De revolutionibus orbium coelestium,Nicolaus Copernicus,
+E0005,Discours de la méthode,René Descartes,
+E0006,On the Origin of Species,Charles Darwin,
+E0007,De Magnete,William Gilbert,
+E0008,Principia Ethica,G. E. Moore,
+E0009,Dialogo sopra i due massimi sistemi del mondo,Galileo Galilei,
+E0010,De humani corporis fabrica,Andreas Vesalius,
+E0011,Historia regum Britanniae,Geoffrey of Monmouth,
+E0012,Divina Commedia,Dante Alighieri,
+E0013,Charles Darwin ein Lebensbild,Wilhelm Bölsche,
+E0014,Versuch über den Character des Grossen Arztes,Matthew Maty,
+E0015,Die streitenden Knaben,Emma Müller,

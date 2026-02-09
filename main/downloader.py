@@ -30,7 +30,7 @@ if __package__ is None or __package__ == "":
 from main import pipeline
 from main.mode_selector import run_with_mode_detection
 from main.interactive import run_interactive
-from main.execution import run_batch_downloads
+from main.execution import run_batch_downloads, process_direct_iiif
 from main.background_scheduler import get_background_scheduler, stop_background_scheduler
 from main.deferred_queue import get_deferred_queue
 from main.quota_manager import get_quota_manager
@@ -65,6 +65,12 @@ Examples:
 
   # Force interactive mode
   python main/downloader.py --interactive
+
+  # Download from a single IIIF manifest URL
+  python main/downloader.py --iiif "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k1511262r/manifest.json" --name Taillevent
+
+  # Download multiple IIIF manifests
+  python main/downloader.py --iiif URL1 --iiif URL2 --output_dir my_downloads
         """
     )
     
@@ -99,6 +105,22 @@ Examples:
         "--config",
         default="config.json",
         help="Path to JSON config file to enable/disable providers."
+    )
+    
+    # Direct IIIF download flags
+    parser.add_argument(
+        "--iiif",
+        action="append",
+        dest="iiif_urls",
+        metavar="URL",
+        help="Direct IIIF manifest URL(s) to download (repeatable). Bypasses CSV and search.",
+    )
+    
+    parser.add_argument(
+        "--name",
+        default=None,
+        help="Output name stem for IIIF downloads (e.g. 'Taillevent_Viandier'). "
+             "Used for folder and file naming.",
     )
     
     # Mode override flags
@@ -180,6 +202,11 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
         logger.warning("No providers are enabled. Update %s to enable providers.", args.config)
         return
 
+    # Handle direct IIIF mode (--iiif takes precedence over csv_file)
+    if args.iiif_urls:
+        _run_direct_iiif_cli(args, config, logger)
+        return
+    
     # Validate CSV file argument
     if not args.csv_file:
         logger.error("CSV file path is required in CLI mode. Use --interactive for guided setup.")
@@ -273,6 +300,70 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
     )
     
     logger.info("Downloader finished.")
+
+
+def _run_direct_iiif_cli(
+    args: argparse.Namespace,
+    config: Dict[str, Any],
+    logger: logging.Logger,
+) -> None:
+    """Handle --iiif CLI invocations.
+
+    Downloads one or more IIIF manifests directly, bypassing CSV loading
+    and provider search.
+
+    Args:
+        args: Parsed CLI arguments (must have iiif_urls populated)
+        config: Configuration dictionary
+        logger: Logger instance
+    """
+    urls = args.iiif_urls or []
+    name_stem = getattr(args, "name", None)
+    dry_run = getattr(args, "dry_run", False)
+    output_dir = getattr(args, "output_dir", "downloaded_works")
+
+    succeeded = 0
+    failed = 0
+
+    for i, url in enumerate(urls, start=1):
+        # Derive entry_id and per-item name
+        if len(urls) == 1 and name_stem:
+            entry_id = f"IIIF_{name_stem}"
+            title = name_stem
+            file_stem = name_stem
+        else:
+            entry_id = f"IIIF_{i:04d}"
+            title = name_stem if name_stem else None
+            file_stem = f"{name_stem}_{i:04d}" if name_stem else None
+
+        logger.info("Processing IIIF manifest %d/%d: %s", i, len(urls), url)
+
+        result = process_direct_iiif(
+            manifest_url=url,
+            output_dir=output_dir,
+            entry_id=entry_id,
+            title=title,
+            file_stem=file_stem,
+            dry_run=dry_run,
+        )
+
+        status = result.get("status", "")
+        if status == "completed":
+            succeeded += 1
+            logger.info("Download completed for manifest %d/%d", i, len(urls))
+        elif status == "dry_run":
+            logger.info("Dry-run complete for manifest %d/%d", i, len(urls))
+        else:
+            failed += 1
+            logger.warning(
+                "Download failed for manifest %d/%d: %s",
+                i, len(urls), result.get("error", "unknown"),
+            )
+
+    logger.info(
+        "Direct IIIF batch complete: %d processed, %d succeeded, %d failed",
+        len(urls), succeeded, failed,
+    )
 
 
 def show_quota_status() -> None:

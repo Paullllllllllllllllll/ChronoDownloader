@@ -14,7 +14,7 @@ from typing import Any
 class DownloadConfiguration:
     """User configuration for a download session."""
     
-    # Mode: "csv", "single", "collection"
+    # Mode: "csv", "single", "collection", "direct_iiif"
     mode: str = "csv"
     
     # CSV mode settings
@@ -27,6 +27,10 @@ class DownloadConfiguration:
     
     # Collection mode settings
     collection_name: str | None = None
+    
+    # Direct IIIF mode settings
+    iiif_urls: list[str] = field(default_factory=list)
+    iiif_name: str | None = None
     
     # General settings
     output_dir: str = "downloaded_works"

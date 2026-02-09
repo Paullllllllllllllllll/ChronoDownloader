@@ -119,6 +119,8 @@ class TestRunCli:
         args.cli = True
         args.quota_status = False
         args.cleanup_deferred = False
+        args.iiif_urls = None
+        args.name = None
         return args
 
     @pytest.fixture
@@ -489,6 +491,8 @@ class TestRunCliEdgeCases:
         args.config = "config.json"
         args.interactive = False
         args.cli = True
+        args.iiif_urls = None
+        args.name = None
         return args
 
     def test_run_cli_handles_csv_validation_error(self, mock_args, mock_config, temp_dir):

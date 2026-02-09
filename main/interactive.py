@@ -25,9 +25,11 @@ if __package__ is None or __package__ == "":
 
 from api.core.config import get_config, get_download_config
 from api.providers import PROVIDERS
+from api.direct_iiif_api import is_iiif_manifest_url
 from main import pipeline
 from main.console_ui import ConsoleUI, DownloadConfiguration
 from main.deferred_queue import get_deferred_queue
+from main.execution import process_direct_iiif
 from main.background_scheduler import get_background_scheduler
 from main.mode_selector import get_general_config
 from main.unified_csv import (
@@ -192,6 +194,7 @@ class InteractiveWorkflow:
             ("csv", "CSV Batch — Process works from a CSV file"),
             ("single", "Single Work — Download a specific work by title"),
             ("collection", "Predefined Collection — Choose from sample datasets"),
+            ("direct_iiif", "Direct IIIF — Download from IIIF manifest URL(s)"),
         ]
     
     def configure_mode(self) -> bool:
@@ -296,6 +299,50 @@ class InteractiveWorkflow:
         self.config.single_creator = creator if creator else None
         self.config.single_entry_id = entry_id if entry_id else "W0001"
         
+        return True
+    
+    def configure_direct_iiif_mode(self) -> bool:
+        """Configure direct IIIF download mode.
+        
+        Returns:
+            True if configured, False to go back
+        """
+        ConsoleUI.print_info("DIRECT IIIF DOWNLOAD")
+        print("  Enter one or more IIIF manifest URLs.")
+        print(f"  {ConsoleUI.DIM}(Enter an empty line when done){ConsoleUI.RESET}\n")
+        
+        urls: List[str] = []
+        while True:
+            prompt_label = f"Manifest URL [{len(urls) + 1}]" if not urls else f"Manifest URL [{len(urls) + 1}] (empty to finish)"
+            url = ConsoleUI.prompt_input(prompt_label, required=(len(urls) == 0))
+            
+            if not url:
+                if urls:
+                    break
+                continue
+            
+            url = url.strip()
+            if not is_iiif_manifest_url(url):
+                ConsoleUI.print_warning(
+                    f"'{url}' does not look like a IIIF manifest URL. "
+                    "Expected a URL containing '/manifest.json' or '/manifest' "
+                    "from a supported digital library."
+                )
+                if not ConsoleUI.prompt_yes_no("Add it anyway?", default=False):
+                    continue
+            
+            urls.append(url)
+            ConsoleUI.print_success(f"Added manifest URL ({len(urls)} total)")
+        
+        # Name stem
+        name = ConsoleUI.prompt_input(
+            "Output name stem (leave empty for auto-detection from manifest)"
+        )
+        
+        self.config.iiif_urls = urls
+        self.config.iiif_name = name if name else None
+        
+        ConsoleUI.print_success(f"Configured {len(urls)} IIIF manifest(s) for download")
         return True
     
     def configure_collection_mode(self) -> bool:
@@ -461,6 +508,10 @@ class InteractiveWorkflow:
                 print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Creator: {self.config.single_creator}")
         elif self.config.mode == "collection":
             print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Collection: {self.config.collection_name}")
+        elif self.config.mode == "direct_iiif":
+            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} IIIF Manifests: {len(self.config.iiif_urls)} URL(s)")
+            if self.config.iiif_name:
+                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Name stem: {self.config.iiif_name}")
         ConsoleUI.print_separator(".", 70)
         
         # Output section
@@ -539,6 +590,12 @@ class InteractiveWorkflow:
                 
                 elif current_step == "configure_single":
                     if self.configure_single_mode():
+                        current_step = "output"
+                    else:
+                        current_step = "mode"
+                
+                elif current_step == "configure_direct_iiif":
+                    if self.configure_direct_iiif_mode():
                         current_step = "output"
                     else:
                         current_step = "mode"
@@ -692,6 +749,32 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
         else:
             stats["processed"] = 1
             stats["failed"] = 1
+    elif config.mode == "direct_iiif":
+        for i, url in enumerate(config.iiif_urls, start=1):
+            if len(config.iiif_urls) == 1 and config.iiif_name:
+                entry_id = f"IIIF_{config.iiif_name}"
+                title = config.iiif_name
+                file_stem = config.iiif_name
+            else:
+                entry_id = f"IIIF_{i:04d}"
+                title = config.iiif_name if config.iiif_name else None
+                file_stem = f"{config.iiif_name}_{i:04d}" if config.iiif_name else None
+
+            log.info("Processing IIIF manifest %d/%d: %s", i, len(config.iiif_urls), url)
+            result = process_direct_iiif(
+                manifest_url=url,
+                output_dir=config.output_dir,
+                entry_id=entry_id,
+                title=title,
+                file_stem=file_stem,
+                dry_run=config.dry_run,
+            )
+            stats["processed"] += 1
+            status = result.get("status", "")
+            if status == "completed":
+                stats["succeeded"] += 1
+            elif status != "dry_run":
+                stats["failed"] += 1
     
     # Handle deferred downloads
     deferred_queue = get_deferred_queue()

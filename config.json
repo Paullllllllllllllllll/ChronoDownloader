@@ -295,5 +295,13 @@
     "max_retries": 5,
     "_note": "Background scheduler monitors quota-limited downloads and retries when quotas reset. State is stored in unified .downloader_state.json"
   },
-  "_csv_format_note": "Expects sampling notebook format: entry_id, short_title, main_author, retrievable, link columns"
+  "direct_iiif": {
+    "enabled": true,
+    "link_column": "direct_link",
+    "check_link_column": true,
+    "naming_template": "{provider}_{item_id}",
+    "_naming_vars": "Available: {entry_id}, {name}, {provider}, {item_id}. Page suffix _p00001.jpg is always appended automatically.",
+    "_note": "When enabled, rows with IIIF manifest URLs in the direct_link column (or link column if check_link_column is true) will be downloaded directly without searching. Supports major digital libraries: Internet Archive, Gallica, MDZ, HathiTrust, LOC, Wellcome, British Library, e-rara, SLUB, and any IIIF-compliant repository."
+  },
+  "_csv_format_note": "Expects sampling notebook format: entry_id, short_title, main_author, retrievable, link columns. Optionally add direct_link column for direct IIIF manifest URLs."
 }

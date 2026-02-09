@@ -38,6 +38,9 @@ LINK_COL = "link"
 PROVIDER_COL = "download_provider"
 TIMESTAMP_COL = "download_timestamp"
 
+# Direct IIIF link column (optional - for bypassing search with known IIIF manifest URLs)
+DIRECT_LINK_COL = "direct_link"
+
 
 def load_works_csv(csv_path: str) -> pd.DataFrame:
     """Load the works CSV file.
@@ -57,11 +60,16 @@ def load_works_csv(csv_path: str) -> pd.DataFrame:
     
     df = pd.read_csv(csv_path)
     
-    # Validate required columns
-    required = [ENTRY_ID_COL, TITLE_COL]
-    missing = [col for col in required if col not in df.columns]
-    if missing:
-        raise ValueError(f"CSV missing required columns: {missing}")
+    # Validate required columns: entry_id is always required;
+    # short_title is required unless a direct_link column is present
+    # (IIIF-only CSVs may omit titles entirely).
+    if ENTRY_ID_COL not in df.columns:
+        raise ValueError(f"CSV missing required column: {ENTRY_ID_COL}")
+    if TITLE_COL not in df.columns and DIRECT_LINK_COL not in df.columns:
+        raise ValueError(
+            f"CSV must have a '{TITLE_COL}' column or a '{DIRECT_LINK_COL}' column "
+            f"(or both). Found columns: {list(df.columns)}"
+        )
     
     # Ensure status and link columns exist
     if STATUS_COL not in df.columns:
@@ -379,6 +387,7 @@ __all__ = [
     "CREATOR_COL",
     "STATUS_COL",
     "LINK_COL",
+    "DIRECT_LINK_COL",
     "load_works_csv",
     "get_pending_works",
     "get_completed_entry_ids",

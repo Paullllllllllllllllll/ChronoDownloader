@@ -183,11 +183,12 @@ class TestInteractiveWorkflow:
             workflow = InteractiveWorkflow()
             options = workflow.get_mode_options()
             
-            assert len(options) == 3
+            assert len(options) == 4
             modes = [opt[0] for opt in options]
             assert "csv" in modes
             assert "single" in modes
             assert "collection" in modes
+            assert "direct_iiif" in modes
 
 
 class TestConfigureConfigFile:

@@ -29,10 +29,18 @@ from main.unified_csv import (
     TITLE_COL,
     CREATOR_COL,
     ENTRY_ID_COL,
+    DIRECT_LINK_COL,
+    LINK_COL,
     get_pending_works,
     mark_success,
     mark_failed,
     mark_deferred,
+)
+from api.direct_iiif_api import (
+    is_iiif_manifest_url,
+    download_from_iiif_manifest,
+    is_direct_download_enabled,
+    preview_manifest,
 )
 from main.background_scheduler import (
     BackgroundRetryScheduler,
@@ -161,6 +169,120 @@ def run_batch_downloads(
         pass
 
 
+def process_direct_iiif(
+    manifest_url: str,
+    output_dir: str,
+    entry_id: Optional[str] = None,
+    title: Optional[str] = None,
+    creator: Optional[str] = None,
+    file_stem: Optional[str] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Process a single direct IIIF manifest download.
+
+    This is the single entry point for all direct-IIIF downloads, used by
+    CLI (``--iiif``), interactive mode, and CSV rows with ``direct_link``.
+
+    Args:
+        manifest_url: URL of the IIIF manifest
+        output_dir: Base directory for downloaded works
+        entry_id: Optional entry identifier (used for work directory naming)
+        title: Optional work title (used for logging and directory naming)
+        creator: Optional creator/author name
+        file_stem: Optional naming stem for output files
+        dry_run: If True, fetch manifest info without downloading
+
+    Returns:
+        Result dictionary with keys: status, item_url, provider, and
+        optionally error, preview (when dry_run).
+    """
+    _log = logging.getLogger(__name__)
+
+    if dry_run:
+        _log.info("Dry-run: previewing IIIF manifest: %s", manifest_url)
+        info = preview_manifest(manifest_url)
+        if info is None:
+            return {
+                "status": "failed",
+                "item_url": manifest_url,
+                "provider": "Direct IIIF",
+                "error": "Failed to fetch manifest",
+            }
+        _log.info(
+            "Manifest preview: %s | %d pages | renderings: %s | label: %s",
+            info.get("provider", "unknown"),
+            info.get("page_count", 0),
+            info.get("rendering_formats") or "none",
+            info.get("label") or "(none)",
+        )
+        return {
+            "status": "dry_run",
+            "item_url": manifest_url,
+            "provider": info.get("provider", "Direct IIIF"),
+            "preview": info,
+        }
+
+    # Compute work directory
+    from main.work_manager import compute_work_dir
+
+    dir_title = title or "iiif_download"
+    work_dir, _work_dir_name = compute_work_dir(
+        output_dir, str(entry_id) if entry_id else None, dir_title
+    )
+
+    dl_result = download_from_iiif_manifest(
+        manifest_url=manifest_url,
+        output_folder=work_dir,
+        title=title,
+        entry_id=str(entry_id) if entry_id else None,
+        file_stem=file_stem,
+    )
+
+    if dl_result["success"]:
+        return {
+            "status": "completed",
+            "item_url": manifest_url,
+            "provider": dl_result["provider"],
+        }
+    return {
+        "status": "failed",
+        "item_url": manifest_url,
+        "provider": dl_result["provider"],
+        "error": dl_result.get("error", "unknown"),
+    }
+
+
+def _get_direct_link(row: pd.Series) -> Optional[str]:
+    """Extract a direct IIIF link from a CSV row if present and valid.
+    
+    Checks both the 'direct_link' column (preferred) and the 'link' column
+    for IIIF manifest URLs.
+    
+    Args:
+        row: DataFrame row
+        
+    Returns:
+        IIIF manifest URL if found and valid, None otherwise
+    """
+    # Check direct_link column first (explicit IIIF manifest URL)
+    if DIRECT_LINK_COL in row.index:
+        direct_link = row.get(DIRECT_LINK_COL)
+        if not pd.isna(direct_link) and isinstance(direct_link, str) and direct_link.strip():
+            url = direct_link.strip()
+            if is_iiif_manifest_url(url):
+                return url
+    
+    # Also check link column for IIIF URLs (backward compatibility)
+    if LINK_COL in row.index:
+        link = row.get(LINK_COL)
+        if not pd.isna(link) and isinstance(link, str) and link.strip():
+            url = link.strip()
+            if is_iiif_manifest_url(url):
+                return url
+    
+    return None
+
+
 def _run_sequential(
     works_df: pd.DataFrame,
     output_dir: str,
@@ -184,6 +306,7 @@ def _run_sequential(
     succeeded = 0
     failed = 0
     skipped = 0
+    direct_iiif_count = 0
     
     for index, row in works_df.iterrows():
         title = row.get(TITLE_COL)
@@ -196,19 +319,35 @@ def _run_sequential(
             skipped += 1
             continue
         
-        if pd.isna(title) or not str(title).strip():
+        # Check for direct IIIF link first (bypasses search)
+        direct_link = _get_direct_link(row) if is_direct_download_enabled() else None
+        
+        title_missing = pd.isna(title) or not str(title).strip()
+        if title_missing and not direct_link:
             logger.warning("Skipping row %d due to missing or empty title.", index + 1)
             skipped += 1
             continue
         
-        # Delegate to pipeline
-        result = pipeline.process_work(
-            str(title),
-            None if pd.isna(creator) else str(creator),
-            str(entry_id),
-            output_dir,
-            dry_run=dry_run,
-        )
+        if direct_link:
+            logger.info("Direct IIIF link detected for '%s': %s", title if not title_missing else entry_id, direct_link)
+            direct_iiif_count += 1
+            result = process_direct_iiif(
+                manifest_url=direct_link,
+                output_dir=output_dir,
+                entry_id=str(entry_id),
+                title=None if title_missing else str(title),
+                creator=None if pd.isna(creator) else str(creator),
+                dry_run=dry_run,
+            )
+        else:
+            # Standard search-based download
+            result = pipeline.process_work(
+                str(title),
+                None if pd.isna(creator) else str(creator),
+                str(entry_id),
+                output_dir,
+                dry_run=dry_run,
+            )
         
         # Update CSV status if path provided
         if csv_path and not dry_run:
@@ -371,22 +510,51 @@ def _run_parallel(
                 skipped_count += 1
                 continue
             
-            if pd.isna(title) or not str(title).strip():
+            # Check for direct IIIF link first (bypasses search)
+            direct_link = _get_direct_link(row) if is_direct_download_enabled() else None
+            
+            title_missing = pd.isna(title) or not str(title).strip()
+            if title_missing and not direct_link:
                 logger.warning("Skipping row %d due to missing or empty title.", index + 1)
                 skipped_count += 1
                 continue
             
-            # Search and select (runs in main thread)
-            task = pipeline.search_and_select(
-                str(title),
-                None if pd.isna(creator) else str(creator),
-                None if pd.isna(entry_id) else str(entry_id),
-                output_dir,
-            )
-            
-            if task:
-                # Submit download to worker pool
-                scheduler.submit(task, pipeline.execute_download)
+            if direct_link:
+                # Direct IIIF download - handle synchronously in parallel mode
+                logger.info("Direct IIIF link detected for '%s': %s", title if not title_missing else entry_id, direct_link)
+                dl_result = process_direct_iiif(
+                    manifest_url=direct_link,
+                    output_dir=output_dir,
+                    entry_id=str(entry_id),
+                    title=None if title_missing else str(title),
+                    creator=None if pd.isna(creator) else str(creator),
+                )
+                
+                # Update CSV for direct downloads
+                if csv_path and entry_id:
+                    try:
+                        if dl_result.get("status") == "completed":
+                            if mark_success(csv_path, str(entry_id), direct_link, dl_result.get("provider", "")):
+                                logger.debug("Marked entry %s as success (direct IIIF)", entry_id)
+                        else:
+                            if mark_failed(csv_path, str(entry_id)):
+                                logger.debug("Marked entry %s as failed (direct IIIF)", entry_id)
+                    except Exception as csv_err:
+                        logger.error("Exception updating CSV for direct IIIF entry %s: %s", entry_id, csv_err)
+                
+                actual_submitted[0] += 1
+            else:
+                # Search and select (runs in main thread)
+                task = pipeline.search_and_select(
+                    str(title),
+                    None if pd.isna(creator) else str(creator),
+                    None if pd.isna(entry_id) else str(entry_id),
+                    output_dir,
+                )
+                
+                if task:
+                    # Submit download to worker pool
+                    scheduler.submit(task, pipeline.execute_download)
             
             logger.info("%s", "-" * 50)
         
@@ -477,4 +645,4 @@ def create_interactive_callbacks(logger: logging.Logger):
     return on_submit, on_complete
 
 
-__all__ = ["run_batch_downloads", "create_interactive_callbacks"]
+__all__ = ["run_batch_downloads", "create_interactive_callbacks", "process_direct_iiif"]

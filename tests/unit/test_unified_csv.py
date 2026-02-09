@@ -74,7 +74,63 @@ class TestLoadWorksCsv:
         
         with pytest.raises(ValueError) as exc_info:
             load_works_csv(csv_path)
-        assert "missing required columns" in str(exc_info.value).lower()
+        assert "entry_id" in str(exc_info.value).lower()
+    
+    def test_iiif_only_csv_without_title(self, temp_dir: str):
+        """Test loading a CSV with direct_link but no short_title column."""
+        csv_path = os.path.join(temp_dir, "iiif_only.csv")
+        pd.DataFrame({
+            "entry_id": ["E0001", "E0002"],
+            "direct_link": [
+                "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k123/manifest.json",
+                "https://api.digitale-sammlungen.de/iiif/presentation/v2/bsb123/manifest",
+            ],
+        }).to_csv(csv_path, index=False)
+        
+        df = load_works_csv(csv_path)
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 2
+        assert "direct_link" in df.columns
+    
+    def test_csv_with_both_title_and_direct_link(self, temp_dir: str):
+        """Test loading a CSV with both short_title and direct_link columns."""
+        csv_path = os.path.join(temp_dir, "mixed.csv")
+        pd.DataFrame({
+            "entry_id": ["E0001", "E0002"],
+            "short_title": ["Work A", ""],
+            "direct_link": [
+                "",
+                "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k123/manifest.json",
+            ],
+        }).to_csv(csv_path, index=False)
+        
+        df = load_works_csv(csv_path)
+        assert len(df) == 2
+    
+    def test_raises_for_no_title_no_direct_link(self, temp_dir: str):
+        """Test that ValueError is raised when neither title nor direct_link column exists."""
+        csv_path = os.path.join(temp_dir, "no_title_no_link.csv")
+        pd.DataFrame({
+            "entry_id": ["E0001"],
+            "main_author": ["Someone"],
+        }).to_csv(csv_path, index=False)
+        
+        with pytest.raises(ValueError) as exc_info:
+            load_works_csv(csv_path)
+        assert "short_title" in str(exc_info.value)
+        assert "direct_link" in str(exc_info.value)
+    
+    def test_raises_for_missing_entry_id(self, temp_dir: str):
+        """Test that ValueError is raised when entry_id column is missing."""
+        csv_path = os.path.join(temp_dir, "no_entry_id.csv")
+        pd.DataFrame({
+            "short_title": ["Test Work"],
+            "direct_link": ["https://example.org/manifest.json"],
+        }).to_csv(csv_path, index=False)
+        
+        with pytest.raises(ValueError) as exc_info:
+            load_works_csv(csv_path)
+        assert "entry_id" in str(exc_info.value)
 
 
 class TestGetPendingWorks:

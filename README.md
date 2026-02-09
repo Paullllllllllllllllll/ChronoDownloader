@@ -41,7 +41,8 @@ ChronoDownloader supports two execution modes:
 - **Parallel Downloads**: Concurrent download workers with per-provider concurrency limits
 - **Intelligent Selection**: Automatic fuzzy matching and scoring to select best candidate
 - **Flexible Strategies**: Download PDFs, EPUBs, or high-resolution page images
-- **IIIF Support**: Native support for IIIF Presentation and Image APIs
+- **IIIF Support**: Native support for IIIF Presentation and Image APIs with direct manifest downloads
+- **Direct IIIF Downloads**: Download from any IIIF manifest URL via CLI (`--iiif`), interactive mode, or CSV `direct_link` column
 - **Budget Management**: Content-type download budgets (images, PDFs, metadata) with GB-based limits
 - **Rate Limiting**: Built-in per-provider rate limiting with exponential backoff
 - **Adaptive Circuit Breaker**: Automatically pauses providers hitting repeated 429s
@@ -64,6 +65,8 @@ ChronoDownloader supports two execution modes:
 - **Parallel Downloads**: Concurrent workers (default: 4) with per-provider semaphores
 - **Multiple Formats**: PDFs, EPUBs, page images (JPG, PNG, JP2, TIFF)
 - **IIIF Integration**: Native IIIF Presentation v2/v3 manifest parsing and Image API
+- **Direct IIIF Mode**: Download directly from IIIF manifest URLs, bypassing search
+- **IIIF URL Pattern Caching**: Learned URL patterns eliminate redundant 400 errors across pages
 - **Smart Strategies**: PDF-first with IIIF fallback for 60% faster downloads
 
 ### Selection and Matching
@@ -232,6 +235,14 @@ entry_id,short_title,main_author
 2,De re coquinaria,Apicius
 ```
 
+For direct IIIF downloads, add a `direct_link` column with manifest URLs (the `short_title` column becomes optional for rows with direct links):
+
+```csv
+entry_id,short_title,main_author,direct_link
+1,Tractatus de vino,Anonymous,
+2,,Unknown,https://api.digitale-sammlungen.de/iiif/presentation/v2/bsb11280551/manifest
+```
+
 **Step 4: Configure (optional)**
 
 Edit `config.json` to enable/disable providers, set rate limits, configure parallel downloads.
@@ -245,8 +256,8 @@ python main/downloader.py
 ```
 
 The interface guides you through:
-1. Mode selection (CSV batch, single work, predefined collection)
-2. Source configuration (CSV path, work details, collection selection)
+1. Mode selection (CSV batch, single work, predefined collection, direct IIIF download)
+2. Source configuration (CSV path, work details, collection selection, or IIIF manifest URLs)
 3. Output settings (directory configuration)
 4. Options (dry-run, logging level)
 5. Confirmation
@@ -266,6 +277,12 @@ python main/downloader.py my_books.csv --dry-run
 
 # Custom configuration
 python main/downloader.py my_books.csv --config config_small.json
+
+# Direct IIIF download (bypass search)
+python main/downloader.py --cli --iiif https://api.digitale-sammlungen.de/iiif/presentation/v2/bsb11280551/manifest --name "Kochbuch"
+
+# Multiple IIIF manifests
+python main/downloader.py --cli --iiif URL1 --iiif URL2 --output_dir ./iiif_downloads
 ```
 
 ### Common Workflows
@@ -314,7 +331,7 @@ ChronoDownloader uses a JSON configuration file (`config.json` by default). Spec
 
 ### Configuration Structure
 
-Seven main sections:
+Eight main sections:
 1. `general`: Global settings including interactive/CLI mode toggle
 2. `providers`: Enable/disable specific providers
 3. `provider_settings`: Per-provider rate limiting and behavior
@@ -322,6 +339,7 @@ Seven main sections:
 5. `download_limits`: Budget constraints
 6. `selection`: Candidate selection and matching strategy
 7. `naming`: Output folder and file naming conventions
+8. `direct_iiif`: Direct IIIF manifest download settings
 
 ### 1. General Settings
 
@@ -374,8 +392,8 @@ Per-provider rate limiting, retry policies, download limits, and quota managemen
       "max_pages": 0,
       "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
-        "delay_ms": 300,
-        "jitter_ms": 150,
+        "delay_ms": 200,
+        "jitter_ms": 100,
         "max_attempts": 25,
         "base_backoff_s": 1.5,
         "backoff_multiplier": 1.5,
@@ -384,14 +402,14 @@ Per-provider rate limiting, retry policies, download limits, and quota managemen
       }
     },
     "gallica": {
-      "max_pages": 15,
+      "max_pages": 0,
       "_quota_note": "No daily quota - unlimited downloads with rate limiting only",
       "network": {
         "delay_ms": 1500,
-        "jitter_ms": 400,
+        "jitter_ms": 500,
         "max_attempts": 25,
-        "base_backoff_s": 1.5,
-        "backoff_multiplier": 1.6,
+        "base_backoff_s": 3.0,
+        "backoff_multiplier": 1.8,
         "timeout_s": 30
       }
     },
@@ -564,7 +582,7 @@ ChronoDownloader distinguishes between two types of download restrictions:
   "selection": {
     "strategy": "collect_and_select",
     "max_parallel_searches": 5,
-    "provider_hierarchy": ["mdz", "bnf_gallica", "loc", "british_library", "internet_archive", "europeana"],
+    "provider_hierarchy": ["mdz", "bnf_gallica", "e_rara", "slub", "internet_archive", "annas_archive", "google_books", "wellcome", "loc", "europeana"],
     "min_title_score": 85,
     "creator_weight": 0.2,
     "year_tolerance": 2,
@@ -609,6 +627,25 @@ ChronoDownloader distinguishes between two types of download restrictions:
 - `include_year_in_work_dir`: Include publication year in folder name
 - `title_slug_max_len`: Maximum title slug length
 
+### 8. Direct IIIF Settings
+
+```json
+{
+  "direct_iiif": {
+    "enabled": true,
+    "link_column": "direct_link",
+    "check_link_column": true,
+    "naming_template": "{provider}_{item_id}"
+  }
+}
+```
+
+**Direct IIIF Parameters**:
+- `enabled`: Enable direct IIIF manifest downloads from CSV `direct_link` column
+- `link_column`: CSV column name containing IIIF manifest URLs
+- `check_link_column`: Also check the `link` column for IIIF manifest URLs
+- `naming_template`: Template for output file naming. Available placeholders: `{entry_id}`, `{name}`, `{provider}`, `{item_id}`. Page suffix (`_p00001.jpg`) is appended automatically.
+
 ## Usage
 
 ### CSV Input Format
@@ -617,14 +654,17 @@ ChronoDownloader uses unified CSV format compatible with sampling notebooks. CSV
 
 **Required columns**:
 - `entry_id`: Unique identifier (must be present)
-- `short_title`: Title to search for
+- `short_title`: Title to search for (optional if `direct_link` is provided)
 
 **Optional columns**:
 - `main_author`: Creator/author name (improves matching)
+- `direct_link`: IIIF manifest URL for direct download (bypasses search)
 - `retrievable`: Download status (True/False/empty, automatically updated)
 - `link`: Item URL (automatically populated after download)
 
 Additional columns preserved but not used.
+
+**IIIF-only CSV**: For direct IIIF downloads, you can omit the `short_title` column entirely. Rows with a `direct_link` value are downloaded directly from the manifest URL without provider search.
 
 **Example CSV**:
 
@@ -675,6 +715,8 @@ python main/downloader.py my_books.csv --config config_small.json
 - `--config PATH`: Path to configuration JSON file (default: config.json)
 - `--interactive`: Force interactive mode
 - `--cli`: Force CLI mode
+- `--iiif URL`: Direct IIIF manifest URL to download (repeatable for multiple manifests)
+- `--name STEM`: Custom file naming stem for `--iiif` downloads
 - `--quota-status`: Display quota usage and deferred queue status, then exit
 - `--cleanup-deferred`: Remove completed items from deferred queue, then exit
 
@@ -684,8 +726,8 @@ When `interactive_mode: true` in config, `python main/downloader.py` launches gu
 
 **Workflow Steps**:
 1. **Welcome Screen**: Tool banner, enabled/disabled providers
-2. **Mode Selection**: CSV Batch, Single Work, or Predefined Collection
-3. **Source Configuration**: CSV path, work details, or collection selection
+2. **Mode Selection**: CSV Batch, Single Work, Predefined Collection, or Direct IIIF Download
+3. **Source Configuration**: CSV path, work details, collection selection, or IIIF manifest URLs
 4. **Output Settings**: Configure output directory
 5. **Options**: Dry-run, logging level
 6. **Confirmation**: Review settings
@@ -1108,7 +1150,7 @@ ChronoDownloader/
 - Conversion utilities for legacy dict-based results
 
 **Shared Utilities**:
-- `iiif.py`: IIIF Presentation v2/v3 parsing, Image API URL generation
+- `iiif.py`: IIIF Presentation v2/v3 parsing, Image API URL generation, learned URL pattern caching
 - `download_helpers.py`: Common download patterns
 - `matching.py`: Token-set ratio fuzzy matching, text normalization
 - `utils.py`: Backward-compatible facade, file download with budget checks
@@ -1400,6 +1442,11 @@ Provide:
 ### Recent Updates
 
 **Latest Features**:
+- Direct IIIF manifest downloads via CLI (`--iiif`), interactive mode, and CSV `direct_link` column
+- Configurable naming templates for IIIF downloads with `{provider}`, `{item_id}`, `{entry_id}`, `{name}` placeholders
+- IIIF-only CSV support (no `short_title` required when `direct_link` is present)
+- IIIF URL pattern caching for faster page downloads (eliminates redundant 400 errors)
+- Optimized rate limiting for IIIF-supporting providers
 - Multi-provider search across 17 digital libraries
 - Parallel downloads with per-provider concurrency limits
 - Adaptive circuit breaker for rate-limited providers
