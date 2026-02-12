@@ -1,17 +1,13 @@
 """Connector for the Biblioteca Nacional de España (BNE) APIs."""
+from __future__ import annotations
 
 import logging
-from typing import List, Union
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-)
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_iiif_renderings
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id
 from .query_helpers import escape_sparql_string
 
 logger = logging.getLogger(__name__)
@@ -24,8 +20,7 @@ IIIF_MANIFEST_PATTERNS = [
     "https://iiif.bne.es/{item_id}/manifest.json",
 ]
 
-
-def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search the BNE SPARQL endpoint for works by title and creator."""
 
     t = escape_sparql_string(title)
@@ -46,7 +41,7 @@ def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> 
     logger.info("Searching BNE for: %s", title)
     data = make_request(SEARCH_API_URL, params=params)
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if not isinstance(data, dict):
         return results
     if data.get("results") and isinstance(data["results"], dict) and data["results"].get("bindings"):
@@ -65,14 +60,10 @@ def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> 
 
     return results
 
-
-def download_bne_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_bne_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download IIIF manifest and page images for a BNE item."""
 
-    if isinstance(item_data, SearchResult):
-        item_id = item_data.source_id or item_data.raw.get("id")
-    else:
-        item_id = item_data.get("id")
+    item_id = resolve_item_id(item_data)
     if not item_id:
         logger.warning("No BNE item id provided.")
         return False

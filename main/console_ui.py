@@ -9,7 +9,6 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
-
 @dataclass
 class DownloadConfiguration:
     """User configuration for a download session."""
@@ -50,7 +49,6 @@ class DownloadConfiguration:
     
     # Session statistics (populated after processing)
     stats: dict[str, Any] = field(default_factory=dict)
-
 
 class ConsoleUI:
     """Simple console UI utilities with ANSI color support."""
@@ -331,6 +329,5 @@ class ConsoleUI:
         print(f"  {ConsoleUI.GREEN}Thank you for using ChronoDownloader!{ConsoleUI.RESET}")
         print(f"{ConsoleUI.BOLD}{ConsoleUI.CYAN}{'=' * width}{ConsoleUI.RESET}")
         print()
-
 
 __all__ = ["ConsoleUI", "DownloadConfiguration"]

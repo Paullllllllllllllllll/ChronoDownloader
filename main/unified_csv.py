@@ -16,7 +16,6 @@ import os
 import shutil
 import threading
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Thread-safe lock for CSV updates
 _csv_lock = threading.Lock()
 
-_csv_cache: Dict[str, Tuple[pd.DataFrame, float]] = {}
+_csv_cache: dict[str, tuple[pd.DataFrame, float]] = {}
 
 # Column names from the sampling notebook
 ENTRY_ID_COL = "entry_id"
@@ -41,6 +40,26 @@ TIMESTAMP_COL = "download_timestamp"
 # Direct IIIF link column (optional - for bypassing search with known IIIF manifest URLs)
 DIRECT_LINK_COL = "direct_link"
 
+_TRUTHY = frozenset({"true", "1", "yes", "y"})
+_FALSY = frozenset({"false", "0", "no", "n"})
+
+def _parse_status(val) -> str:
+    """Classify a single status cell value.
+
+    Returns:
+        ``"completed"``, ``"failed"``, or ``"pending"``.
+    """
+    if pd.isna(val):
+        return "pending"
+    if isinstance(val, bool):
+        return "completed" if val else "failed"
+    if isinstance(val, str):
+        lowered = val.strip().lower()
+        if lowered in _TRUTHY:
+            return "completed"
+        if lowered in _FALSY:
+            return "failed"
+    return "pending"
 
 def load_works_csv(csv_path: str) -> pd.DataFrame:
     """Load the works CSV file.
@@ -79,7 +98,6 @@ def load_works_csv(csv_path: str) -> pd.DataFrame:
     
     return df
 
-
 def get_pending_works(df: pd.DataFrame) -> pd.DataFrame:
     """Get works that need to be processed.
     
@@ -96,19 +114,9 @@ def get_pending_works(df: pd.DataFrame) -> pd.DataFrame:
     # Convert to nullable boolean for proper comparison
     status = df[STATUS_COL]
     
-    # Pending = not True (i.e., NA, empty, False, or any non-True value)
-    def is_pending(val):
-        if pd.isna(val):
-            return True
-        if isinstance(val, bool):
-            return not val
-        if isinstance(val, str):
-            return val.strip().lower() not in ("true", "1", "yes", "y")
-        return True
-    
-    mask = status.apply(is_pending)
+    # Pending = not completed
+    mask = status.apply(lambda v: _parse_status(v) != "completed")
     return df[mask].copy()
-
 
 def get_completed_entry_ids(df: pd.DataFrame) -> set:
     """Get set of entry_ids that are already completed.
@@ -119,18 +127,8 @@ def get_completed_entry_ids(df: pd.DataFrame) -> set:
     Returns:
         Set of entry_id values where retrievable=True
     """
-    def is_completed(val):
-        if pd.isna(val):
-            return False
-        if isinstance(val, bool):
-            return val
-        if isinstance(val, str):
-            return val.strip().lower() in ("true", "1", "yes", "y")
-        return False
-    
-    mask = df[STATUS_COL].apply(is_completed)
+    mask = df[STATUS_COL].apply(lambda v: _parse_status(v) == "completed")
     return set(df.loc[mask, ENTRY_ID_COL].astype(str))
-
 
 def _backup_csv(csv_path: str) -> str:
     """Create a timestamped backup of the CSV file.
@@ -146,7 +144,6 @@ def _backup_csv(csv_path: str) -> str:
     shutil.copy2(csv_path, backup_path)
     return backup_path
 
-
 def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
     """Save DataFrame to CSV, preserving all columns.
     
@@ -155,7 +152,6 @@ def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
         csv_path: Path to save to
     """
     df.to_csv(csv_path, index=False, encoding="utf-8")
-
 
 def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
     mtime = 0.0
@@ -174,7 +170,6 @@ def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
     _csv_cache[csv_path] = (df, mtime)
     return df
 
-
 def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
     _save_csv(df, csv_path)
     try:
@@ -183,12 +178,11 @@ def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
         mtime = 0.0
     _csv_cache[csv_path] = (df, mtime)
 
-
 def mark_success(
     csv_path: str,
     entry_id: str,
     item_url: str,
-    provider: Optional[str] = None,
+    provider: str | None = None,
 ) -> bool:
     """Mark a work as successfully downloaded.
     
@@ -242,11 +236,10 @@ def mark_success(
             logger.exception("Failed to mark entry %s as success", entry_id)
             return False
 
-
 def mark_failed(
     csv_path: str,
     entry_id: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> bool:
     """Mark a work as failed to download.
     
@@ -294,7 +287,6 @@ def mark_failed(
             logger.exception("Failed to mark entry %s as failed", entry_id)
             return False
 
-
 def mark_deferred(
     csv_path: str,
     entry_id: str,
@@ -331,7 +323,6 @@ def mark_deferred(
             logger.exception("Failed to mark entry %s as deferred", entry_id)
             return False
 
-
 def get_stats(csv_path: str) -> dict:
     """Get download statistics from the CSV.
     
@@ -355,20 +346,7 @@ def get_stats(csv_path: str) -> dict:
                 "pending": total,
             }
         
-        def classify(val):
-            if pd.isna(val):
-                return "pending"
-            if isinstance(val, bool):
-                return "completed" if val else "failed"
-            if isinstance(val, str):
-                lowered = val.strip().lower()
-                if lowered in ("true", "1", "yes", "y"):
-                    return "completed"
-                if lowered in ("false", "0", "no", "n"):
-                    return "failed"
-            return "pending"
-        
-        status_counts = df[STATUS_COL].apply(classify).value_counts()
+        status_counts = df[STATUS_COL].apply(_parse_status).value_counts()
         
         return {
             "total": total,
@@ -379,7 +357,6 @@ def get_stats(csv_path: str) -> dict:
     except Exception:
         logger.exception("Failed to get stats from CSV")
         return {"total": 0, "completed": 0, "failed": 0, "pending": 0}
-
 
 __all__ = [
     "ENTRY_ID_COL",

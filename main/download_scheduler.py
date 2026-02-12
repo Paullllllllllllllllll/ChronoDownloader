@@ -12,18 +12,14 @@ Key components:
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable
 
 from api.core.config import get_config
 from api.core.context import (
-    clear_current_entry,
-    clear_current_name_stem,
-    clear_current_provider,
-    clear_current_work,
+    clear_all_context,
     reset_counters,
     set_current_entry,
     set_current_name_stem,
@@ -33,7 +29,6 @@ from api.core.context import (
 from api.model import SearchResult
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class DownloadTask:
@@ -54,28 +49,27 @@ class DownloadTask:
         provider_map: Map of provider_key to (search_fn, download_fn, name)
         selection_config: Selection configuration dict
         base_output_dir: Base output directory
-        status: Optional[str] = None
-        item_url: Optional[str] = None
-        provider: Optional[str] = None
+        status: str | None = None
+        item_url: str | None = None
+        provider: str | None = None
     """
     work_id: str
-    entry_id: Optional[str]
+    entry_id: str | None
     title: str
-    creator: Optional[str]
+    creator: str | None
     work_dir: str
     work_stem: str
     selected_result: SearchResult
     provider_key: str
-    provider_tuple: Tuple[str, Callable, Callable, str]
+    provider_tuple: tuple[str, Callable, Callable, str]
     work_json_path: str
-    all_candidates: List[SearchResult] = field(default_factory=list)
-    provider_map: Dict[str, Tuple[Callable, Callable, str]] = field(default_factory=dict)
-    selection_config: Dict[str, Any] = field(default_factory=dict)
+    all_candidates: list[SearchResult] = field(default_factory=list)
+    provider_map: dict[str, tuple[Callable, Callable, str]] = field(default_factory=dict)
+    selection_config: dict[str, Any] = field(default_factory=dict)
     base_output_dir: str = "downloaded_works"
-    status: Optional[str] = None
-    item_url: Optional[str] = None
-    provider: Optional[str] = None
-
+    status: str | None = None
+    item_url: str | None = None
+    provider: str | None = None
 
 class ProviderSemaphoreManager:
     """Manages per-provider semaphores for concurrency control.
@@ -84,14 +78,14 @@ class ProviderSemaphoreManager:
     This ensures we don't overwhelm rate-limited providers even when using multiple workers.
     """
     
-    def __init__(self, config: Optional[Dict[str, int]] = None, default: int = 2):
+    def __init__(self, config: dict[str, int] | None = None, default: int = 2):
         """Initialize the semaphore manager.
         
         Args:
             config: Mapping of provider_key -> max concurrent downloads
             default: Default concurrency limit if provider not in config
         """
-        self._semaphores: Dict[str, threading.Semaphore] = {}
+        self._semaphores: dict[str, threading.Semaphore] = {}
         self._config = config or {}
         self._default = default
         self._lock = threading.Lock()
@@ -142,8 +136,7 @@ class ProviderSemaphoreManager:
         """
         return self._config.get(provider_key, self._default)
 
-
-def get_parallel_download_config() -> Dict[str, Any]:
+def get_parallel_download_config() -> dict[str, Any]:
     """Get parallel download configuration from config.json.
     
     Returns:
@@ -167,7 +160,6 @@ def get_parallel_download_config() -> Dict[str, Any]:
     
     return dl
 
-
 class DownloadScheduler:
     """Manages parallel download workers with graceful shutdown.
     
@@ -178,8 +170,8 @@ class DownloadScheduler:
     def __init__(
         self,
         max_workers: int = 4,
-        provider_limits: Optional[Dict[str, int]] = None,
-        on_complete: Optional[Callable[[DownloadTask, bool, Optional[Exception]], None]] = None,
+        provider_limits: dict[str, int] | None = None,
+        on_complete: Optional[Callable[[DownloadTask, bool, Exception | None], None]] = None,
         on_submit: Optional[Callable[[DownloadTask], None]] = None,
     ):
         """Initialize the scheduler.
@@ -197,8 +189,8 @@ class DownloadScheduler:
             self._provider_limits, 
             self._default_concurrency
         )
-        self._executor: Optional[ThreadPoolExecutor] = None
-        self._futures: Dict[Future, DownloadTask] = {}
+        self._executor: ThreadPoolExecutor | None = None
+        self._futures: dict[Future, DownloadTask] = {}
         self._on_complete = on_complete
         self._on_submit = on_submit
         self._shutdown_event = threading.Event()
@@ -253,7 +245,7 @@ class DownloadScheduler:
         self, 
         task: DownloadTask, 
         download_fn: Callable[[DownloadTask], bool]
-    ) -> Optional[Future]:
+    ) -> Future | None:
         """Submit a download task to the pool.
         
         Args:
@@ -304,7 +296,7 @@ class DownloadScheduler:
             return False
         
         provider = task.provider_key
-        error: Optional[Exception] = None
+        error: Exception | None = None
         success = False
         
         try:
@@ -329,22 +321,7 @@ class DownloadScheduler:
                     success = False
                 finally:
                     # Clear thread-local context
-                    try:
-                        clear_current_work()
-                    except Exception:
-                        pass
-                    try:
-                        clear_current_entry()
-                    except Exception:
-                        pass
-                    try:
-                        clear_current_provider()
-                    except Exception:
-                        pass
-                    try:
-                        clear_current_name_stem()
-                    except Exception:
-                        pass
+                    clear_all_context()
             finally:
                 # Always release semaphore
                 self._semaphores.release(provider)
@@ -372,7 +349,7 @@ class DownloadScheduler:
         
         return success
     
-    def wait_all(self, timeout: Optional[float] = None) -> List[Tuple[DownloadTask, bool, Optional[Exception]]]:
+    def wait_all(self, timeout: float | None = None) -> list[tuple[DownloadTask, bool, Exception | None]]:
         """Wait for all pending downloads to complete.
         
         Args:
@@ -381,14 +358,14 @@ class DownloadScheduler:
         Returns:
             List of (task, success, error) tuples
         """
-        results: List[Tuple[DownloadTask, bool, Optional[Exception]]] = []
+        results: list[tuple[DownloadTask, bool, Exception | None]] = []
         
         with self._lock:
             futures_copy = dict(self._futures)
         
         for future in as_completed(futures_copy.keys(), timeout=timeout):
             task = futures_copy[future]
-            error: Optional[Exception] = None
+            error: Exception | None = None
             success = False
             
             try:
@@ -405,7 +382,7 @@ class DownloadScheduler:
         
         return results
     
-    def get_pending_tasks(self) -> List[DownloadTask]:
+    def get_pending_tasks(self) -> list[DownloadTask]:
         """Get list of currently pending/running tasks.
         
         Returns:
@@ -419,7 +396,7 @@ class DownloadScheduler:
         self._shutdown_event.set()
         logger.info("Scheduler shutdown requested")
     
-    def shutdown(self, wait: bool = True, timeout: Optional[float] = None) -> None:
+    def shutdown(self, wait: bool = True, timeout: float | None = None) -> None:
         """Gracefully shutdown the scheduler.
         
         Args:
@@ -443,7 +420,7 @@ class DownloadScheduler:
                 self._failure_count
             )
     
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Get scheduler statistics.
         
         Returns:

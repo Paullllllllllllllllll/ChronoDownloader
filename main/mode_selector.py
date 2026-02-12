@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable
 
 # Ensure parent directory is in path for direct script execution
 if __package__ is None or __package__ == "":
@@ -21,12 +21,11 @@ from api.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
-
 def _detect_mode_and_parse_args(
     parser_factory: Callable[[], argparse.ArgumentParser],
     script_name: str,
-    config_path: Optional[str] = None,
-) -> Tuple[Dict[str, Any], bool, Optional[argparse.Namespace]]:
+    config_path: str | None = None,
+) -> tuple[dict[str, Any], bool, argparse.Namespace | None]:
     """Internal helper that performs mode detection and argument parsing.
     
     This function handles:
@@ -89,14 +88,13 @@ def _detect_mode_and_parse_args(
     
     return config, interactive_mode, args
 
-
 def run_with_mode_detection(
     interactive_handler: Callable[[], None],
-    cli_handler: Callable[[argparse.Namespace, Dict[str, Any]], None],
+    cli_handler: Callable[[argparse.Namespace, dict[str, Any]], None],
     parser_factory: Callable[[], argparse.ArgumentParser],
     script_name: str,
-    config_path: Optional[str] = None,
-) -> Tuple[Dict[str, Any], bool, Optional[argparse.Namespace]]:
+    config_path: str | None = None,
+) -> tuple[dict[str, Any], bool, argparse.Namespace | None]:
     """Route execution based on interactive_mode configuration.
     
     Args:
@@ -114,8 +112,7 @@ def run_with_mode_detection(
     """
     return _detect_mode_and_parse_args(parser_factory, script_name, config_path)
 
-
-def get_general_config() -> Dict[str, Any]:
+def get_general_config() -> dict[str, Any]:
     """Get general configuration section with defaults.
     
     Returns:

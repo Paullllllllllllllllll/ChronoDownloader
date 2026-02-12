@@ -1,24 +1,19 @@
+from __future__ import annotations
+
 import logging
 import urllib.parse
-from typing import List, Union
 
-from .utils import (
-    save_json,
-    download_file,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-)
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_file, download_iiif_renderings
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 
 logger = logging.getLogger(__name__)
 
 LOC_API_BASE_URL = "https://www.loc.gov/"
 
-
-def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search Library of Congress for works.
     
     Args:
@@ -50,7 +45,7 @@ def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> 
     if not isinstance(data, dict):
         return []
     
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
 
     def _extract_iiif_manifest(item: dict) -> str | None:
         iiif_manifest = item.get("iiif_manifest_url")
@@ -89,7 +84,7 @@ def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> 
             results.append(_item_to_search_result(item))
     return results
 
-def download_loc_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_loc_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download a Library of Congress work.
     
     Args:
@@ -99,14 +94,9 @@ def download_loc_work(item_data: Union[SearchResult, dict], output_folder: str) 
     Returns:
         True if download was successful, False otherwise
     """
-    if isinstance(item_data, SearchResult):
-        item_url = item_data.item_url or item_data.raw.get("url")
-        item_id = item_data.source_id or item_data.raw.get("id") or item_data.title or "unknown_item"
-        iiif_manifest_hint = item_data.iiif_manifest or item_data.raw.get("iiif_manifest")
-    else:
-        item_url = item_data.get("item_url")
-        item_id = item_data.get("id", item_data.get("title", "unknown_item"))
-        iiif_manifest_hint = item_data.get("iiif_manifest")
+    item_url = resolve_item_field(item_data, "item_url", attr="item_url")
+    item_id = resolve_item_id(item_data) or resolve_item_field(item_data, "title", attr="title", default="unknown_item")
+    iiif_manifest_hint = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")
     if not item_url:
         logger.warning("No item URL found for LOC item: %s", item_id)
         return False

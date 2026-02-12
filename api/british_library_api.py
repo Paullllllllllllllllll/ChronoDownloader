@@ -1,19 +1,15 @@
 """Connector for the British Library SRU and IIIF APIs."""
+from __future__ import annotations
 
 import logging
 import re
 import xml.etree.ElementTree as ET
-from typing import List, Union
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-)
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_iiif_renderings
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id
 from .query_helpers import escape_sparql_string, escape_sru_literal
 
 logger = logging.getLogger(__name__)
@@ -22,8 +18,7 @@ SRU_BASE_URL = "https://sru.bl.uk/SRU"
 IIIF_MANIFEST_BASE = "https://api.bl.uk/metadata/iiif/ark:/81055/{identifier}/manifest.json"
 BNB_SPARQL_URL = "https://bnb.data.bl.uk/sparql"
 
-
-def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> List[SearchResult]:
+def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> list[SearchResult]:
     """Fallback search using BNB SPARQL endpoint to discover BL identifiers.
 
     We look for works whose title contains the query, optionally filtered by creator
@@ -61,7 +56,7 @@ def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> Lis
         )
     except Exception:
         data = None
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     try:
         bindings = (data if isinstance(data, dict) else {}).get("results", {}).get("bindings", [])
         for b in bindings:
@@ -94,8 +89,7 @@ def _search_bnb_sparql(title: str, creator: str | None, max_results: int) -> Lis
         logger.exception("BNB SPARQL fallback parsing error")
     return results
 
-
-def search_british_library(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_british_library(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search the British Library using SRU; fallback to BNB SPARQL if needed."""
 
     q_title = escape_sru_literal(title)
@@ -116,7 +110,7 @@ def search_british_library(title: str, creator: str | None = None, max_results: 
     logger.info("Searching British Library (SRU) for: %s", title)
     response_text = make_request(SRU_BASE_URL, params=params, headers={"Accept": "application/xml,text/xml"})
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if isinstance(response_text, str):
         try:
             namespaces = {
@@ -159,15 +153,10 @@ def search_british_library(title: str, creator: str | None = None, max_results: 
         sparql_results = []
     return sparql_results
 
-
-def download_british_library_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_british_library_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download IIIF manifest and page images for a British Library item."""
 
-    identifier = None
-    if isinstance(item_data, SearchResult):
-        identifier = item_data.source_id or item_data.raw.get("identifier")
-    else:
-        identifier = item_data.get("identifier")
+    identifier = resolve_item_id(item_data, "identifier")
     if not identifier:
         logger.warning("No BL identifier provided for download.")
         return False

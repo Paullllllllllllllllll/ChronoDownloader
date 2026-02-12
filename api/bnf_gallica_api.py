@@ -6,20 +6,18 @@ Gallica digital library using SRU (Search/Retrieve via URL) and IIIF APIs.
 Gallica hosts millions of digitized documents including books, manuscripts,
 maps, periodicals, and more from the BnF collections.
 """
+from __future__ import annotations
+
 import logging
 import re
 import xml.etree.ElementTree as ET
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-    budget_exhausted,
-)
+from .core.budget import budget_exhausted
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_iiif_renderings
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id
 from .query_helpers import escape_sru_literal
 
 logger = logging.getLogger(__name__)
@@ -27,7 +25,6 @@ logger = logging.getLogger(__name__)
 # Gallica API endpoints
 SRU_BASE_URL = "https://gallica.bnf.fr/SRU"
 IIIF_MANIFEST_BASE_URL = "https://gallica.bnf.fr/iiif/ark:/12148/{ark_id}/manifest.json"
-
 
 def search_gallica(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search Gallica using its SRU API.
@@ -92,7 +89,6 @@ def search_gallica(title: str, creator: str | None = None, max_results: int = 3)
         logger.exception("Unexpected error during Gallica XML parsing: %s", e)
     return results
 
-
 def download_gallica_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download Gallica IIIF manifest and full-size page images.
 
@@ -107,11 +103,7 @@ def download_gallica_work(item_data: SearchResult | dict, output_folder: str) ->
     Returns:
         True if any files were downloaded, False otherwise
     """
-    ark_id = None
-    if isinstance(item_data, SearchResult):
-        ark_id = item_data.source_id or item_data.raw.get("ark_id")
-    else:
-        ark_id = item_data.get("ark_id")
+    ark_id = resolve_item_id(item_data, "ark_id")
     if not ark_id:
         logger.warning("No ark_id found in item data.")
         return False

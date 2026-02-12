@@ -11,7 +11,7 @@ Functions exported:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .utils import download_file, make_request
 
@@ -24,10 +24,9 @@ __all__ = [
 ]
 
 # Simple, process-local cache for IIIF info.json documents
-_INFO_JSON_CACHE: Dict[str, Dict[str, Any]] = {}
+_INFO_JSON_CACHE: dict[str, dict[str, Any]] = {}
 
-
-def _fetch_info_json(service_base: str) -> Optional[Dict[str, Any]]:
+def _fetch_info_json(service_base: str) -> dict[str, Any] | None:
     """Fetch and cache the IIIF Image API info.json for a service base.
 
     Args:
@@ -51,8 +50,7 @@ def _fetch_info_json(service_base: str) -> Optional[Dict[str, Any]]:
     
     return None
 
-
-def extract_image_service_bases(manifest: Dict[str, Any]) -> List[str]:
+def extract_image_service_bases(manifest: dict[str, Any]) -> list[str]:
     """Extract IIIF Image API service base URLs from a Presentation manifest.
 
     Supports both IIIF v2 and v3 structures. Duplicates are removed while
@@ -64,7 +62,7 @@ def extract_image_service_bases(manifest: Dict[str, Any]) -> List[str]:
     Returns:
         List of unique IIIF Image API service base URLs
     """
-    bases: List[str] = []
+    bases: list[str] = []
 
     # IIIF v2: sequences[0].canvases[].images[0].resource.service['@id'|'id']
     try:
@@ -137,7 +135,7 @@ def extract_image_service_bases(manifest: Dict[str, Any]) -> List[str]:
 
     # Deduplicate while preserving order
     seen: set[str] = set()
-    unique: List[str] = []
+    unique: list[str] = []
     for b in bases:
         if b not in seen and isinstance(b, str):
             seen.add(b)
@@ -145,8 +143,7 @@ def extract_image_service_bases(manifest: Dict[str, Any]) -> List[str]:
     
     return unique
 
-
-def extract_direct_image_urls(manifest: Dict[str, Any]) -> List[str]:
+def extract_direct_image_urls(manifest: dict[str, Any]) -> list[str]:
     """Extract direct image URLs from a Presentation manifest.
     
     Some manifests (especially simplified IIIF v3) provide direct image URLs
@@ -158,7 +155,7 @@ def extract_direct_image_urls(manifest: Dict[str, Any]) -> List[str]:
     Returns:
         List of direct image URLs
     """
-    urls: List[str] = []
+    urls: list[str] = []
     
     # IIIF v2: sequences[0].canvases[].images[0].resource['@id'|'id']
     try:
@@ -206,7 +203,7 @@ def extract_direct_image_urls(manifest: Dict[str, Any]) -> List[str]:
     
     # Deduplicate while preserving order
     seen: set[str] = set()
-    unique: List[str] = []
+    unique: list[str] = []
     for u in urls:
         if u not in seen:
             seen.add(u)
@@ -214,10 +211,9 @@ def extract_direct_image_urls(manifest: Dict[str, Any]) -> List[str]:
     
     return unique
 
-
 def image_url_candidates(
-    service_base: str, info: Optional[Dict[str, Any]] = None
-) -> List[str]:
+    service_base: str, info: dict[str, Any] | None = None
+) -> list[str]:
     """Return a list of likely IIIF Image API URLs for a service base.
 
     Includes variants compatible with common v2 and v3 servers. If `info` (info.json)
@@ -231,7 +227,7 @@ def image_url_candidates(
         List of candidate image URLs to try
     """
     b = service_base.rstrip("/")
-    candidates: List[str] = [
+    candidates: list[str] = [
         f"{b}/full/full/0/default.jpg",
         f"{b}/full/max/0/default.jpg",
         f"{b}/full/pct:100/0/default.jpg",
@@ -279,7 +275,7 @@ def image_url_candidates(
             # If server advertises PNG support, add .png alternatives up front
             fmts = info.get("formats") or []
             if isinstance(fmts, list) and any(str(x).lower() == "png" for x in fmts):
-                pngs: List[str] = []
+                pngs: list[str] = []
                 for u in candidates:
                     if u.endswith(".jpg"):
                         pngs.append(u[:-4] + ".png")
@@ -290,14 +286,13 @@ def image_url_candidates(
     
     # Deduplicate while preserving order
     seen: set[str] = set()
-    uniq: List[str] = []
+    uniq: list[str] = []
     for u in candidates:
         if u not in seen:
             seen.add(u)
             uniq.append(u)
     
     return uniq
-
 
 def download_one_from_service(
     service_base: str, output_folder: str, filename: str

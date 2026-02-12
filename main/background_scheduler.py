@@ -15,13 +15,11 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable
 
 from api.core.config import get_config
 from api.core.context import (
-    clear_current_entry,
-    clear_current_provider,
-    clear_current_work,
+    clear_all_context,
     set_current_entry,
     set_current_provider,
     set_current_work,
@@ -36,7 +34,6 @@ logger = logging.getLogger(__name__)
 # Default check interval (15 minutes)
 DEFAULT_CHECK_INTERVAL_MINUTES = 15
 
-
 class BackgroundRetryScheduler:
     """Background thread for retrying deferred downloads.
     
@@ -44,7 +41,7 @@ class BackgroundRetryScheduler:
     when their quota reset times have passed.
     """
     
-    _instance: Optional["BackgroundRetryScheduler"] = None
+    _instance: "BackgroundRetryScheduler" | None = None
     _lock = threading.Lock()
     
     def __new__(cls) -> "BackgroundRetryScheduler":
@@ -61,7 +58,7 @@ class BackgroundRetryScheduler:
         if getattr(self, "_initialized", False):
             return
         
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
         self._pause_event.set()  # Not paused by default
@@ -75,11 +72,11 @@ class BackgroundRetryScheduler:
         self._enabled = bool(deferred_cfg.get("background_enabled", True))
         
         # Components
-        self._queue: Optional[DeferredQueue] = None
-        self._quota_manager: Optional[QuotaManager] = None
+        self._queue: DeferredQueue | None = None
+        self._quota_manager: QuotaManager | None = None
         
         # Provider download functions (set during integration)
-        self._provider_download_fns: Dict[str, Callable] = {}
+        self._provider_download_fns: dict[str, Callable] = {}
         
         # Statistics
         self._stats_lock = threading.Lock()
@@ -203,7 +200,7 @@ class BackgroundRetryScheduler:
         """Check if scheduler is paused."""
         return not self._pause_event.is_set()
     
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Get scheduler statistics.
         
         Returns:
@@ -336,18 +333,7 @@ class BackgroundRetryScheduler:
             try:
                 success = download_fn(search_result, item.work_dir)
             finally:
-                try:
-                    clear_current_work()
-                except Exception:
-                    pass
-                try:
-                    clear_current_entry()
-                except Exception:
-                    pass
-                try:
-                    clear_current_provider()
-                except Exception:
-                    pass
+                clear_all_context()
             
             if success:
                 # Record quota usage
@@ -398,7 +384,7 @@ class BackgroundRetryScheduler:
                     self._on_retry_failure(item, str(e))
             return False
     
-    def _reconstruct_search_result(self, item: DeferredItem) -> Optional[SearchResult]:
+    def _reconstruct_search_result(self, item: DeferredItem) -> SearchResult | None:
         """Reconstruct a SearchResult from stored DeferredItem data.
         
         Args:
@@ -423,7 +409,6 @@ class BackgroundRetryScheduler:
             logger.warning("Failed to reconstruct SearchResult for %s: %s", item.title, e)
             return None
 
-
 def get_background_scheduler() -> BackgroundRetryScheduler:
     """Get the singleton BackgroundRetryScheduler instance.
     
@@ -431,7 +416,6 @@ def get_background_scheduler() -> BackgroundRetryScheduler:
         BackgroundRetryScheduler instance
     """
     return BackgroundRetryScheduler()
-
 
 def start_background_scheduler() -> bool:
     """Convenience function to start the background scheduler.
@@ -442,7 +426,6 @@ def start_background_scheduler() -> bool:
     scheduler = get_background_scheduler()
     return scheduler.start()
 
-
 def stop_background_scheduler(wait: bool = True) -> None:
     """Convenience function to stop the background scheduler.
     
@@ -451,7 +434,6 @@ def stop_background_scheduler(wait: bool = True) -> None:
     """
     scheduler = get_background_scheduler()
     scheduler.stop(wait=wait)
-
 
 __all__ = [
     "BackgroundRetryScheduler",

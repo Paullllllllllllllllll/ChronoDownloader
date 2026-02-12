@@ -15,14 +15,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_CONFIG_CACHE: dict[str, Any] | None = None
 
-
-def get_config(force_reload: bool = False) -> Dict[str, Any]:
+def get_config(force_reload: bool = False) -> dict[str, Any]:
     """Load project configuration JSON.
 
     Looks for the path in CHRONO_CONFIG_PATH env var; falls back to 'config.json' in CWD.
@@ -47,7 +46,6 @@ def get_config(force_reload: bool = False) -> Dict[str, Any]:
         _CONFIG_CACHE = {}
     
     return _CONFIG_CACHE
-
 
 def get_provider_setting(provider_key: str, setting: str, default: Any = None) -> Any:
     """Retrieve a provider-specific setting from the configuration.
@@ -74,8 +72,7 @@ def get_provider_setting(provider_key: str, setting: str, default: Any = None) -
     
     return ps.get(key, {}).get(setting, default)
 
-
-def get_download_config() -> Dict[str, Any]:
+def get_download_config() -> dict[str, Any]:
     """Get download-related configuration section.
     
     Returns:
@@ -94,23 +91,19 @@ def get_download_config() -> Dict[str, Any]:
     
     return dl
 
-
 def prefer_pdf_over_images() -> bool:
     """Check if PDF downloads should be preferred over page images."""
     return bool(get_download_config().get("prefer_pdf_over_images", True))
-
 
 def overwrite_existing() -> bool:
     """Check if existing files should be overwritten."""
     return bool(get_download_config().get("overwrite_existing", False))
 
-
 def include_metadata() -> bool:
     """Check if metadata files should be saved."""
     return bool(get_download_config().get("include_metadata", True))
 
-
-def get_network_config(provider_key: Optional[str]) -> Dict[str, Any]:
+def get_network_config(provider_key: str | None) -> dict[str, Any]:
     """Return network policy for a provider, with sensible defaults.
     
     Args:
@@ -149,8 +142,7 @@ def get_network_config(provider_key: Optional[str]) -> Dict[str, Any]:
     
     return net
 
-
-def get_download_limits() -> Dict[str, Any]:
+def get_download_limits() -> dict[str, Any]:
     """Get download limits configuration section.
     
     Returns:
@@ -158,7 +150,6 @@ def get_download_limits() -> Dict[str, Any]:
     """
     cfg = get_config()
     return dict(cfg.get("download_limits", {}) or {})
-
 
 def get_max_pages(provider_key: str) -> int | None:
     """Get max pages limit for a provider.
@@ -174,7 +165,6 @@ def get_max_pages(provider_key: str) -> int | None:
         return val
     return None
 
-
 def get_resume_mode() -> str:
     """Get the resume mode for processing works.
     
@@ -188,8 +178,7 @@ def get_resume_mode() -> str:
     """
     return str(get_download_config().get("resume_mode", "skip_completed"))
 
-
-def get_min_title_score(provider_key: Optional[str] = None, default: float = 50.0) -> float:
+def get_min_title_score(provider_key: str | None = None, default: float = 50.0) -> float:
     """Get minimum title score threshold, with optional per-provider override.
     
     Checks provider_settings.<provider_key>.min_title_score first,

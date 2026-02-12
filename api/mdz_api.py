@@ -1,24 +1,19 @@
 """Connector for the Münchener DigitalisierungsZentrum (MDZ) API."""
+from __future__ import annotations
 
 import logging
 import re
 import urllib.parse
-from typing import List, Union
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-    budget_exhausted,
-)
-from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .download_helpers import download_page_images
+from .iiif import extract_image_service_bases
+from .core.config import prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_iiif_renderings
+from .model import SearchResult, convert_to_searchresult, resolve_item_id
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
-
 
 # MDZ API endpoints (Solr endpoints deprecated as of 2024/2025)
 # Primary search endpoint is the web API which returns JSON
@@ -26,7 +21,7 @@ MDZ_WEB_SEARCH_URL = "https://www.digitale-sammlungen.de/api/search"
 IIIF_MANIFEST_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v2/{object_id}/manifest"
 IIIF_MANIFEST_V3_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v3/{object_id}/manifest"
 
-def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search MDZ using the public JSON search endpoint, with HTML/Solr fallbacks.
 
     Primary endpoint: /api/search (same domain as the website), returns JSON with 'docs'.
@@ -42,7 +37,7 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
         "ocrContext": 1,
     }
     data = make_request(MDZ_WEB_SEARCH_URL, params=params)
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if isinstance(data, dict) and data.get("docs"):
         for doc in data["docs"]:
             try:
@@ -97,8 +92,7 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
     # Legacy Solr endpoints are deprecated and removed as of 2024/2025
     return results
 
-
-def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_mdz_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download the IIIF manifest and page images for an MDZ item.
 
     - Fetches the IIIF Presentation manifest (v2 or v3).
@@ -106,10 +100,7 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bo
     - Downloads up to DEFAULT_MAX_PAGES (override via env MDZ_MAX_PAGES) images using the IIIF Image API.
     """
 
-    if isinstance(item_data, SearchResult):
-        object_id = item_data.source_id or item_data.raw.get("id")
-    else:
-        object_id = item_data.get("id")
+    object_id = resolve_item_id(item_data)
     if not object_id:
         logger.warning("No MDZ object id found in item data.")
         return False
@@ -138,43 +129,11 @@ def download_mdz_work(item_data: Union[SearchResult, dict], output_folder) -> bo
     except Exception:
         logger.exception("MDZ: error while downloading manifest renderings for %s", object_id)
 
-    # Extract per-canvas Image API service base URLs
+    # Extract per-canvas Image API service base URLs and download
     image_service_bases = extract_image_service_bases(manifest)
 
     if not image_service_bases:
         logger.info("No IIIF image services found in MDZ manifest for %s", object_id)
         return True
 
-    # Download images (limit pages by config provider_settings.mdz.max_pages; 0 or missing = all)
-    total_pages = len(image_service_bases)
-    max_pages = get_max_pages("mdz")
-    to_download = image_service_bases[:max_pages] if max_pages and max_pages > 0 else image_service_bases
-    logger.info("MDZ: downloading %d/%d page images for %s", len(to_download), total_pages, object_id)
-    success_any = False
-    for idx, svc in enumerate(to_download, start=1):
-        # Stop immediately if the global download budget has been exhausted
-        if budget_exhausted():
-            logger.warning(
-                "Download budget exhausted; stopping MDZ downloads at %d/%d pages for %s",
-                idx - 1,
-                len(to_download),
-                object_id,
-            )
-            break
-        try:
-            filename = f"mdz_{object_id}_p{idx:05d}.jpg"
-            if download_one_from_service(svc, output_folder, filename):
-                success_any = True
-            else:
-                # If budget was hit during the attempt, stop looping to avoid noisy retries
-                if budget_exhausted():
-                    logger.warning(
-                        "Download budget hit while downloading MDZ %s; stopping further page downloads.",
-                        object_id,
-                    )
-                    break
-                logger.warning("Failed to download MDZ image for %s from %s", object_id, svc)
-        except Exception:
-            logger.exception("Failed to download MDZ image for %s from %s", object_id, svc)
-
-    return success_any
+    return download_page_images(image_service_bases, output_folder, "mdz", object_id)

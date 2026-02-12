@@ -7,8 +7,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 class QuotaDeferredException(Exception):
     """Raised when a provider's quota is exhausted and download should be deferred.
@@ -25,8 +24,8 @@ class QuotaDeferredException(Exception):
     def __init__(
         self,
         provider: str,
-        reset_time: Optional[datetime] = None,
-        message: Optional[str] = None,
+        reset_time: datetime | None = None,
+        message: str | None = None,
     ):
         self.provider = provider
         self.reset_time = reset_time
@@ -36,7 +35,6 @@ class QuotaDeferredException(Exception):
     def __repr__(self) -> str:
         reset_str = self.reset_time.isoformat() if self.reset_time else "unknown"
         return f"QuotaDeferredException(provider={self.provider!r}, reset_time={reset_str})"
-
 
 @dataclass
 class SearchResult:
@@ -57,16 +55,16 @@ class SearchResult:
 
     provider: str
     title: str
-    creators: List[str] = field(default_factory=list)
-    date: Optional[str] = None
-    source_id: Optional[str] = None
-    iiif_manifest: Optional[str] = None
-    item_url: Optional[str] = None
-    thumbnail_url: Optional[str] = None
-    provider_key: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict)
+    creators: list[str] = field(default_factory=list)
+    date: str | None = None
+    source_id: str | None = None
+    iiif_manifest: str | None = None
+    item_url: str | None = None
+    thumbnail_url: str | None = None
+    provider_key: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self, include_raw: bool = False) -> Dict[str, Any]:
+    def to_dict(self, include_raw: bool = False) -> dict[str, Any]:
         """Convert SearchResult to dictionary.
 
         Args:
@@ -80,8 +78,7 @@ class SearchResult:
             d.pop("raw", None)
         return d
 
-
-def _as_list(value: Any) -> List[str]:
+def _as_list(value: Any) -> list[str]:
     """Convert various input types to a list of strings.
 
     Handles None, strings (with comma splitting), lists, and other types.
@@ -106,8 +103,76 @@ def _as_list(value: Any) -> List[str]:
     
     return [str(value)]
 
+def resolve_item_field(
+    item_data: SearchResult | dict,
+    raw_key: str,
+    *,
+    attr: str | None = None,
+    default: Any = None,
+) -> Any:
+    """Extract a field from a SearchResult or plain dict uniformly.
 
-def convert_to_searchresult(provider: str, data: Dict[str, Any]) -> SearchResult:
+    For a ``SearchResult``, the function first checks the attribute given by
+    *attr* (defaults to *raw_key*) and then falls back to ``raw[raw_key]``.
+    For a plain ``dict``, it simply returns ``dict.get(raw_key, default)``.
+
+    This eliminates the repeated ``isinstance(item_data, SearchResult)``
+    branching found in every provider download function.
+
+    Args:
+        item_data: A ``SearchResult`` or a provider-specific dict.
+        raw_key: Key to look up in the raw dict (or plain dict).
+        attr: SearchResult attribute name to try first. Defaults to *raw_key*.
+        default: Value returned when the field is missing everywhere.
+
+    Returns:
+        Resolved value or *default*.
+    """
+    if isinstance(item_data, SearchResult):
+        sr_attr = attr or raw_key
+        value = getattr(item_data, sr_attr, None)
+        if value is not None:
+            return value
+        return item_data.raw.get(raw_key, default)
+    if isinstance(item_data, dict):
+        return item_data.get(raw_key, default)
+    return default
+
+def resolve_item_id(
+    item_data: SearchResult | dict,
+    *raw_keys: str,
+) -> str | None:
+    """Extract the primary identifier from a SearchResult or dict.
+
+    For a ``SearchResult`` the lookup order is:
+    ``source_id`` → ``raw[key]`` for each *raw_key* in order.
+    For a plain ``dict``: ``dict[key]`` for each *raw_key* in order.
+
+    Args:
+        item_data: A ``SearchResult`` or a provider-specific dict.
+        *raw_keys: One or more dict keys to try (e.g. ``"id"``, ``"identifier"``).
+            Defaults to ``("id",)`` when omitted.
+
+    Returns:
+        The first non-empty string found, or ``None``.
+    """
+    keys = raw_keys or ("id",)
+    if isinstance(item_data, SearchResult):
+        if item_data.source_id:
+            return item_data.source_id
+        for key in keys:
+            val = item_data.raw.get(key)
+            if val:
+                return str(val)
+        return None
+    if isinstance(item_data, dict):
+        for key in keys:
+            val = item_data.get(key)
+            if val:
+                return str(val)
+    return None
+
+def convert_to_searchresult(provider: str, data: dict[str, Any]) -> SearchResult:
     """Convert a provider-specific search result dict into a SearchResult.
 
     The original dict is preserved in .raw for downstream compatibility.

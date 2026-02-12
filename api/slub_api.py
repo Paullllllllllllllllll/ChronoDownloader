@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Union
 
 from .download_helpers import download_iiif_manifest_and_images
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 from .query_helpers import escape_sru_literal
-from .utils import make_request, save_json
+from .core.network import make_request
+from .utils import save_json
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,6 @@ SEARCH_URL = "https://data.slub-dresden.de/search"
 SOURCE_URL = "https://data.slub-dresden.de/source/kxp-de14/{record_id}"
 IIIF_MANIFEST_URL = "https://iiif.slub-dresden.de/iiif/2/{ppn}/manifest.json"
 DIGITAL_ITEM_URL = "https://digital.slub-dresden.de/id{ppn}"
-
 
 def _extract_title(item: dict) -> str:
     title = item.get("preferredName") or ""
@@ -30,7 +29,6 @@ def _extract_title(item: dict) -> str:
         title = item.get("title")
     return title or "N/A"
 
-
 def _extract_creator(item: dict) -> str:
     contrib = item.get("contributor") or []
     if isinstance(contrib, list):
@@ -39,13 +37,11 @@ def _extract_creator(item: dict) -> str:
                 return str(c.get("name"))
     return "N/A"
 
-
 def _extract_record_id(item: dict) -> str | None:
     record_id = item.get("@id") or item.get("id")
     if record_id and isinstance(record_id, str):
         return record_id.rstrip("/").split("/")[-1]
     return None
-
 
 def _extract_ppn_from_url(url: str | None) -> str | None:
     if not url or not isinstance(url, str):
@@ -57,7 +53,6 @@ def _extract_ppn_from_url(url: str | None) -> str | None:
     if match:
         return match.group(1)
     return None
-
 
 def _resolve_ppn_from_source(record_id: str, output_folder: str) -> tuple[str | None, str | None]:
     """Fetch source record and extract digital URL + PPN."""
@@ -71,7 +66,7 @@ def _resolve_ppn_from_source(record_id: str, output_folder: str) -> tuple[str | 
     if not isinstance(data, dict):
         return None, None
 
-    urls: List[str] = []
+    urls: list[str] = []
     for entry in data.get("856", []) or []:
         if isinstance(entry, dict):
             for subfield in entry.values():
@@ -83,8 +78,7 @@ def _resolve_ppn_from_source(record_id: str, output_folder: str) -> tuple[str | 
     ppn = _extract_ppn_from_url(digital_url)
     return ppn, digital_url
 
-
-def search_slub(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_slub(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search SLUB LOD API for digitized resources."""
     q = title if not creator else f"{title} {creator}"
     q = escape_sru_literal(q)
@@ -100,7 +94,7 @@ def search_slub(title: str, creator: str | None = None, max_results: int = 3) ->
     if not isinstance(data, list):
         return []
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     for item in data:
         if not isinstance(item, dict):
             continue
@@ -125,15 +119,10 @@ def search_slub(title: str, creator: str | None = None, max_results: int = 3) ->
 
     return results
 
-
-def download_slub_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_slub_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download SLUB item via IIIF manifest derived from the source record."""
-    if isinstance(item_data, SearchResult):
-        record_id = item_data.source_id or item_data.raw.get("id")
-        manifest_url = item_data.iiif_manifest or item_data.raw.get("iiif_manifest")
-    else:
-        record_id = item_data.get("id")
-        manifest_url = item_data.get("iiif_manifest")
+    record_id = resolve_item_id(item_data)
+    manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")
 
     if not manifest_url:
         ppn = None

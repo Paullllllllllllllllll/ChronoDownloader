@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -26,7 +26,6 @@ from .config import get_network_config
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # Circuit Breaker Pattern
 # =============================================================================
@@ -36,7 +35,6 @@ class CircuitState(Enum):
     CLOSED = "closed"      # Normal operation
     OPEN = "open"          # Provider disabled due to failures
     HALF_OPEN = "half_open"  # Testing if provider recovered
-
 
 @dataclass
 class CircuitBreaker:
@@ -116,12 +114,10 @@ class CircuitBreaker:
         elapsed = time.monotonic() - self.opened_at
         return max(0.0, self.cooldown_seconds - elapsed)
 
-
 # Per-provider circuit breakers
-_CIRCUIT_BREAKERS: Dict[str, CircuitBreaker] = {}
+_CIRCUIT_BREAKERS: dict[str, CircuitBreaker] = {}
 
-
-def get_circuit_breaker(provider_key: Optional[str]) -> Optional[CircuitBreaker]:
+def get_circuit_breaker(provider_key: str | None) -> CircuitBreaker | None:
     """Get or create a circuit breaker for a provider.
     
     Args:
@@ -153,8 +149,7 @@ def get_circuit_breaker(provider_key: Optional[str]) -> Optional[CircuitBreaker]
     
     return cb
 
-
-def is_provider_available(provider_key: Optional[str]) -> bool:
+def is_provider_available(provider_key: str | None) -> bool:
     """Check if a provider is currently available (circuit not open).
     
     Args:
@@ -168,8 +163,7 @@ def is_provider_available(provider_key: Optional[str]) -> bool:
         return True
     return cb.allow_request()
 
-
-def get_provider_cooldown(provider_key: Optional[str]) -> float:
+def get_provider_cooldown(provider_key: str | None) -> float:
     """Get remaining cooldown time for a provider.
     
     Args:
@@ -184,10 +178,10 @@ def get_provider_cooldown(provider_key: Optional[str]) -> float:
     return cb.time_until_retry()
 
 # Global session (lazy-initialized)
-_SESSION: Optional[requests.Session] = None
+_SESSION: requests.Session | None = None
 
 # Map URL hostnames to provider keys for rate limiting and policies
-PROVIDER_HOST_MAP: Dict[str, tuple[str, ...]] = {
+PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
     "gallica": ("gallica.bnf.fr",),
     "british_library": ("api.bl.uk", "sru.bl.uk", "iiif.bl.uk", "access.bl.uk", "bnb.data.bl.uk"),
     "mdz": ("api.digitale-sammlungen.de", "www.digitale-sammlungen.de", "digitale-sammlungen.de"),
@@ -211,7 +205,6 @@ PROVIDER_HOST_MAP: Dict[str, tuple[str, ...]] = {
         "oai.sbb.berlin",
     ),
 }
-
 
 class RateLimiter:
     """Simple per-provider rate limiter with jitter, using monotonic time."""
@@ -238,17 +231,14 @@ class RateLimiter:
         
         self._last_ts = now
 
-
 # Per-provider rate limiter instances
-_RATE_LIMITERS: Dict[str, RateLimiter] = {}
-
+_RATE_LIMITERS: dict[str, RateLimiter] = {}
 
 # =============================================================================
 # Rate Limiter Functions
 # =============================================================================
 
-
-def get_provider_for_url(url: str) -> Optional[str]:
+def get_provider_for_url(url: str) -> str | None:
     """Determine the provider key for a given URL.
     
     Args:
@@ -277,8 +267,7 @@ def get_provider_for_url(url: str) -> Optional[str]:
     
     return None
 
-
-def get_rate_limiter(provider_key: Optional[str]) -> Optional[RateLimiter]:
+def get_rate_limiter(provider_key: str | None) -> RateLimiter | None:
     """Get or create a rate limiter for a provider.
     
     Args:
@@ -300,7 +289,6 @@ def get_rate_limiter(provider_key: Optional[str]) -> Optional[RateLimiter]:
         _RATE_LIMITERS[provider_key] = rl
     
     return rl
-
 
 def build_session() -> requests.Session:
     """Build a configured requests session with retries and default headers.
@@ -347,7 +335,6 @@ def build_session() -> requests.Session:
     
     return session
 
-
 def get_session() -> requests.Session:
     """Get the global HTTP session (lazy initialization).
     
@@ -359,13 +346,12 @@ def get_session() -> requests.Session:
         _SESSION = build_session()
     return _SESSION
 
-
 def make_request(
     url: str,
-    params: Optional[Dict] = None,
-    headers: Optional[Dict] = None,
+    params: Dict | None = None,
+    headers: Dict | None = None,
     timeout: int = 15,
-) -> Optional[Union[Dict, str, bytes]]:
+) -> Dict | str | bytes | None:
     """HTTP GET with centralized per-provider pacing, backoff, and circuit breaker.
     
     Args:
@@ -574,13 +560,12 @@ def make_request(
     logger.error("Giving up after %d attempts for %s", max_attempts, url)
     return None
 
-
 def make_json_request(
     url: str,
-    params: Optional[Dict] = None,
-    headers: Optional[Dict] = None,
+    params: Dict | None = None,
+    headers: Dict | None = None,
     timeout: int = 15,
-) -> Dict[str, Any] | None:
+) -> dict[str, Any] | None:
     """HTTP GET expecting a JSON response, with type-safe return.
     
     This is a convenience wrapper around make_request() that returns only

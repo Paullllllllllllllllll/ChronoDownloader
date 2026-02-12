@@ -24,12 +24,11 @@ import logging
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from api.core.config import get_config, get_provider_setting
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class ProviderQuota:
@@ -47,15 +46,15 @@ class ProviderQuota:
     daily_limit: int = 10
     reset_hours: int = 24
     downloads_used: int = 0
-    period_start: Optional[str] = None
-    exhausted_at: Optional[str] = None
+    period_start: str | None = None
+    exhausted_at: str | None = None
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ProviderQuota":
+    def from_dict(cls, data: dict[str, Any]) -> "ProviderQuota":
         """Create from dictionary."""
         return cls(
             provider_key=data.get("provider_key", "unknown"),
@@ -66,7 +65,7 @@ class ProviderQuota:
             exhausted_at=data.get("exhausted_at"),
         )
     
-    def get_reset_time(self) -> Optional[datetime]:
+    def get_reset_time(self) -> datetime | None:
         """Get the datetime when quota period will reset.
         
         Uses period_start + reset_hours for consistent rolling window behavior.
@@ -113,7 +112,6 @@ class ProviderQuota:
         """
         return self.seconds_until_reset() <= 0
 
-
 class QuotaManager:
     """Centralized manager for provider quotas.
     
@@ -121,10 +119,10 @@ class QuotaManager:
     and persists state to disk.
     """
     
-    _instance: Optional["QuotaManager"] = None
+    _instance: "QuotaManager" | None = None
     _lock = threading.Lock()
     
-    def __new__(cls, state_file: Optional[str] = None) -> "QuotaManager":
+    def __new__(cls, state_file: str | None = None) -> "QuotaManager":
         """Singleton pattern - only one QuotaManager instance."""
         with cls._lock:
             if cls._instance is None:
@@ -133,7 +131,7 @@ class QuotaManager:
                 cls._instance = instance
             return cls._instance
     
-    def __init__(self, state_file: Optional[str] = None):
+    def __init__(self, state_file: str | None = None):
         """Initialize the quota manager.
         
         Args:
@@ -142,7 +140,7 @@ class QuotaManager:
         if getattr(self, "_initialized", False):
             return
         
-        self._quotas: Dict[str, ProviderQuota] = {}
+        self._quotas: dict[str, ProviderQuota] = {}
         self._data_lock = threading.RLock()
         self._state_manager = None  # Lazy init to avoid circular imports
         
@@ -270,7 +268,7 @@ class QuotaManager:
         
         return False
     
-    def can_download(self, provider_key: str) -> Tuple[bool, Optional[float]]:
+    def can_download(self, provider_key: str) -> tuple[bool, float | None]:
         """Check if a download is allowed for a provider.
         
         Args:
@@ -333,7 +331,7 @@ class QuotaManager:
             self._save_state()
             return max(0, remaining)
     
-    def get_quota_status(self, provider_key: str) -> Dict[str, Any]:
+    def get_quota_status(self, provider_key: str) -> dict[str, Any]:
         """Get current quota status for a provider.
         
         Args:
@@ -356,14 +354,14 @@ class QuotaManager:
                 "seconds_until_reset": quota.seconds_until_reset(),
             }
     
-    def get_next_reset(self) -> Optional[Tuple[str, datetime]]:
+    def get_next_reset(self) -> tuple[str, datetime] | None:
         """Get the next quota reset time across all providers.
         
         Returns:
             Tuple of (provider_key, reset_datetime) or None if no quotas exhausted
         """
         with self._data_lock:
-            earliest: Optional[Tuple[str, datetime]] = None
+            earliest: tuple[str, datetime] | None = None
             
             for provider_key, quota in self._quotas.items():
                 if quota.is_exhausted():
@@ -374,7 +372,7 @@ class QuotaManager:
             
             return earliest
     
-    def get_exhausted_providers(self) -> List[str]:
+    def get_exhausted_providers(self) -> list[str]:
         """Get list of providers with exhausted quotas.
         
         Returns:
@@ -429,7 +427,7 @@ class QuotaManager:
         )
         return daily_limit is not None
     
-    def get_quota_limited_providers(self) -> List[str]:
+    def get_quota_limited_providers(self) -> list[str]:
         """Get list of all providers with quota limits enabled.
         
         Returns:
@@ -445,7 +443,6 @@ class QuotaManager:
         
         return quota_providers
 
-
 def get_quota_manager() -> QuotaManager:
     """Get the singleton QuotaManager instance.
     
@@ -453,7 +450,6 @@ def get_quota_manager() -> QuotaManager:
         QuotaManager instance
     """
     return QuotaManager()
-
 
 __all__ = [
     "QuotaManager",

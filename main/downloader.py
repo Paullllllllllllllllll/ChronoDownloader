@@ -19,9 +19,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-import pandas as pd
+from typing import Any
 
 # Ensure parent directory is in path for direct script execution
 if __package__ is None or __package__ == "":
@@ -31,7 +29,7 @@ from main import pipeline
 from main.mode_selector import run_with_mode_detection
 from main.interactive import run_interactive
 from main.execution import run_batch_downloads, process_direct_iiif
-from main.background_scheduler import get_background_scheduler, stop_background_scheduler
+from main.background_scheduler import get_background_scheduler
 from main.deferred_queue import get_deferred_queue
 from main.quota_manager import get_quota_manager
 from main.unified_csv import (
@@ -40,8 +38,6 @@ from main.unified_csv import (
     get_stats,
     TITLE_COL,
 )
-from api import utils
-
 
 def create_cli_parser() -> argparse.ArgumentParser:
     """Create argument parser for CLI mode.
@@ -150,8 +146,7 @@ Examples:
     
     return parser
 
-
-def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
+def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> None:
     """Run the downloader in CLI mode.
     
     Supports both sequential and parallel download modes based on config.
@@ -301,10 +296,9 @@ def run_cli(args: argparse.Namespace, config: Dict[str, Any]) -> None:
     
     logger.info("Downloader finished.")
 
-
 def _run_direct_iiif_cli(
     args: argparse.Namespace,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     logger: logging.Logger,
 ) -> None:
     """Handle --iiif CLI invocations.
@@ -364,7 +358,6 @@ def _run_direct_iiif_cli(
         "Direct IIIF batch complete: %d processed, %d succeeded, %d failed",
         len(urls), succeeded, failed,
     )
-
 
 def show_quota_status() -> None:
     """Display quota and deferred queue status."""
@@ -440,7 +433,6 @@ def show_quota_status() -> None:
     
     print("\n" + "=" * 60 + "\n")
 
-
 def cleanup_deferred_queue() -> None:
     """Remove completed items from deferred queue."""
     queue = get_deferred_queue()
@@ -457,7 +449,6 @@ def cleanup_deferred_queue() -> None:
     pending = counts_after.get("pending", 0) + counts_after.get("retrying", 0)
     failed = counts_after.get("failed", 0)
     print(f"Remaining: {pending} pending, {failed} failed")
-
 
 def main() -> None:
     """Main entry point supporting both interactive and CLI modes."""
@@ -503,7 +494,6 @@ def main() -> None:
         logging.exception("Unexpected error: %s", e)
         print(f"Error: {e}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

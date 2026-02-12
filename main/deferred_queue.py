@@ -24,7 +24,7 @@ import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Iterator
 
 from api.core.config import get_config
 
@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 # Legacy constant (kept for backward compatibility)
 DEFAULT_QUEUE_FILE = ".deferred_queue.json"
-
 
 @dataclass
 class DeferredItem:
@@ -59,28 +58,28 @@ class DeferredItem:
     """
     id: str
     title: str
-    creator: Optional[str]
-    entry_id: Optional[str]
+    creator: str | None
+    entry_id: str | None
     provider_key: str
     provider_name: str
-    source_id: Optional[str]
+    source_id: str | None
     work_dir: str
     base_output_dir: str
-    item_url: Optional[str] = None
-    deferred_at: Optional[str] = None
-    reset_time: Optional[str] = None
+    item_url: str | None = None
+    deferred_at: str | None = None
+    reset_time: str | None = None
     retry_count: int = 0
-    last_retry_at: Optional[str] = None
+    last_retry_at: str | None = None
     status: str = "pending"
-    error_message: Optional[str] = None
-    raw_data: Dict[str, Any] = field(default_factory=dict)
+    error_message: str | None = None
+    raw_data: dict[str, Any] = field(default_factory=dict)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DeferredItem":
+    def from_dict(cls, data: dict[str, Any]) -> "DeferredItem":
         """Create from dictionary."""
         return cls(
             id=data.get("id", str(uuid.uuid4())),
@@ -102,7 +101,7 @@ class DeferredItem:
             raw_data=data.get("raw_data", {}),
         )
     
-    def get_reset_datetime(self) -> Optional[datetime]:
+    def get_reset_datetime(self) -> datetime | None:
         """Get reset time as datetime.
         
         Returns:
@@ -148,7 +147,6 @@ class DeferredItem:
         delta = (reset_dt - now).total_seconds()
         return max(0.0, delta)
 
-
 class DeferredQueue:
     """Thread-safe, persistent queue for deferred downloads.
     
@@ -156,10 +154,10 @@ class DeferredQueue:
     or other temporary failures. Automatically persists to JSON.
     """
     
-    _instance: Optional["DeferredQueue"] = None
+    _instance: "DeferredQueue" | None = None
     _lock = threading.Lock()
     
-    def __new__(cls, queue_file: Optional[str] = None) -> "DeferredQueue":
+    def __new__(cls, queue_file: str | None = None) -> "DeferredQueue":
         """Singleton pattern - only one DeferredQueue instance."""
         with cls._lock:
             if cls._instance is None:
@@ -168,7 +166,7 @@ class DeferredQueue:
                 cls._instance = instance
             return cls._instance
     
-    def __init__(self, queue_file: Optional[str] = None):
+    def __init__(self, queue_file: str | None = None):
         """Initialize the deferred queue.
         
         Args:
@@ -177,7 +175,7 @@ class DeferredQueue:
         if getattr(self, "_initialized", False):
             return
         
-        self._items: Dict[str, DeferredItem] = {}
+        self._items: dict[str, DeferredItem] = {}
         self._data_lock = threading.RLock()
         self._save_lock = threading.Lock()
         self._state_manager = None  # Lazy init to avoid circular imports
@@ -235,16 +233,16 @@ class DeferredQueue:
     def add(
         self,
         title: str,
-        creator: Optional[str],
-        entry_id: Optional[str],
+        creator: str | None,
+        entry_id: str | None,
         provider_key: str,
         provider_name: str,
-        source_id: Optional[str],
+        source_id: str | None,
         work_dir: str,
         base_output_dir: str,
-        item_url: Optional[str] = None,
-        reset_time: Optional[datetime] = None,
-        raw_data: Optional[Dict[str, Any]] = None,
+        item_url: str | None = None,
+        reset_time: datetime | None = None,
+        raw_data: dict[str, Any] | None = None,
     ) -> DeferredItem:
         """Add a new item to the deferred queue.
         
@@ -341,7 +339,7 @@ class DeferredQueue:
                 return True
             return False
     
-    def mark_failed(self, item_id: str, error_message: Optional[str] = None) -> bool:
+    def mark_failed(self, item_id: str, error_message: str | None = None) -> bool:
         """Mark an item as permanently failed.
         
         Args:
@@ -367,7 +365,7 @@ class DeferredQueue:
     def mark_retrying(
         self,
         item_id: str,
-        new_reset_time: Optional[datetime] = None
+        new_reset_time: datetime | None = None
     ) -> bool:
         """Mark an item as being retried (increment retry count).
         
@@ -409,7 +407,7 @@ class DeferredQueue:
             )
             return True
     
-    def get(self, item_id: str) -> Optional[DeferredItem]:
+    def get(self, item_id: str) -> DeferredItem | None:
         """Get an item by ID.
         
         Args:
@@ -421,7 +419,7 @@ class DeferredQueue:
         with self._data_lock:
             return self._items.get(item_id)
     
-    def get_pending(self) -> List[DeferredItem]:
+    def get_pending(self) -> list[DeferredItem]:
         """Get all pending items (not completed or failed).
         
         Returns:
@@ -433,7 +431,7 @@ class DeferredQueue:
                 if item.status in ("pending", "retrying")
             ]
     
-    def get_ready(self) -> List[DeferredItem]:
+    def get_ready(self) -> list[DeferredItem]:
         """Get items that are ready for retry (reset time passed).
         
         Returns:
@@ -445,7 +443,7 @@ class DeferredQueue:
                 if item.is_ready_for_retry()
             ]
     
-    def get_by_provider(self, provider_key: str) -> List[DeferredItem]:
+    def get_by_provider(self, provider_key: str) -> list[DeferredItem]:
         """Get pending items for a specific provider.
         
         Args:
@@ -460,14 +458,14 @@ class DeferredQueue:
                 if item.provider_key == provider_key and item.status in ("pending", "retrying")
             ]
     
-    def get_next_ready_time(self) -> Optional[datetime]:
+    def get_next_ready_time(self) -> datetime | None:
         """Get the earliest reset time among pending items.
         
         Returns:
             Earliest reset datetime or None if no pending items
         """
         with self._data_lock:
-            earliest: Optional[datetime] = None
+            earliest: datetime | None = None
             
             for item in self._items.values():
                 if item.status not in ("pending", "retrying"):
@@ -479,14 +477,14 @@ class DeferredQueue:
             
             return earliest
     
-    def count_by_status(self) -> Dict[str, int]:
+    def count_by_status(self) -> dict[str, int]:
         """Get count of items by status.
         
         Returns:
             Dictionary of status -> count
         """
         with self._data_lock:
-            counts: Dict[str, int] = {}
+            counts: dict[str, int] = {}
             for item in self._items.values():
                 counts[item.status] = counts.get(item.status, 0) + 1
             return counts
@@ -577,7 +575,6 @@ class DeferredQueue:
             logger.info("Cleared all %d item(s) from queue", count)
             return count
 
-
 def get_deferred_queue() -> DeferredQueue:
     """Get the singleton DeferredQueue instance.
     
@@ -585,7 +582,6 @@ def get_deferred_queue() -> DeferredQueue:
         DeferredQueue instance
     """
     return DeferredQueue()
-
 
 __all__ = [
     "DeferredQueue",

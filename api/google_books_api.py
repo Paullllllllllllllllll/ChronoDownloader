@@ -1,43 +1,40 @@
 """Connector for the Google Books API."""
+from __future__ import annotations
 
 import hashlib
 import logging
 import os
 import re
 import urllib.parse
-from typing import List, Union
 
-from .utils import save_json, make_request, download_file, get_provider_setting
-from .model import SearchResult, convert_to_searchresult
+from .core.config import get_provider_setting
+from .core.network import make_request
+from .utils import save_json, download_file
+from .model import SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://www.googleapis.com/books/v1/volumes"
-
 
 def _api_key() -> str | None:
     """Get Google Books API key from environment."""
     # Environment-only API key
     return os.getenv("GOOGLE_BOOKS_API_KEY")
 
-
 def _gb_free_only() -> bool:
     """Check if only free books should be searched."""
     val = get_provider_setting("google_books", "free_only", True)
     return bool(val)
-
 
 def _gb_prefer_format() -> str:
     """Get preferred download format (pdf or epub)."""
     val = get_provider_setting("google_books", "prefer", "pdf")
     return str(val or "pdf").lower()
 
-
 def _gb_allow_drm() -> bool:
     """Check if DRM-protected content is allowed."""
     val = get_provider_setting("google_books", "allow_drm", False)
     return bool(val)
-
 
 def _gb_max_files() -> int:
     """Get maximum number of files to download per work."""
@@ -47,8 +44,7 @@ def _gb_max_files() -> int:
     except Exception:
         return 2
 
-
-def search_google_books(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_google_books(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search Google Books API for works.
     
     Args:
@@ -123,7 +119,7 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
         if data and data.get("items"):
             break
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if data and data.get("items"):
         for item in data["items"]:
             volume_info = item.get("volumeInfo", {})
@@ -165,8 +161,7 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
             results.append(convert_to_searchresult("Google Books", raw))
     return results
 
-
-def download_google_books_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_google_books_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download metadata and available files for a Google Books volume.
     
     Google Books only provides actual downloadable PDFs/EPUBs for:
@@ -185,10 +180,7 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
         True if any object was downloaded
     """
 
-    if isinstance(item_data, SearchResult):
-        volume_id = item_data.source_id or item_data.raw.get("id")
-    else:
-        volume_id = item_data.get("id")
+    volume_id = resolve_item_id(item_data)
     if not volume_id:
         logger.warning("No Google Books volume id provided.")
         return False
@@ -212,9 +204,9 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
     viewability = str(access_info.get("viewability") or "").lower()
     is_full_view = "all_pages" in viewability or viewability == "full"
     
-    def _collect_links() -> List[str]:
+    def _collect_links() -> list[str]:
         """Collect download links from access info."""
-        links: List[str] = []
+        links: list[str] = []
         fmt_order = [prefer, "pdf" if prefer != "pdf" else "epub"]
         for fmt in fmt_order:
             fi = access_info.get(fmt, {})
@@ -230,7 +222,7 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
 
     # Deduplicate and enforce max_files
     seen = set()
-    uniq_links: List[str] = []
+    uniq_links: list[str] = []
     for u in download_links:
         if u and u not in seen:
             seen.add(u)
@@ -279,7 +271,6 @@ def download_google_books_work(item_data: Union[SearchResult, dict], output_fold
 
     return any_ok
 
-
 # Known Google Books "image not available" placeholder signatures
 # These are detected by file size and MD5 hash
 GB_PLACEHOLDER_SIGNATURES = {
@@ -291,7 +282,6 @@ GB_PLACEHOLDER_SIGNATURES = {
 
 # Minimum file size for a valid page image (placeholders are typically small)
 GB_MIN_VALID_IMAGE_SIZE = 15000  # 15KB - real scanned pages are usually larger
-
 
 def _is_placeholder_image(filepath: str) -> bool:
     """Check if a downloaded image is a Google Books placeholder.
@@ -330,7 +320,6 @@ def _is_placeholder_image(filepath: str) -> bool:
     except Exception as e:
         logger.debug("Error checking placeholder status for %s: %s", filepath, e)
         return False
-
 
 def _download_page_images(volume_id: str, output_folder: str, max_pages: int = 50) -> bool:
     """Attempt to download page images from Google Books for full-view books.

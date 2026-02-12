@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .config import get_download_limits
 
 logger = logging.getLogger(__name__)
-
 
 class DownloadBudget:
     """Tracks and enforces download limits across the whole run.
@@ -40,11 +39,11 @@ class DownloadBudget:
         self.total_pdfs_bytes = 0
         self.total_metadata_bytes = 0
         # Per-work counters: {work_id: {"images": bytes, "pdfs": bytes, "metadata": bytes}}
-        self.per_work: Dict[str, Dict[str, int]] = {}
+        self.per_work: dict[str, dict[str, int]] = {}
         self._exhausted = False
 
     @staticmethod
-    def _gb_to_bytes(gb: Any) -> Optional[int]:
+    def _gb_to_bytes(gb: Any) -> int | None:
         """Convert GB value to bytes, or None if unlimited."""
         try:
             val = float(gb)
@@ -53,7 +52,7 @@ class DownloadBudget:
             return None
 
     @staticmethod
-    def _mb_to_bytes(mb: Any) -> Optional[int]:
+    def _mb_to_bytes(mb: Any) -> int | None:
         """Convert MB value to bytes, or None if unlimited."""
         try:
             val = float(mb)
@@ -62,7 +61,7 @@ class DownloadBudget:
             return None
 
     @staticmethod
-    def _limit_value(v: Any) -> Optional[int]:
+    def _limit_value(v: Any) -> int | None:
         """Convert config value to an integer limit or None if unlimited."""
         try:
             iv = int(v)
@@ -81,17 +80,17 @@ class DownloadBudget:
         with self._lock:
             return self._exhausted
 
-    def _inc(self, bucket: Dict[str, Dict[str, int]], key: str, field: str, delta: int) -> int:
+    def _inc(self, bucket: dict[str, dict[str, int]], key: str, field: str, delta: int) -> int:
         """Increment a counter in a nested bucket."""
         m = bucket.setdefault(key, {"images": 0, "pdfs": 0, "metadata": 0})
         m[field] = int(m.get(field, 0)) + int(delta)
         return m[field]
 
-    def _get(self, bucket: Dict[str, Dict[str, int]], key: str, field: str) -> int:
+    def _get(self, bucket: dict[str, dict[str, int]], key: str, field: str) -> int:
         """Get a counter value from a nested bucket."""
         return int(bucket.get(key, {}).get(field, 0))
 
-    def allow_content(self, content_type: str, work_id: Optional[str], add_bytes: Optional[int]) -> bool:
+    def allow_content(self, content_type: str, work_id: str | None, add_bytes: int | None) -> bool:
         """Check if additional content can be downloaded within budget limits.
         
         Args:
@@ -148,7 +147,7 @@ class DownloadBudget:
         
         return True
 
-    def record_download(self, content_type: str, work_id: Optional[str], size_bytes: int) -> None:
+    def record_download(self, content_type: str, work_id: str | None, size_bytes: int) -> None:
         """Record a completed download.
         
         Args:
@@ -187,18 +186,18 @@ class DownloadBudget:
                               f"metadata={stats.get('metadata', 0) / 1024:.1f}KB")
 
     # Legacy compatibility methods
-    def allow_new_file(self, provider: Optional[str], work_id: Optional[str]) -> bool:
+    def allow_new_file(self, provider: str | None, work_id: str | None) -> bool:
         """Legacy method for backward compatibility. Always returns True."""
         return not self._exhausted
 
-    def allow_bytes(self, provider: Optional[str], work_id: Optional[str], add_bytes: Optional[int]) -> bool:
+    def allow_bytes(self, provider: str | None, work_id: str | None, add_bytes: int | None) -> bool:
         """Legacy method for backward compatibility. Checks against total limits."""
         if not add_bytes or add_bytes <= 0:
             return True
         # Default to checking against images limit for legacy calls
         return self.allow_content("images", work_id, add_bytes)
 
-    def add_bytes(self, provider: Optional[str], work_id: Optional[str], add_bytes: int) -> bool:
+    def add_bytes(self, provider: str | None, work_id: str | None, add_bytes: int) -> bool:
         """Add bytes to budget during streaming download.
         
         Args:
@@ -221,7 +220,7 @@ class DownloadBudget:
         
         return True
 
-    def add_file(self, provider: Optional[str], work_id: Optional[str]) -> None:
+    def add_file(self, provider: str | None, work_id: str | None) -> None:
         """Record a completed file download (legacy method).
         
         Args:
@@ -232,19 +231,16 @@ class DownloadBudget:
         # The size was already tracked via add_bytes during download
         pass
 
-    def record_file(self, provider: Optional[str], work_id: Optional[str], size_bytes: int) -> None:
+    def record_file(self, provider: str | None, work_id: str | None, size_bytes: int) -> None:
         """Legacy method for backward compatibility."""
         self.record_download("images", work_id, size_bytes)
-
 
 # Global singleton budget tracker
 _BUDGET = DownloadBudget()
 
-
 def get_budget() -> DownloadBudget:
     """Get the global download budget tracker."""
     return _BUDGET
-
 
 def budget_exhausted() -> bool:
     """Check if the global download budget has been exhausted."""

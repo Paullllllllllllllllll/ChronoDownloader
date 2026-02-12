@@ -3,34 +3,28 @@
 This provider prioritizes PDF downloads over IIIF images for better availability
 and faster downloads, as configured in the download preferences.
 """
+from __future__ import annotations
+
 import logging
 import urllib.parse
-from typing import List, Union
 
-from .download_helpers import download_iiif_manifest_and_images
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
-from .utils import (
-    budget_exhausted,
-    download_file,
-    download_iiif_renderings,
-    get_max_pages,
-    make_request,
-    prefer_pdf_over_images,
-    save_json,
-)
+from .model import SearchResult, convert_to_searchresult, resolve_item_id
+from .core.budget import budget_exhausted
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import download_file, download_iiif_renderings, save_json
 
 logger = logging.getLogger(__name__)
 
 SEARCH_API_URL = "https://archive.org/advancedsearch.php"
 METADATA_API_URL = "https://archive.org/metadata/{identifier}"
 
-
 def search_internet_archive(
     title: str,
     creator: str | None = None,
     max_results: int = 3
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """Search Internet Archive using the Advanced Search API.
     
     Args:
@@ -55,7 +49,7 @@ def search_internet_archive(
     }
     logger.info("Searching Internet Archive for: %s", title)
     data = make_request(SEARCH_API_URL, params=params)
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if not isinstance(data, dict):
         return results
     if data.get("response") and data["response"].get("docs"):
@@ -73,8 +67,7 @@ def search_internet_archive(
             results.append(sr)
     return results
 
-
-def download_ia_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_ia_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download available objects for an Internet Archive item.
 
     Download strategy prioritizes PDFs over IIIF images for better availability:
@@ -90,11 +83,7 @@ def download_ia_work(item_data: Union[SearchResult, dict], output_folder: str) -
     Returns:
         True if any content was downloaded, False otherwise
     """
-    identifier = None
-    if isinstance(item_data, SearchResult):
-        identifier = item_data.source_id or item_data.raw.get("identifier")
-    else:
-        identifier = item_data.get("identifier") or item_data.get("id")
+    identifier = resolve_item_id(item_data, "identifier", "id")
     if not identifier:
         logger.warning("No identifier found in item data.")
         return False

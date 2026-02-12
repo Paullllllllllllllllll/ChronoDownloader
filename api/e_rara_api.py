@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
-from typing import List, Union
 
 from .download_helpers import download_iiif_manifest_and_images
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 from .query_helpers import escape_sru_literal
-from .utils import make_request
+from .core.network import make_request
 
 logger = logging.getLogger(__name__)
 
@@ -20,17 +19,15 @@ SRU_URL = "https://www.e-rara.ch/sru"
 IIIF_MANIFEST_URL = "https://www.e-rara.ch/i3f/v20/{vlid}/manifest"
 ITEM_URL = "https://www.e-rara.ch/{prefix}/{vlid}"
 
-
 def _build_query(title: str, creator: str | None) -> str:
-    parts: List[str] = []
+    parts: list[str] = []
     if title:
         parts.append(f'"{escape_sru_literal(title)}"')
     if creator:
         parts.append(f'"{escape_sru_literal(creator)}"')
     return " ".join(parts).strip()
 
-
-def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search e-rara via SRU (MODS schema)."""
     query = _build_query(title, creator)
     if not query:
@@ -48,7 +45,7 @@ def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) 
     if not isinstance(response_text, str):
         return []
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     try:
         ns = {
             "srw": "http://www.loc.gov/zing/srw/",
@@ -101,15 +98,10 @@ def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) 
 
     return results
 
-
-def download_e_rara_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_e_rara_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download via e-rara IIIF manifest."""
-    if isinstance(item_data, SearchResult):
-        vlid = item_data.source_id or item_data.raw.get("id")
-        manifest_url = item_data.iiif_manifest or item_data.raw.get("iiif_manifest")
-    else:
-        vlid = item_data.get("id")
-        manifest_url = item_data.get("iiif_manifest")
+    vlid = resolve_item_id(item_data)
+    manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")
 
     if not vlid and not manifest_url:
         logger.warning("No e-rara VLID or manifest URL provided.")

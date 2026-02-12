@@ -1,32 +1,24 @@
 """Connector for the Digital Public Library of America (DPLA) API."""
+from __future__ import annotations
 
 import logging
 import os
-from typing import List, Union
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-    download_file,
-)
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_file, download_iiif_renderings
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 
 logger = logging.getLogger(__name__)
 
-
 API_BASE_URL = "https://api.dp.la/v2/"
-
 
 def _api_key() -> str | None:
     """Get DPLA API key from environment."""
     return os.getenv("DPLA_API_KEY")
 
-
-def search_dpla(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_dpla(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search the DPLA API for a title and optional creator."""
 
     key = _api_key()
@@ -45,7 +37,7 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
     logger.info("Searching DPLA for: %s", title)
     data = make_request(f"{API_BASE_URL}items", params=params)
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if not isinstance(data, dict):
         return results
     if data.get("docs"):
@@ -103,14 +95,10 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
 
     return results
 
-
-def download_dpla_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_dpla_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download metadata, IIIF manifest, and page images for a DPLA item (when available)."""
 
-    if isinstance(item_data, SearchResult):
-        item_id = item_data.source_id or item_data.raw.get("id")
-    else:
-        item_id = item_data.get("id")
+    item_id = resolve_item_id(item_data)
     if not item_id:
         logger.warning("No DPLA item id found in item data.")
         return False
@@ -152,10 +140,7 @@ def download_dpla_work(item_data: Union[SearchResult, dict], output_folder: str)
         manifest_url = _from_hv(hv)
     # From search payload
     if not manifest_url:
-        if isinstance(item_data, SearchResult):
-            manifest_url = item_data.raw.get("iiif_manifest")
-        else:
-            manifest_url = item_data.get("iiif_manifest")
+        manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")
 
     if manifest_url and not (isinstance(manifest_url, str) and "manifest" in manifest_url):
         manifest_url = None

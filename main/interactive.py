@@ -15,7 +15,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 
@@ -41,7 +41,6 @@ from main.unified_csv import (
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # Interactive Workflow
 # =============================================================================
@@ -53,7 +52,7 @@ class InteractiveWorkflow:
         """Initialize the workflow."""
         ConsoleUI.enable_ansi()
         self.config = DownloadConfiguration()
-        self.app_config: Dict[str, Any] = {}
+        self.app_config: dict[str, Any] = {}
         self.start_time: float = 0.0
     
     def display_welcome(self) -> None:
@@ -85,7 +84,7 @@ class InteractiveWorkflow:
             return True
         
         # Build options list
-        options: List[Tuple[str, str]] = []
+        options: list[tuple[str, str]] = []
         for f in config_files:
             try:
                 import json
@@ -188,7 +187,7 @@ class InteractiveWorkflow:
             if key_settings:
                 ConsoleUI.print_config_summary(key_settings, "Download Settings")
     
-    def get_mode_options(self) -> List[Tuple[str, str]]:
+    def get_mode_options(self) -> list[tuple[str, str]]:
         """Get download mode options."""
         return [
             ("csv", "CSV Batch — Process works from a CSV file"),
@@ -311,7 +310,7 @@ class InteractiveWorkflow:
         print("  Enter one or more IIIF manifest URLs.")
         print(f"  {ConsoleUI.DIM}(Enter an empty line when done){ConsoleUI.RESET}\n")
         
-        urls: List[str] = []
+        urls: list[str] = []
         while True:
             prompt_label = f"Manifest URL [{len(urls) + 1}]" if not urls else f"Manifest URL [{len(urls) + 1}] (empty to finish)"
             url = ConsoleUI.prompt_input(prompt_label, required=(len(urls) == 0))
@@ -556,7 +555,7 @@ class InteractiveWorkflow:
         print()
         return ConsoleUI.prompt_yes_no("Proceed with these settings?", default=True)
     
-    def run_workflow(self) -> Optional[DownloadConfiguration]:
+    def run_workflow(self) -> DownloadConfiguration | None:
         """Run the interactive configuration workflow.
         
         Returns:
@@ -629,14 +628,13 @@ class InteractiveWorkflow:
                 print(f"\n{ConsoleUI.YELLOW}Operation cancelled.{ConsoleUI.RESET}")
                 return None
 
-
 # =============================================================================
 # Processing Functions
 # =============================================================================
 
 def process_single_work(
     title: str,
-    creator: Optional[str],
+    creator: str | None,
     entry_id: str,
     output_dir: str,
     dry_run: bool,
@@ -666,7 +664,6 @@ def process_single_work(
     )
     
     return True
-
 
 def run_interactive_session(config: DownloadConfiguration, start_time: float = 0.0) -> None:
     """Execute download session based on interactive configuration.
@@ -811,7 +808,6 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
         providers_used=provider_names if provider_names else None,
     )
 
-
 def process_csv_batch_with_stats(
     csv_path: str,
     output_dir: str,
@@ -819,8 +815,8 @@ def process_csv_batch_with_stats(
     dry_run: bool,
     log: logging.Logger,
     use_parallel: bool = True,
-    max_workers_override: Optional[int] = None
-) -> Dict[str, int]:
+    max_workers_override: int | None = None
+) -> dict[str, int]:
     """Process works from a CSV file and return statistics.
     
     Args:
@@ -894,7 +890,6 @@ def process_csv_batch_with_stats(
     )
     
     return result_stats
-
 
 def run_interactive() -> None:
     """Main entry point for interactive mode."""

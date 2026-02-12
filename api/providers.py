@@ -4,7 +4,7 @@ Centralizes provider imports and the mapping used by the downloader.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from . import bnf_gallica_api
 from . import internet_archive_api
@@ -24,7 +24,7 @@ from . import slub_api
 from . import e_rara_api
 from . import sbb_digital_api
 
-PROVIDERS: Dict[str, Tuple[Any, Any, str]] = {
+PROVIDERS: dict[str, tuple[Any, Any, str]] = {
     "bnf_gallica": (bnf_gallica_api.search_gallica, bnf_gallica_api.download_gallica_work, "BnF Gallica"),
     "internet_archive": (
         internet_archive_api.search_internet_archive,

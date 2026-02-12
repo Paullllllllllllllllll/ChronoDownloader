@@ -5,25 +5,19 @@ external providers (e.g., Heidelberg, Göttingen libraries) which have their own
 IIIF manifests. This connector attempts to construct IIIF manifest URLs from
 the provider's isShownAt links.
 """
+from __future__ import annotations
 
 import logging
 import os
 import re
-from typing import List, Union, Optional
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_file,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-)
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_file, download_iiif_renderings
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 
 logger = logging.getLogger(__name__)
-
 
 API_BASE_URL = "https://api.deutsche-digitale-bibliothek.de/"
 
@@ -40,8 +34,7 @@ IIIF_MANIFEST_PATTERNS = [
      "https://api.digitale-sammlungen.de/iiif/presentation/v2/{}/manifest"),
 ]
 
-
-def _extract_iiif_manifest_url(is_shown_at: str) -> Optional[str]:
+def _extract_iiif_manifest_url(is_shown_at: str) -> str | None:
     """Try to construct IIIF manifest URL from isShownAt link."""
     if not is_shown_at:
         return None
@@ -56,13 +49,11 @@ def _extract_iiif_manifest_url(is_shown_at: str) -> Optional[str]:
     
     return None
 
-
 def _api_key() -> str | None:
     """Get DDB API key from environment."""
     return os.getenv("DDB_API_KEY")
 
-
-def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search the DDB API for a title and optional creator."""
 
     key = _api_key()
@@ -84,7 +75,7 @@ def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> 
     logger.info("Searching DDB for: %s", title)
     data = make_request(f"{API_BASE_URL}search", params=params)
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if not isinstance(data, dict):
         return results
     if data.get("results"):
@@ -119,8 +110,7 @@ def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> 
 
     return results
 
-
-def download_ddb_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_ddb_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download IIIF manifest and page images for a DDB item.
 
     DDB aggregates items from many German institutions. This function:
@@ -130,10 +120,7 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder: str) 
     - Falls back to downloading the preview image if no IIIF available
     """
 
-    if isinstance(item_data, SearchResult):
-        item_id = item_data.source_id or item_data.raw.get("id")
-    else:
-        item_id = item_data.get("id")
+    item_id = resolve_item_id(item_data)
     if not item_id:
         logger.warning("No DDB item id found in item data.")
         return False
@@ -148,8 +135,8 @@ def download_ddb_work(item_data: Union[SearchResult, dict], output_folder: str) 
     save_json(item_meta, output_folder, f"ddb_{item_id}_metadata")
 
     # Try to find manifest URL from multiple sources
-    manifest_url = item_meta.get("iiifManifest") or (
-        item_data.raw.get("iiif_manifest") if isinstance(item_data, SearchResult) else item_data.get("iiif_manifest")
+    manifest_url = item_meta.get("iiifManifest") or resolve_item_field(
+        item_data, "iiif_manifest", attr="iiif_manifest"
     )
     
     # Extract isShownAt and isShownBy from EDM metadata

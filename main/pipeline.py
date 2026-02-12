@@ -30,8 +30,7 @@ import dataclasses
 import json
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from main.download_scheduler import DownloadTask
@@ -40,8 +39,6 @@ from api import utils
 from api.core.config import get_config, get_resume_mode
 from api.core.context import (
     clear_all_context,
-    clear_current_entry,
-    clear_current_name_stem,
     clear_current_provider,
     clear_current_work,
     provider_context,
@@ -54,7 +51,7 @@ from api.core.context import (
 )
 from api.model import QuotaDeferredException, SearchResult
 from api.providers import PROVIDERS
-from main.deferred_queue import DeferredItem, get_deferred_queue
+from main.deferred_queue import get_deferred_queue
 from main.index_manager import build_index_row, update_index_csv
 from main.selection import (
     collect_candidates_all,
@@ -68,51 +65,47 @@ from main.work_manager import (
     create_work_json,
     format_candidates_for_json,
     format_selected_for_json,
-    get_naming_config,
     update_work_status,
 )
 
 logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
-ProviderTuple = Tuple[str, Callable, Callable, str]
-
+ProviderTuple = tuple[str, Callable, Callable, str]
 
 @dataclasses.dataclass
 class _PreparedWork:
     title: str
-    creator: Optional[str]
-    entry_id: Optional[str]
+    creator: str | None
+    entry_id: str | None
     base_output_dir: str
     work_dir: str
     work_dir_name: str
     work_stem: str
     work_id: str
     work_json_path: str
-    sel_cfg: Dict[str, Any]
-    provider_list: List[ProviderTuple]
-    provider_map: Dict[str, Tuple[Any, Any, str]]
-    all_candidates: List[SearchResult]
-    selected: Optional[SearchResult]
-    selected_provider_tuple: Optional[ProviderTuple]
-    selected_source_id: Optional[str]
+    sel_cfg: dict[str, Any]
+    provider_list: list[ProviderTuple]
+    provider_map: dict[str, tuple[Any, Any, str]]
+    all_candidates: list[SearchResult]
+    selected: SearchResult | None
+    selected_provider_tuple: ProviderTuple | None
+    selected_source_id: str | None
 
-
-def _compute_selected_source_id(selected: Optional[SearchResult]) -> Optional[str]:
+def _compute_selected_source_id(selected: SearchResult | None) -> str | None:
     if not selected:
         return None
     return selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
 
-
 def _collect_and_select(
     title: str,
-    creator: Optional[str],
-    sel_cfg: Dict[str, Any],
-    provider_list: List[ProviderTuple],
-) -> tuple[List[SearchResult], Optional[SearchResult], Optional[ProviderTuple]]:
-    all_candidates: List[SearchResult] = []
-    selected: Optional[SearchResult] = None
-    selected_provider_tuple: Optional[ProviderTuple] = None
+    creator: str | None,
+    sel_cfg: dict[str, Any],
+    provider_list: list[ProviderTuple],
+) -> tuple[list[SearchResult], SearchResult | None, ProviderTuple | None]:
+    all_candidates: list[SearchResult] = []
+    selected: SearchResult | None = None
+    selected_provider_tuple: ProviderTuple | None = None
 
     min_title_score = float(sel_cfg.get("min_title_score", 85))
     creator_weight = float(sel_cfg.get("creator_weight", 0.2))
@@ -144,13 +137,12 @@ def _collect_and_select(
 
     return all_candidates, selected, selected_provider_tuple
 
-
 def _prepare_work(
     title: str,
-    creator: Optional[str],
-    entry_id: Optional[str],
+    creator: str | None,
+    entry_id: str | None,
     base_output_dir: str,
-) -> Optional[_PreparedWork]:
+) -> _PreparedWork | None:
     work_dir, work_dir_name = compute_work_dir(base_output_dir, entry_id, title)
 
     resume_mode = get_resume_mode()
@@ -161,7 +153,7 @@ def _prepare_work(
 
     sel_cfg = _get_selection_config()
     provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
-    provider_map: Dict[str, Tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
+    provider_map: dict[str, tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
 
     all_candidates, selected, selected_provider_tuple = _collect_and_select(
         title,
@@ -193,7 +185,6 @@ def _prepare_work(
         selected_source_id=selected_source_id,
     )
 
-
 def _persist_work_json(prep: _PreparedWork, status: str = "pending") -> None:
     create_work_json(
         work_json_path=prep.work_json_path,
@@ -205,7 +196,6 @@ def _persist_work_json(prep: _PreparedWork, status: str = "pending") -> None:
         selected=format_selected_for_json(prep.selected, prep.selected_source_id),
         status=status,
     )
-
 
 def _persist_candidates_metadata(prep: _PreparedWork) -> None:
     if not prep.sel_cfg.get("keep_non_selected_metadata", True):
@@ -224,8 +214,7 @@ def _persist_candidates_metadata(prep: _PreparedWork) -> None:
                     sr.source_id,
                 )
 
-
-def load_enabled_apis(config_path: str) -> List[ProviderTuple]:
+def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
     """Load enabled providers from a JSON config file.
 
     Args:
@@ -259,7 +248,7 @@ def load_enabled_apis(config_path: str) -> List[ProviderTuple]:
         s, d, n = PROVIDERS["internet_archive"]
         return [("internet_archive", s, d, n)]
     
-    enabled: List[ProviderTuple] = []
+    enabled: list[ProviderTuple] = []
     for key, flag in (cfg.get("providers") or {}).items():
         if flag and key in PROVIDERS:
             s, d, n = PROVIDERS[key]
@@ -273,14 +262,12 @@ def load_enabled_apis(config_path: str) -> List[ProviderTuple]:
     
     return enabled
 
-
 # Default to Internet Archive only; this will be overridden by the CLI using this module
-ENABLED_APIS: List[ProviderTuple] = [
+ENABLED_APIS: list[ProviderTuple] = [
     ("internet_archive",) + PROVIDERS["internet_archive"],
 ]
 
-
-def _required_provider_envvars() -> Dict[str, str]:
+def _required_provider_envvars() -> dict[str, str]:
     """Return mapping of provider_key -> required environment variable name for API keys.
 
     Only providers listed here will be treated as requiring keys; others work without keys.
@@ -293,10 +280,9 @@ def _required_provider_envvars() -> Dict[str, str]:
         # HathiTrust key is optional and not required for search (HATHI_API_KEY)
     }
 
-
 def filter_enabled_providers_for_keys(
-    enabled: List[ProviderTuple]
-) -> List[ProviderTuple]:
+    enabled: list[ProviderTuple]
+) -> list[ProviderTuple]:
     """Filter out providers missing required API keys in the environment.
 
     Args:
@@ -306,8 +292,8 @@ def filter_enabled_providers_for_keys(
         Filtered list with only providers that have required keys set
     """
     req = _required_provider_envvars()
-    kept: List[ProviderTuple] = []
-    missing: List[Tuple[str, str, str]] = []  # (provider_key, provider_name, envvar)
+    kept: list[ProviderTuple] = []
+    missing: list[tuple[str, str, str]] = []  # (provider_key, provider_name, envvar)
     
     for pkey, s, d, pname in enabled:
         envvar = req.get(pkey)
@@ -330,8 +316,7 @@ def filter_enabled_providers_for_keys(
     
     return kept
 
-
-def _get_selection_config() -> Dict[str, Any]:
+def _get_selection_config() -> dict[str, Any]:
     """Get selection configuration with defaults.
     
     Returns:
@@ -353,10 +338,9 @@ def _get_selection_config() -> Dict[str, Any]:
     
     return sel
 
-
 def _provider_order(
-    enabled: List[ProviderTuple], hierarchy: List[str]
-) -> List[ProviderTuple]:
+    enabled: list[ProviderTuple], hierarchy: list[str]
+) -> list[ProviderTuple]:
     """Reorder providers according to hierarchy preference.
     
     Args:
@@ -379,13 +363,12 @@ def _provider_order(
     
     return ordered
 
-
 def search_and_select(
     title: str,
-    creator: Optional[str] = None,
-    entry_id: Optional[str] = None,
+    creator: str | None = None,
+    entry_id: str | None = None,
     base_output_dir: str = "downloaded_works",
-) -> Optional["DownloadTask"]:
+) -> "DownloadTask" | None:
     """Phase 1: Search providers and select best candidate.
     
     This function performs the search phase and returns a DownloadTask
@@ -442,7 +425,6 @@ def search_and_select(
     logger.info("Created download task for '%s' from %s", title, prep.selected_provider_tuple[3])
     return task
 
-
 def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
     """Phase 2: Execute download for a task.
     
@@ -495,7 +477,7 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
             try:
                 provider_list = ENABLED_APIS
                 prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
-                ranked_fallbacks: List[Tuple[int, float, SearchResult]] = []
+                ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
                 for sr in all_candidates:
                     try:
                         if sr.provider_key == pkey and sr.source_id == selected.source_id:
@@ -629,14 +611,13 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
     
     return download_succeeded
 
-
 def process_work(
     title: str,
-    creator: Optional[str] = None,
-    entry_id: Optional[str] = None,
+    creator: str | None = None,
+    entry_id: str | None = None,
     base_output_dir: str = "downloaded_works",
     dry_run: bool = False,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Search, select, persist metadata, and download one work.
 
     This function orchestrates provider searches and the download phase for a
@@ -733,7 +714,7 @@ def process_work(
                 # Fallback: try the next-best candidate based on provider priority and score
                 try:
                     prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
-                    ranked_fallbacks: List[Tuple[int, float, SearchResult]] = []
+                    ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
                     for sr in all_candidates:
                         try:
                             if selected and sr.provider_key == selected.provider_key and sr.source_id == selected.source_id:
@@ -867,18 +848,7 @@ def process_work(
     update_index_csv(base_output_dir, row)
 
     # Clear per-work context
-    try:
-        clear_current_work()
-    except Exception:
-        pass
-    try:
-        clear_current_entry()
-    except Exception:
-        pass
-    try:
-        clear_current_name_stem()
-    except Exception:
-        pass
+    clear_all_context()
     
     logger.info("Finished processing '%s'. Check '%s' for results.", title, prep.work_dir)
     

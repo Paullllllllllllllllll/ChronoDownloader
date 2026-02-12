@@ -7,18 +7,13 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
-from typing import List, Union
 
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 from .query_helpers import escape_sru_literal
-from .utils import (
-    make_request,
-    download_file,
-    get_max_pages,
-    prefer_pdf_over_images,
-    budget_exhausted,
-    save_json,
-)
+from .core.budget import budget_exhausted
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import download_file, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +21,7 @@ SRU_URL = "https://sru.gbv.de/stabikat"
 METS_URL = "https://digital.staatsbibliothek-berlin.de/dms/metsresolver/?PPN={ppn}"
 ITEM_URL = "https://digital.staatsbibliothek-berlin.de/werkansicht?PPN={ppn}"
 
-
-def _candidate_queries(title: str, creator: str | None) -> List[str]:
+def _candidate_queries(title: str, creator: str | None) -> list[str]:
     q_title = escape_sru_literal(title)
     q_creator = escape_sru_literal(creator) if creator else None
     queries = []
@@ -39,10 +33,9 @@ def _candidate_queries(title: str, creator: str | None) -> List[str]:
     queries.append(f'"{q_title}"')
     return [q for q in queries if q]
 
-
-def search_sbb_digital(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_sbb_digital(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search StaBiKat via SRU for potential digitized items."""
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     for query in _candidate_queries(title, creator):
         params = {
             "version": "1.2",
@@ -114,15 +107,14 @@ def search_sbb_digital(title: str, creator: str | None = None, max_results: int 
 
     return results
 
-
-def _collect_mets_urls(mets_xml: str) -> tuple[List[str], List[str]]:
+def _collect_mets_urls(mets_xml: str) -> tuple[list[str], list[str]]:
     ns = {
         "mets": "http://www.loc.gov/METS/",
         "xlink": "http://www.w3.org/1999/xlink",
     }
     root = ET.fromstring(mets_xml)
-    pdf_urls: List[str] = []
-    image_urls: List[str] = []
+    pdf_urls: list[str] = []
+    image_urls: list[str] = []
 
     for file_el in root.findall(".//mets:file", ns):
         mimetype = (file_el.get("MIMETYPE") or "").lower()
@@ -141,15 +133,10 @@ def _collect_mets_urls(mets_xml: str) -> tuple[List[str], List[str]]:
 
     return pdf_urls, image_urls
 
-
-def download_sbb_digital_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_sbb_digital_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download PDF/images using METS resolver URLs."""
-    if isinstance(item_data, SearchResult):
-        ppn = item_data.source_id or item_data.raw.get("id")
-        mets_url = item_data.raw.get("mets_url")
-    else:
-        ppn = item_data.get("id")
-        mets_url = item_data.get("mets_url")
+    ppn = resolve_item_id(item_data)
+    mets_url = resolve_item_field(item_data, "mets_url")
 
     if not ppn:
         logger.warning("No PPN found for SBB digital item.")

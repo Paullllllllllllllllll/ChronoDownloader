@@ -40,29 +40,20 @@ Note:
   Title extraction from search results may be limited due to HTML structure.
   MD5 hashes serve as reliable identifiers even when titles are incomplete.
 """
+from __future__ import annotations
 
-import json
 import logging
 import os
 import re
-import time
-import urllib.parse
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Tuple, Union, Optional
 
 from bs4 import BeautifulSoup
 
-from .utils import (
-    save_json,
-    download_file,
-    make_request,
-    get_max_pages,
-    prefer_pdf_over_images,
-    get_provider_setting,
-)
+from .core.config import get_provider_setting
+from .core.network import make_request
+from .utils import save_json, download_file
 from .matching import title_score, normalize_text
-from .model import QuotaDeferredException, SearchResult, convert_to_searchresult
+from .model import QuotaDeferredException, SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +73,6 @@ def _get_quota_manager():
     """Lazy import to avoid circular dependencies."""
     from main.quota_manager import get_quota_manager
     return get_quota_manager()
-
 
 def _get_quota_config() -> dict:
     """Get Anna's Archive quota configuration.
@@ -105,8 +95,7 @@ def _get_quota_config() -> dict:
         "reset_wait_hours": get_provider_setting("annas_archive", "quota_reset_wait_hours", 24),
     }
 
-
-def _check_and_update_quota() -> Tuple[bool, Optional[float]]:
+def _check_and_update_quota() -> tuple[bool, float | None]:
     """Check if we can use fast download and update quota.
     
     Uses the centralized QuotaManager for consistent tracking across all providers.
@@ -130,7 +119,6 @@ def _check_and_update_quota() -> Tuple[bool, Optional[float]]:
     else:
         return False, None  # Signal to fallback to scraping
 
-
 def _record_fast_download() -> None:
     """Record that a fast download was used."""
     quota_manager = _get_quota_manager()
@@ -141,7 +129,6 @@ def _record_fast_download() -> None:
         "Anna's Archive: Fast download used. %d/%d remaining today.",
         remaining, config["daily_limit"]
     )
-
 
 def is_quota_available() -> bool:
     """Check if Anna's Archive fast download quota is available.
@@ -159,8 +146,7 @@ def is_quota_available() -> bool:
     can_download, _wait_seconds = _check_and_update_quota()
     return can_download
 
-
-def get_quota_reset_time() -> Optional[datetime]:
+def get_quota_reset_time() -> datetime | None:
     """Get the expected time when the Anna's Archive quota will reset.
     
     Returns:
@@ -187,7 +173,6 @@ def get_quota_reset_time() -> Optional[datetime]:
     # Fallback: reset time is reset_wait_hours from now
     config = _get_quota_config()
     return datetime.utcnow() + timedelta(hours=config["reset_wait_hours"])
-
 
 def _clean_title_candidate(text: str) -> str:
     """Normalize spacing and trim overly long or concatenated titles."""
@@ -226,10 +211,9 @@ def _clean_title_candidate(text: str) -> str:
 
     return cleaned
 
-
-def _collect_title_candidates(texts: List[str]) -> List[str]:
+def _collect_title_candidates(texts: list[str]) -> list[str]:
     """Collect unique, cleaned title candidates from raw text snippets."""
-    candidates: List[str] = []
+    candidates: list[str] = []
     seen_norm = set()
 
     for raw_text in texts:
@@ -259,13 +243,12 @@ def _collect_title_candidates(texts: List[str]) -> List[str]:
 
     return candidates
 
-
-def _extract_title_candidates(title_cell) -> List[str]:
+def _extract_title_candidates(title_cell) -> list[str]:
     """Extract potential title strings from the table title cell."""
     if not title_cell:
         return []
 
-    snippets: List[str] = []
+    snippets: list[str] = []
 
     # Anchor texts pointing to MD5 pages are strong signals
     for link in title_cell.find_all("a", href=lambda x: x and "/md5/" in x):
@@ -286,8 +269,7 @@ def _extract_title_candidates(title_cell) -> List[str]:
 
     return _collect_title_candidates(snippets)
 
-
-def _extract_creators_from_cell(creator_cell) -> List[str]:
+def _extract_creators_from_cell(creator_cell) -> list[str]:
     """Extract creator names from the creators cell."""
     if not creator_cell:
         return []
@@ -296,7 +278,7 @@ def _extract_creators_from_cell(creator_cell) -> List[str]:
     if not raw_text:
         return []
 
-    creators: List[str] = []
+    creators: list[str] = []
     seen_norm = set()
     for part in re.split(r"[,;/\|]+", raw_text):
         candidate = re.sub(r"\s+", " ", part).strip()
@@ -310,10 +292,9 @@ def _extract_creators_from_cell(creator_cell) -> List[str]:
 
     return creators
 
-
-def _select_best_title(query_title: str, candidates: List[str]) -> Tuple[Optional[str], Dict[str, int]]:
+def _select_best_title(query_title: str, candidates: list[str]) -> tuple[str | None, dict[str, int]]:
     """Select the best-matching title candidate and return detailed scores."""
-    best_title: Optional[str] = None
+    best_title: str | None = None
     best_scores = {"token": 0, "simple": 0, "combined": 0}
 
     for candidate in candidates:
@@ -327,8 +308,7 @@ def _select_best_title(query_title: str, candidates: List[str]) -> Tuple[Optiona
 
     return best_title, best_scores
 
-
-def _get_api_key() -> Optional[str]:
+def _get_api_key() -> str | None:
     """Get Anna's Archive API key from environment or config.
     
     Returns:
@@ -349,8 +329,7 @@ def _get_api_key() -> Optional[str]:
     
     return None
 
-
-def search_annas_archive(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_annas_archive(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search Anna's Archive by scraping the public search page.
     
     Uses table display format for cleaner, more structured results.
@@ -376,7 +355,7 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
     # Make request to search page with table display
     html = make_request(SEARCH_URL, params=params)
     
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     
     if isinstance(html, str):
         soup = BeautifulSoup(html, "html.parser")
@@ -421,8 +400,8 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
                     # Table structure: [icons, title, authors, publisher, year, filename]
                     cells = row.find_all(['td', 'th'])
 
-                    title_candidates: List[str] = []
-                    extracted_creators: List[str] = []
+                    title_candidates: list[str] = []
+                    extracted_creators: list[str] = []
                     title_scores = {"token": 0, "simple": 0, "combined": 0}
 
                     if len(cells) > 1:
@@ -530,8 +509,7 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
     logger.info("Found %d results from Anna's Archive", len(results))
     return results
 
-
-def download_annas_archive_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_annas_archive_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download a work from Anna's Archive.
     
     Anna's Archive aggregates files from multiple sources. This function:
@@ -556,11 +534,7 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
         QuotaDeferredException: When quota is exhausted and wait_for_quota_reset is True.
             The caller should catch this and retry later.
     """
-    md5 = None
-    if isinstance(item_data, SearchResult):
-        md5 = item_data.source_id or item_data.raw.get("md5") or item_data.raw.get("id")
-    else:
-        md5 = item_data.get("md5") or item_data.get("id")
+    md5 = resolve_item_id(item_data, "md5", "id")
     
     if not md5:
         logger.warning("No MD5 hash found in item data for Anna's Archive")
@@ -600,7 +574,6 @@ def download_annas_archive_work(item_data: Union[SearchResult, dict], output_fol
     else:
         logger.info("Anna's Archive: Using public download scraping (no API key)")
         return _download_via_scraping(md5, output_folder)
-
 
 def _download_with_api(md5: str, api_key: str, output_folder: str) -> bool:
     """Download using Anna's Archive fast download API (requires membership).
@@ -682,7 +655,6 @@ def _download_with_api(md5: str, api_key: str, output_folder: str) -> bool:
     except Exception as e:
         logger.exception("Error using Anna's Archive fast download API: %s", e)
         return False
-
 
 def _download_via_scraping(md5: str, output_folder: str) -> bool:
     """Download by scraping the MD5 page for download links.

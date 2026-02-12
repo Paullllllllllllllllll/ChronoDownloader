@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from api.core.config import get_config, get_resume_mode
 from api.core.naming import build_work_directory_name
@@ -18,8 +18,7 @@ from api.matching import normalize_text
 
 logger = logging.getLogger(__name__)
 
-
-def get_naming_config() -> Dict[str, Any]:
+def get_naming_config() -> dict[str, Any]:
     """Get naming configuration with defaults.
     
     Returns:
@@ -33,7 +32,6 @@ def get_naming_config() -> Dict[str, Any]:
     nm.setdefault("title_slug_max_len", 80)
     
     return nm
-
 
 def compute_work_id(title: str, creator: str | None) -> str:
     """Generate a stable hash-based work ID from title and creator.
@@ -49,12 +47,11 @@ def compute_work_id(title: str, creator: str | None) -> str:
     h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:10]
     return h
 
-
 def compute_work_dir(
     base_output_dir: str,
     entry_id: str | None,
     title: str,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Compute the work directory path and name.
     
     Args:
@@ -74,8 +71,7 @@ def compute_work_dir(
     work_dir = os.path.join(base_output_dir, work_dir_name)
     return work_dir, work_dir_name
 
-
-def check_work_status(work_dir: str, resume_mode: str | None = None) -> Tuple[bool, str]:
+def check_work_status(work_dir: str, resume_mode: str | None = None) -> tuple[bool, str]:
     """Check if a work should be skipped based on resume mode and existing state.
     
     Args:
@@ -119,11 +115,10 @@ def check_work_status(work_dir: str, resume_mode: str | None = None) -> Tuple[bo
     
     return False, ""
 
-
 def update_work_status(
     work_json_path: str,
     status: str,
-    download_info: Dict[str, Any] | None = None,
+    download_info: dict[str, Any] | None = None,
 ) -> None:
     """Update the status field in work.json.
     
@@ -150,15 +145,14 @@ def update_work_status(
     except Exception as e:
         logger.warning("Failed to update work.json status: %s", e)
 
-
 def create_work_json(
     work_json_path: str,
     title: str,
     creator: str | None,
     entry_id: str | None,
-    selection_config: Dict[str, Any],
+    selection_config: dict[str, Any],
     candidates: list,
-    selected: Dict[str, Any] | None,
+    selected: dict[str, Any] | None,
     status: str = "pending",
 ) -> None:
     """Create the initial work.json file.
@@ -173,7 +167,7 @@ def create_work_json(
         selected: Selected candidate info or None
         status: Initial status (default: "pending")
     """
-    work_meta: Dict[str, Any] = {
+    work_meta: dict[str, Any] = {
         "input": {"title": title, "creator": creator, "entry_id": entry_id},
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "status": status,
@@ -186,7 +180,6 @@ def create_work_json(
             json.dump(work_meta, f, indent=2, ensure_ascii=False)
     except Exception:
         logger.exception("Failed to write work.json to %s", work_json_path)
-
 
 def format_candidates_for_json(candidates: list) -> list:
     """Format SearchResult candidates for work.json storage.
@@ -212,8 +205,7 @@ def format_candidates_for_json(candidates: list) -> list:
         for sr in candidates
     ]
 
-
-def format_selected_for_json(selected, source_id: str | None) -> Dict[str, Any] | None:
+def format_selected_for_json(selected, source_id: str | None) -> dict[str, Any] | None:
     """Format selected SearchResult for work.json storage.
     
     Args:
@@ -231,7 +223,6 @@ def format_selected_for_json(selected, source_id: str | None) -> Dict[str, Any] 
         "source_id": source_id,
         "title": selected.title,
     }
-
 
 __all__ = [
     "get_naming_config",

@@ -1,18 +1,14 @@
 """Connector for the Polona.pl API."""
+from __future__ import annotations
 
 import logging
 import urllib.parse
-from typing import List, Union
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-)
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_iiif_renderings
 from .iiif import extract_image_service_bases, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
@@ -22,8 +18,7 @@ logger = logging.getLogger(__name__)
 SEARCH_PAGE_URL = "https://polona.pl/search/?query={query}"
 IIIF_MANIFEST_URL = "https://polona.pl/iiif/item/{item_id}/manifest.json"
 
-
-def search_polona(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_polona(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search Polona by parsing the public search page for item links.
 
     Note: Polona does not expose a stable, documented JSON search for items.
@@ -35,7 +30,7 @@ def search_polona(title: str, creator: str | None = None, max_results: int = 3) 
     logger.info("Searching Polona for: %s", title)
     html = make_request(url)
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if isinstance(html, str):
         soup = BeautifulSoup(html, "html.parser")
         seen = set()
@@ -64,17 +59,13 @@ def search_polona(title: str, creator: str | None = None, max_results: int = 3) 
                 continue
     return results
 
-
-def download_polona_work(item_data: Union[SearchResult, dict], output_folder) -> bool:
+def download_polona_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download IIIF manifest and page images for a Polona item.
 
     Polona exposes a stable IIIF manifest per item; we parse v2/v3 and download full-size images.
     """
 
-    if isinstance(item_data, SearchResult):
-        item_id = item_data.source_id or item_data.raw.get("id")
-    else:
-        item_id = item_data.get("id")
+    item_id = resolve_item_id(item_data)
     if not item_id:
         logger.warning("No Polona item id provided.")
         return False
@@ -98,7 +89,7 @@ def download_polona_work(item_data: Union[SearchResult, dict], output_folder) ->
         logger.exception("Polona: error while downloading manifest renderings for %s", item_id)
 
     # Extract IIIF Image API service bases
-    service_bases: List[str] = extract_image_service_bases(manifest)
+    service_bases: list[str] = extract_image_service_bases(manifest)
 
     if not service_bases:
         logger.info("No IIIF image services found in Polona manifest for %s", item_id)

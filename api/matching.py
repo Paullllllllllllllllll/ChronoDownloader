@@ -8,8 +8,7 @@ from __future__ import annotations
 import difflib
 import re
 import unicodedata
-from typing import Iterable, Optional
-
+from typing import Iterable
 
 def strip_accents(text: str) -> str:
     """Remove accent marks from text while preserving base characters.
@@ -26,7 +25,6 @@ def strip_accents(text: str) -> str:
     # Normalize and remove combining characters
     nfkd = unicodedata.normalize("NFKD", str(text))
     return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
-
 
 def normalize_text(text: str) -> str:
     """Normalize text for robust fuzzy matching.
@@ -54,7 +52,6 @@ def normalize_text(text: str) -> str:
     
     return s
 
-
 def simple_ratio(a: str, b: str) -> int:
     """Return a similarity score in 0..100 using difflib ratio.
 
@@ -72,7 +69,6 @@ def simple_ratio(a: str, b: str) -> int:
         return 0
     
     return int(round(difflib.SequenceMatcher(None, a_norm, b_norm).ratio() * 100))
-
 
 def token_set_ratio(a: str, b: str) -> int:
     """Approximate token set ratio using stdlib.
@@ -98,7 +94,6 @@ def token_set_ratio(a: str, b: str) -> int:
     
     return simple_ratio(sa, sb)
 
-
 def title_score(query_title: str, item_title: str, method: str = "token_set") -> int:
     """Compute similarity score between query and item titles.
 
@@ -116,8 +111,7 @@ def title_score(query_title: str, item_title: str, method: str = "token_set") ->
     # Default to token_set
     return token_set_ratio(query_title, item_title)
 
-
-def creator_score(query_creator: Optional[str], creators: Optional[Iterable[str]]) -> int:
+def creator_score(query_creator: str | None, creators: Iterable[str] | None) -> int:
     """Compute best similarity score between query creator and item creators.
 
     Args:
@@ -139,8 +133,7 @@ def creator_score(query_creator: Optional[str], creators: Optional[Iterable[str]
     
     return best
 
-
-def parse_year(text: Optional[str]) -> Optional[int]:
+def parse_year(text: str | None) -> int | None:
     """Extract a 4-digit year from text.
 
     Args:
@@ -161,12 +154,11 @@ def parse_year(text: Optional[str]) -> Optional[int]:
     except Exception:
         return None
 
-
 def combined_match_score(
     query_title: str,
     item_title: str,
-    query_creator: Optional[str] = None,
-    creators: Optional[Iterable[str]] = None,
+    query_creator: str | None = None,
+    creators: Iterable[str] | None = None,
     creator_weight: float = 0.2,
     method: str = "token_set",
 ) -> float:

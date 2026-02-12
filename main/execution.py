@@ -18,7 +18,7 @@ Expected CSV columns (from bib_sampling.ipynb):
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -31,10 +31,8 @@ from main.unified_csv import (
     ENTRY_ID_COL,
     DIRECT_LINK_COL,
     LINK_COL,
-    get_pending_works,
     mark_success,
     mark_failed,
-    mark_deferred,
 )
 from api.direct_iiif_api import (
     is_iiif_manifest_url,
@@ -45,17 +43,14 @@ from api.direct_iiif_api import (
 from main.background_scheduler import (
     BackgroundRetryScheduler,
     get_background_scheduler,
-    start_background_scheduler,
-    stop_background_scheduler,
 )
 from main.deferred_queue import get_deferred_queue
 from api.providers import PROVIDERS
 
-
 def _setup_background_scheduler(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     logger: logging.Logger,
-) -> Optional[BackgroundRetryScheduler]:
+) -> BackgroundRetryScheduler | None:
     """Set up and start the background retry scheduler.
     
     Args:
@@ -92,20 +87,19 @@ def _setup_background_scheduler(
     
     return None
 
-
 def run_batch_downloads(
     works_df: pd.DataFrame,
     output_dir: str,
-    config: Dict[str, Any],
+    config: dict[str, Any],
     dry_run: bool = False,
     use_parallel: bool = True,
-    max_workers_override: Optional[int] = None,
-    logger: Optional[logging.Logger] = None,
+    max_workers_override: int | None = None,
+    logger: logging.Logger | None = None,
     on_submit: Optional[Callable[[DownloadTask], None]] = None,
-    on_complete: Optional[Callable[[DownloadTask, bool, Optional[Exception]], None]] = None,
-    csv_path: Optional[str] = None,
+    on_complete: Optional[Callable[[DownloadTask, bool, Exception | None], None]] = None,
+    csv_path: str | None = None,
     enable_background_retry: bool = True,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Run batch downloads with automatic mode selection.
     
     Args:
@@ -132,7 +126,7 @@ def run_batch_downloads(
         logger = logging.getLogger(__name__)
     
     # Start background retry scheduler if enabled
-    bg_scheduler: Optional[BackgroundRetryScheduler] = None
+    bg_scheduler: BackgroundRetryScheduler | None = None
     if enable_background_retry and not dry_run:
         bg_scheduler = _setup_background_scheduler(config, logger)
     
@@ -168,16 +162,15 @@ def run_batch_downloads(
         # It will be stopped by the main downloader when appropriate
         pass
 
-
 def process_direct_iiif(
     manifest_url: str,
     output_dir: str,
-    entry_id: Optional[str] = None,
-    title: Optional[str] = None,
-    creator: Optional[str] = None,
-    file_stem: Optional[str] = None,
+    entry_id: str | None = None,
+    title: str | None = None,
+    creator: str | None = None,
+    file_stem: str | None = None,
     dry_run: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Process a single direct IIIF manifest download.
 
     This is the single entry point for all direct-IIIF downloads, used by
@@ -251,8 +244,7 @@ def process_direct_iiif(
         "error": dl_result.get("error", "unknown"),
     }
 
-
-def _get_direct_link(row: pd.Series) -> Optional[str]:
+def _get_direct_link(row: pd.Series) -> str | None:
     """Extract a direct IIIF link from a CSV row if present and valid.
     
     Checks both the 'direct_link' column (preferred) and the 'link' column
@@ -282,14 +274,13 @@ def _get_direct_link(row: pd.Series) -> Optional[str]:
     
     return None
 
-
 def _run_sequential(
     works_df: pd.DataFrame,
     output_dir: str,
     dry_run: bool,
     logger: logging.Logger,
-    csv_path: Optional[str] = None,
-) -> Dict[str, int]:
+    csv_path: str | None = None,
+) -> dict[str, int]:
     """Run downloads sequentially.
     
     Args:
@@ -386,17 +377,16 @@ def _run_sequential(
     logger.info("All works processed.")
     return {"processed": processed, "succeeded": succeeded, "failed": failed, "skipped": skipped}
 
-
 def _run_parallel(
     works_df: pd.DataFrame,
     output_dir: str,
-    config: Dict[str, Any],
-    max_workers_override: Optional[int],
+    config: dict[str, Any],
+    max_workers_override: int | None,
     logger: logging.Logger,
     on_submit: Optional[Callable[[DownloadTask], None]] = None,
-    on_complete: Optional[Callable[[DownloadTask, bool, Optional[Exception]], None]] = None,
-    csv_path: Optional[str] = None,
-) -> Dict[str, int]:
+    on_complete: Optional[Callable[[DownloadTask, bool, Exception | None], None]] = None,
+    csv_path: str | None = None,
+) -> dict[str, int]:
     """Run downloads in parallel using DownloadScheduler.
     
     Searches are sequential to avoid overwhelming providers,
@@ -445,7 +435,7 @@ def _run_parallel(
         actual_submitted[0] += 1
         submit_callback(task)
     
-    def wrapped_complete(task: DownloadTask, success: bool, error: Optional[Exception]) -> None:
+    def wrapped_complete(task: DownloadTask, success: bool, error: Exception | None) -> None:
         # Always perform CSV sync (critical for resume functionality)
         if csv_path and task.entry_id:
             try:
@@ -611,7 +601,6 @@ def _run_parallel(
         "skipped": skipped_count,
     }
 
-
 def create_interactive_callbacks(logger: logging.Logger):
     """Create progress callbacks suitable for interactive mode.
     
@@ -631,7 +620,7 @@ def create_interactive_callbacks(logger: logging.Logger):
         title_short = task.title[:50] + "..." if len(task.title) > 50 else task.title
         ConsoleUI.print_info(f"Queued [{submitted[0]}]", title_short)
     
-    def on_complete(task: DownloadTask, success: bool, error: Optional[Exception]) -> None:
+    def on_complete(task: DownloadTask, success: bool, error: Exception | None) -> None:
         completed[0] += 1
         title_short = task.title[:50] + "..." if len(task.title) > 50 else task.title
         if success:
@@ -643,6 +632,5 @@ def create_interactive_callbacks(logger: logging.Logger):
             ConsoleUI.print_error(msg)
     
     return on_submit, on_complete
-
 
 __all__ = ["run_batch_downloads", "create_interactive_callbacks", "process_direct_iiif"]

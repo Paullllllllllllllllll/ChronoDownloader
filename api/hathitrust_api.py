@@ -1,24 +1,23 @@
 """Connector for the HathiTrust Bibliographic and Data APIs."""
+from __future__ import annotations
 
 import logging
 import os
 import re
-from typing import Any, Dict, List, Union
+from typing import Any
 
-from .utils import save_json, make_request, download_file
-from .model import SearchResult, convert_to_searchresult
-
+from .core.network import make_request
+from .utils import save_json, download_file
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 
 logger = logging.getLogger(__name__)
 
 BIB_BASE_URL = "https://catalog.hathitrust.org/api/volumes/brief/"
 DATA_API_URL = "https://babel.hathitrust.org/cgi/htd/volume/pages"
 
-
 def _api_key() -> str | None:
     """Get HathiTrust API key from environment."""
     return os.getenv("HATHI_API_KEY")
-
 
 def _bib_url(id_type: str, value: str) -> str:
     """Build Bibliographic API URL for a given identifier type and value.
@@ -33,8 +32,7 @@ def _bib_url(id_type: str, value: str) -> str:
     id_type = id_type.lower().strip()
     return f"{BIB_BASE_URL}{id_type}/{value}.json"
 
-
-def _parse_identifiers(text: str) -> Dict[str, List[str]]:
+def _parse_identifiers(text: str) -> dict[str, list[str]]:
     """Parse explicit identifier hints from a string like 'oclc:12345 isbn:978...'.
     
     Args:
@@ -46,7 +44,7 @@ def _parse_identifiers(text: str) -> Dict[str, List[str]]:
     if not text:
         return {}
     s = str(text)
-    ids: Dict[str, List[str]] = {"oclc": [], "isbn": [], "lccn": [], "issn": [], "htid": []}
+    ids: dict[str, list[str]] = {"oclc": [], "isbn": [], "lccn": [], "issn": [], "htid": []}
     # Patterns are lenient to allow punctuation; we strip surrounding cruft
     for m in re.finditer(r"oclc\s*:\s*(\d+)", s, flags=re.I):
         ids["oclc"].append(m.group(1))
@@ -61,8 +59,7 @@ def _parse_identifiers(text: str) -> Dict[str, List[str]]:
     # Drop empty lists
     return {k: v for k, v in ids.items() if v}
 
-
-def search_hathitrust(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_hathitrust(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Identifier-aware search using the HathiTrust Bibliographic API.
     
     Args:
@@ -80,7 +77,7 @@ def search_hathitrust(title: str, creator: str | None = None, max_results: int =
         for k, v in _parse_identifiers(str(creator)).items():
             id_hints.setdefault(k, []).extend(v)
 
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if not id_hints:
         logger.info(
             "HathiTrust: no explicit identifiers found in query '%s'; skipping search (no public keyword API).",
@@ -89,8 +86,8 @@ def search_hathitrust(title: str, creator: str | None = None, max_results: int =
         return results
 
     # Helper to transform bib record to SearchResult(s)
-    def _records_to_results(data: Dict[str, Any]) -> List[SearchResult]:
-        out: List[SearchResult] = []
+    def _records_to_results(data: dict[str, Any]) -> list[SearchResult]:
+        out: list[SearchResult] = []
         try:
             recs = (data or {}).get("records", {})
             for rec_id, rec in recs.items():
@@ -156,8 +153,7 @@ def search_hathitrust(title: str, creator: str | None = None, max_results: int =
             break
     return results
 
-
-def download_hathitrust_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_hathitrust_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download metadata and a representative page for a HathiTrust item.
 
     - Save Bibliographic API record (if present in raw.bib).
@@ -170,14 +166,9 @@ def download_hathitrust_work(item_data: Union[SearchResult, dict], output_folder
     Returns:
         True if download was successful, False otherwise
     """
-    if isinstance(item_data, SearchResult):
-        htid = item_data.source_id or item_data.raw.get("htid")
-        bib = item_data.raw.get("bib")
-        rec_id = item_data.raw.get("record_id")
-    else:
-        htid = item_data.get("htid") or item_data.get("identifier") or item_data.get("id")
-        bib = item_data.get("bib")
-        rec_id = item_data.get("record_id")
+    htid = resolve_item_id(item_data, "htid", "identifier", "id")
+    bib = resolve_item_field(item_data, "bib")
+    rec_id = resolve_item_field(item_data, "record_id")
 
     # Save bib metadata if available in raw
     if isinstance(bib, dict):

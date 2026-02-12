@@ -53,7 +53,6 @@ PROVIDER_ABBREV = {
     "sbb_digital": "SBB",
 }
 
-
 def to_snake_case(value: str) -> str:
     """Convert arbitrary string to snake_case: lowercase, alnum + underscores only.
     
@@ -77,7 +76,6 @@ def to_snake_case(value: str) -> str:
     # Trim underscores and lowercase
     s = s.strip("_").lower()
     return s
-
 
 def sanitize_filename(name: str, max_base_len: int = 100) -> str:
     """Sanitize string for safe filenames while preserving extension.
@@ -110,7 +108,6 @@ def sanitize_filename(name: str, max_base_len: int = 100) -> str:
     base = base[:max_base_len]
     return f"{base}{ext}"
 
-
 def _split_name_and_suffixes(name: str) -> tuple[str, str]:
     """Split a filename into base name and extension(s).
     
@@ -133,7 +130,6 @@ def _split_name_and_suffixes(name: str) -> tuple[str, str]:
     
     return base_no_ext, ext
 
-
 def get_provider_slug(pref_key: str | None, url_provider: str | None) -> str:
     """Get a short slug identifier for a provider.
     
@@ -153,7 +149,6 @@ def get_provider_slug(pref_key: str | None, url_provider: str | None) -> str:
     # Otherwise snake-case the key as best effort
     return to_snake_case(key)
 
-
 def get_provider_abbrev(provider_key: str) -> str:
     """Get a display abbreviation for a provider.
     
@@ -164,7 +159,6 @@ def get_provider_abbrev(provider_key: str) -> str:
         Display abbreviation (uppercase)
     """
     return PROVIDER_ABBREV.get(provider_key, provider_key.upper())
-
 
 def build_work_directory_name(
     entry_id: str | None,

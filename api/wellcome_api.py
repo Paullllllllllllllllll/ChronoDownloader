@@ -12,16 +12,17 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List, Union, Dict, Optional
 
-from .utils import make_request, save_json, get_provider_setting, budget_exhausted, download_file
+from .core.budget import budget_exhausted
+from .core.config import get_provider_setting
+from .core.network import make_request
+from .utils import download_file
 from .iiif import download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 
 logger = logging.getLogger(__name__)
 
 CATALOGUE_WORKS_URL = "https://api.wellcomecollection.org/catalogue/v2/works"
-
 
 def _max_images() -> int | None:
     """Read max images per work from config (provider_settings.wellcome.max_images).
@@ -38,8 +39,7 @@ def _max_images() -> int | None:
     except ValueError:
         return 0
 
-
-def _extract_image_services(work: Dict) -> List[str]:
+def _extract_image_services(work: Dict) -> list[str]:
     """Return a list of IIIF Image API service base URLs from a Work doc (with include=items).
 
     Looks for items[].locations[] entries with locationType.id == "iiif-image".
@@ -51,7 +51,7 @@ def _extract_image_services(work: Dict) -> List[str]:
     Returns:
         List of IIIF Image API service base URLs
     """
-    services: List[str] = []
+    services: list[str] = []
     for item in work.get("items", []) or []:
         for loc in item.get("locations", []) or []:
             lt = (loc.get("locationType") or {}).get("id")
@@ -62,8 +62,7 @@ def _extract_image_services(work: Dict) -> List[str]:
                     services.append(base)
     return services
 
-
-def search_wellcome(title: str, creator: Optional[str] = None, max_results: int = 3) -> List[SearchResult]:
+def search_wellcome(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     """Search Wellcome works and return entries that have IIIF Image services.
 
     We combine title and optional creator into a simple query string, request include=items,
@@ -87,7 +86,7 @@ def search_wellcome(title: str, creator: Optional[str] = None, max_results: int 
     }
     logger.info("Searching Wellcome Collection for: %s", title)
     data = make_request(CATALOGUE_WORKS_URL, params=params)
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if not isinstance(data, dict):
         return results
     for work in data.get("results", []) or []:
@@ -108,8 +107,7 @@ def search_wellcome(title: str, creator: Optional[str] = None, max_results: int 
             break
     return results
 
-
-def download_wellcome_work(item_data: Union[SearchResult, Dict], output_folder: str) -> bool:
+def download_wellcome_work(item_data: SearchResult | Dict, output_folder: str) -> bool:
     """Download full-size images from Wellcome IIIF Image services.
 
     If the SearchResult contains raw.image_services, we use them directly.
@@ -122,14 +120,9 @@ def download_wellcome_work(item_data: Union[SearchResult, Dict], output_folder: 
     Returns:
         True if download was successful, False otherwise
     """
-    if isinstance(item_data, SearchResult):
-        work_id = item_data.source_id or item_data.raw.get("id")
-        services = item_data.raw.get("image_services") or []
-        title = item_data.title
-    else:
-        work_id = item_data.get("id")
-        services = item_data.get("image_services", [])
-        title = item_data.get("title") or ""
+    work_id = resolve_item_id(item_data)
+    services = resolve_item_field(item_data, "image_services", default=[]) or []
+    title = resolve_item_field(item_data, "title", attr="title", default="")
 
     # Refetch work if needed
     if work_id and not services:
@@ -171,11 +164,7 @@ def download_wellcome_work(item_data: Union[SearchResult, Dict], output_folder: 
             logger.exception("Error downloading Wellcome image from %s", svc)
     # Attempt thumbnail download as an additional/fallback object
     try:
-        thumb_url = None
-        if isinstance(item_data, SearchResult):
-            thumb_url = item_data.raw.get("thumbnail")
-        else:
-            thumb_url = item_data.get("thumbnail")
+        thumb_url = resolve_item_field(item_data, "thumbnail")
         if not thumb_url and work_id:
             # Try refetching minimal work to get thumbnail if missing
             work = make_request(f"{CATALOGUE_WORKS_URL}/{work_id}")

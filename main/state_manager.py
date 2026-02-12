@@ -17,14 +17,13 @@ import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from api.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_STATE_FILE = ".downloader_state.json"
-
 
 class StateManager:
     """Unified state manager for persistent application state.
@@ -33,10 +32,10 @@ class StateManager:
     quota tracking and deferred downloads.
     """
     
-    _instance: Optional["StateManager"] = None
+    _instance: "StateManager" | None = None
     _lock = threading.Lock()
     
-    def __new__(cls, state_file: Optional[str] = None) -> "StateManager":
+    def __new__(cls, state_file: str | None = None) -> "StateManager":
         """Singleton pattern."""
         with cls._lock:
             if cls._instance is None:
@@ -45,7 +44,7 @@ class StateManager:
                 cls._instance = instance
             return cls._instance
     
-    def __init__(self, state_file: Optional[str] = None):
+    def __init__(self, state_file: str | None = None):
         """Initialize the state manager.
         
         Args:
@@ -68,7 +67,7 @@ class StateManager:
             )
         
         # State sections
-        self._state: Dict[str, Any] = {
+        self._state: dict[str, Any] = {
             "quotas": {},
             "deferred_items": [],
             "last_updated": None,
@@ -149,7 +148,7 @@ class StateManager:
     
     # === Quota State Methods ===
     
-    def get_quotas(self) -> Dict[str, Any]:
+    def get_quotas(self) -> dict[str, Any]:
         """Get all quota state.
         
         Returns:
@@ -158,7 +157,7 @@ class StateManager:
         with self._data_lock:
             return dict(self._state["quotas"])
     
-    def get_quota(self, provider_key: str) -> Optional[Dict[str, Any]]:
+    def get_quota(self, provider_key: str) -> dict[str, Any] | None:
         """Get quota state for a provider.
         
         Args:
@@ -170,7 +169,7 @@ class StateManager:
         with self._data_lock:
             return self._state["quotas"].get(provider_key)
     
-    def set_quota(self, provider_key: str, quota_data: Dict[str, Any]) -> None:
+    def set_quota(self, provider_key: str, quota_data: dict[str, Any]) -> None:
         """Set quota state for a provider.
         
         Args:
@@ -181,7 +180,7 @@ class StateManager:
             self._state["quotas"][provider_key] = quota_data
             self._save_state()
     
-    def update_quotas(self, quotas: Dict[str, Dict[str, Any]]) -> None:
+    def update_quotas(self, quotas: dict[str, dict[str, Any]]) -> None:
         """Update multiple quotas at once.
         
         Args:
@@ -212,7 +211,7 @@ class StateManager:
             self._state["deferred_items"] = items
             self._save_state()
     
-    def add_deferred_item(self, item: Dict[str, Any]) -> None:
+    def add_deferred_item(self, item: dict[str, Any]) -> None:
         """Add a deferred item.
         
         Args:
@@ -256,7 +255,6 @@ class StateManager:
         """Force a save to disk."""
         self._save_state()
 
-
 def get_state_manager() -> StateManager:
     """Get the singleton StateManager instance.
     
@@ -264,7 +262,6 @@ def get_state_manager() -> StateManager:
         StateManager instance
     """
     return StateManager()
-
 
 __all__ = [
     "StateManager",

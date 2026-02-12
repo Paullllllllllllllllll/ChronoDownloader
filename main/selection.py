@@ -11,7 +11,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable
 
 from api.core.config import get_config, get_provider_setting, get_min_title_score
 from api.matching import combined_match_score
@@ -20,15 +20,14 @@ from api.model import SearchResult, convert_to_searchresult
 logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
-ProviderTuple = Tuple[str, Callable, Callable, str]
-
+ProviderTuple = tuple[str, Callable, Callable, str]
 
 def call_search_function(
     search_func: Callable,
     title: str,
-    creator: Optional[str],
+    creator: str | None,
     max_results: int
-) -> List[Any]:
+) -> list[Any]:
     """Call a search function with varying signatures robustly.
     
     Args:
@@ -55,7 +54,6 @@ def call_search_function(
     except Exception:
         raise
     return []
-
 
 def prepare_search_result(
     provider_key: str,
@@ -86,13 +84,12 @@ def prepare_search_result(
     
     return sr
 
-
 def score_candidate(
     sr: SearchResult,
     query_title: str,
-    query_creator: Optional[str],
+    query_creator: str | None,
     creator_weight: float
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute matching score for a search result candidate.
     
     Args:
@@ -124,11 +121,10 @@ def score_candidate(
     
     return {"score": score, "boost": boost, "total": total}
 
-
 def attach_scores(
     sr: SearchResult,
     query_title: str,
-    query_creator: Optional[str],
+    query_creator: str | None,
     creator_weight: float
 ) -> None:
     """Compute and attach matching scores to a SearchResult's raw dict.
@@ -141,7 +137,6 @@ def attach_scores(
     """
     scores = score_candidate(sr, query_title, query_creator, creator_weight)
     sr.raw.setdefault("__matching__", {}).update(scores)
-
 
 def get_max_results_for_provider(provider_key: str, default: int = 5) -> int:
     """Get max_results setting for a provider.
@@ -159,15 +154,14 @@ def get_max_results_for_provider(provider_key: str, default: int = 5) -> int:
     except Exception:
         return default
 
-
 def collect_candidates_sequential(
-    provider_list: List[ProviderTuple],
+    provider_list: list[ProviderTuple],
     title: str,
-    creator: Optional[str],
+    creator: str | None,
     min_title_score: float,
     creator_weight: float,
     max_candidates_per_provider: int
-) -> Tuple[List[SearchResult], Optional[SearchResult], Optional[ProviderTuple]]:
+) -> tuple[list[SearchResult], SearchResult | None, ProviderTuple | None]:
     """Collect candidates using sequential first-hit strategy.
     
     Searches providers in order and stops at the first acceptable match.
@@ -184,9 +178,9 @@ def collect_candidates_sequential(
     Returns:
         Tuple of (all_candidates, selected, selected_provider_tuple)
     """
-    all_candidates: List[SearchResult] = []
-    selected: Optional[SearchResult] = None
-    selected_provider_tuple: Optional[ProviderTuple] = None
+    all_candidates: list[SearchResult] = []
+    selected: SearchResult | None = None
+    selected_provider_tuple: ProviderTuple | None = None
     
     for pkey, search_func, download_func, pname in provider_list:
         logger.info("--- Searching on %s for '%s' ---", pname, title)
@@ -204,7 +198,7 @@ def collect_candidates_sequential(
             provider_threshold = get_min_title_score(pkey, default=min_title_score)
             
             # Score and collect candidates
-            temp: List[Tuple[float, SearchResult]] = []
+            temp: list[tuple[float, SearchResult]] = []
             for it in results:
                 sr = prepare_search_result(pkey, pname, it)
                 attach_scores(sr, title, creator, creator_weight)
@@ -225,7 +219,6 @@ def collect_candidates_sequential(
     
     return all_candidates, selected, selected_provider_tuple
 
-
 def _get_max_parallel_searches() -> int:
     """Get max_parallel_searches from config.
     
@@ -239,14 +232,13 @@ def _get_max_parallel_searches() -> int:
     except (TypeError, ValueError):
         return 1
 
-
 def _search_single_provider(
     provider_tuple: ProviderTuple,
     title: str,
-    creator: Optional[str],
+    creator: str | None,
     max_candidates_per_provider: int,
     creator_weight: float,
-) -> Tuple[str, str, List[SearchResult]]:
+) -> tuple[str, str, list[SearchResult]]:
     """Search a single provider and return scored candidates.
     
     This function is designed to be called from a ThreadPoolExecutor.
@@ -262,7 +254,7 @@ def _search_single_provider(
         Tuple of (provider_key, provider_name, list of scored SearchResults)
     """
     pkey, search_func, _download_func, pname = provider_tuple
-    candidates: List[SearchResult] = []
+    candidates: list[SearchResult] = []
     
     try:
         max_results = get_max_results_for_provider(pkey, max_candidates_per_provider)
@@ -278,14 +270,13 @@ def _search_single_provider(
     
     return pkey, pname, candidates
 
-
 def collect_candidates_all(
-    provider_list: List[ProviderTuple],
+    provider_list: list[ProviderTuple],
     title: str,
-    creator: Optional[str],
+    creator: str | None,
     creator_weight: float,
     max_candidates_per_provider: int
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """Collect candidates from all providers.
     
     Supports parallel searches when selection.max_parallel_searches > 1.
@@ -307,20 +298,19 @@ def collect_candidates_all(
     
     return _collect_candidates_parallel(provider_list, title, creator, creator_weight, max_candidates_per_provider, max_workers)
 
-
 def _collect_candidates_sequential(
-    provider_list: List[ProviderTuple],
+    provider_list: list[ProviderTuple],
     title: str,
-    creator: Optional[str],
+    creator: str | None,
     creator_weight: float,
     max_candidates_per_provider: int
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """Sequential candidate collection (collect-and-select mode without early exit).
     
     This is a simplified version of collect_candidates_sequential that doesn't
     perform early exit on first match - it always collects from all providers.
     """
-    all_candidates: List[SearchResult] = []
+    all_candidates: list[SearchResult] = []
     
     for pkey, search_func, _download_func, pname in provider_list:
         logger.info("--- Searching on %s for '%s' ---", pname, title)
@@ -344,21 +334,20 @@ def _collect_candidates_sequential(
     
     return all_candidates
 
-
 def _collect_candidates_parallel(
-    provider_list: List[ProviderTuple],
+    provider_list: list[ProviderTuple],
     title: str,
-    creator: Optional[str],
+    creator: str | None,
     creator_weight: float,
     max_candidates_per_provider: int,
     max_workers: int,
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """Parallel candidate collection using ThreadPoolExecutor.
     
     Searches all providers concurrently, then merges results.
     Provider order is preserved for consistent selection behavior.
     """
-    all_candidates: List[SearchResult] = []
+    all_candidates: list[SearchResult] = []
     start_time = time.perf_counter()
     
     logger.info(
@@ -367,7 +356,7 @@ def _collect_candidates_parallel(
     )
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_provider: Dict[concurrent.futures.Future, ProviderTuple] = {}
+        future_to_provider: dict[concurrent.futures.Future, ProviderTuple] = {}
         
         for provider_tuple in provider_list:
             future = executor.submit(
@@ -380,7 +369,7 @@ def _collect_candidates_parallel(
             )
             future_to_provider[future] = provider_tuple
         
-        results_by_provider: Dict[str, List[SearchResult]] = {}
+        results_by_provider: dict[str, list[SearchResult]] = {}
         
         for future in concurrent.futures.as_completed(future_to_provider):
             provider_tuple = future_to_provider[future]
@@ -410,12 +399,11 @@ def _collect_candidates_parallel(
     
     return all_candidates
 
-
 def select_best_candidate(
-    all_candidates: List[SearchResult],
-    provider_list: List[ProviderTuple],
+    all_candidates: list[SearchResult],
+    provider_list: list[ProviderTuple],
     min_title_score: float
-) -> Tuple[Optional[SearchResult], Optional[ProviderTuple]]:
+) -> tuple[SearchResult | None, ProviderTuple | None]:
     """Select the best candidate based on provider hierarchy and scores.
     
     Uses per-provider min_title_score thresholds when configured,
@@ -430,7 +418,7 @@ def select_best_candidate(
         Tuple of (selected_result, selected_provider_tuple)
     """
     prov_priority = {pkey: idx for idx, (pkey, *_rest) in enumerate(provider_list)}
-    ranked: List[Tuple[int, float, SearchResult]] = []
+    ranked: list[tuple[int, float, SearchResult]] = []
     
     for sr in all_candidates:
         sc = sr.raw.get("__matching__", {})

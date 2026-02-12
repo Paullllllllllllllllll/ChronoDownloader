@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -100,7 +100,6 @@ _ANNAS_LOGIN_MARKERS = (
     "__darkreader__",
 )
 
-
 def _infer_extension_from_content_type(content_type: str) -> str:
     """Infer file extension from Content-Type header.
     
@@ -115,7 +114,6 @@ def _infer_extension_from_content_type(content_type: str) -> str:
         if mime in ct_lower:
             return ext
     return ""
-
 
 def _should_reject_html_response(
     content_type: str,
@@ -153,7 +151,6 @@ def _should_reject_html_response(
     
     return False, ""
 
-
 def _validate_file_magic_bytes(filepath: str, ext: str) -> tuple[bool, str]:
     """Validate downloaded file by checking magic bytes.
     
@@ -188,7 +185,6 @@ def _validate_file_magic_bytes(filepath: str, ext: str) -> tuple[bool, str]:
         logger.warning("Error validating file %s: %s", filepath, e)
         return True, ""  # Don't reject on validation error
 
-
 def _validate_html_not_login_page(filepath: str, url: str, provider: str | None) -> tuple[bool, str]:
     """Check if HTML file is a login/error page that should be rejected.
     
@@ -219,7 +215,6 @@ def _validate_html_not_login_page(filepath: str, url: str, provider: str | None)
         logger.warning("Error validating HTML file %s: %s", filepath, e)
         return True, ""
 
-
 def _determine_target_directory(
     folder_path: str,
     ext: str,
@@ -245,7 +240,6 @@ def _determine_target_directory(
         return None, f"Extension {ext} not in allowed list; skipping download", False
     
     return os.path.join(folder_path, "objects"), "", True
-
 
 def _build_standardized_filename(
     ext: str,
@@ -286,9 +280,8 @@ def _build_standardized_filename(
     
     return sanitize_filename(f"{safe_base}{ext}")
 
-
 def download_iiif_renderings(
-    manifest: Dict[str, Any], folder_path: str, filename_prefix: str = ""
+    manifest: dict[str, Any], folder_path: str, filename_prefix: str = ""
 ) -> int:
     """Download files referenced in IIIF manifest-level 'rendering' entries.
 
@@ -314,7 +307,7 @@ def download_iiif_renderings(
     if not dl_cfg.get("download_manifest_renderings", True):
         return 0
     
-    whitelist: List[str] = [
+    whitelist: list[str] = [
         str(m).lower()
         for m in (dl_cfg.get("rendering_mime_whitelist") or ["application/pdf", "application/epub+zip"])
         if m
@@ -325,8 +318,8 @@ def download_iiif_renderings(
     except Exception:
         limit = 1
 
-    def _collect_renderings(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
+    def _collect_renderings(obj: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
         r = obj.get("rendering")
         if isinstance(r, list):
             for it in r:
@@ -336,11 +329,11 @@ def download_iiif_renderings(
             items.append(r)
         return items
 
-    candidates: List[Dict[str, Any]] = _collect_renderings(manifest)
+    candidates: list[dict[str, Any]] = _collect_renderings(manifest)
 
     # Deduplicate by URL
     seen: set[str] = set()
-    selected: List[Dict[str, Any]] = []
+    selected: list[dict[str, Any]] = []
     for it in candidates:
         url = it.get("@id") or it.get("id")
         fmt = (it.get("format") or it.get("type") or "").lower()
@@ -364,7 +357,6 @@ def download_iiif_renderings(
         if download_file(url, folder_path, f"rendering_{idx:02d}"):
             count += 1
     return count
-
 
 def download_file(url: str, folder_path: str, filename: str) -> str | None:
     """Download a file with centralized rate limiting, retries, and budget enforcement.
@@ -583,8 +575,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         logger.error("Error saving file to %s: %s", folder_path, e)
         return None
 
-
-def _filename_from_content_disposition(cd: Optional[str]) -> Optional[str]:
+def _filename_from_content_disposition(cd: str | None) -> str | None:
     """Parse filename from Content-Disposition header."""
     if not cd:
         return None
@@ -614,8 +605,7 @@ def _filename_from_content_disposition(cd: Optional[str]) -> Optional[str]:
         return None
     return None
 
-
-def save_json(data: Any, folder_path: str, filename: str) -> Optional[str]:
+def save_json(data: Any, folder_path: str, filename: str) -> str | None:
     """Save data as JSON file in metadata directory.
 
     Args:
@@ -659,7 +649,6 @@ def save_json(data: Any, folder_path: str, filename: str) -> Optional[str]:
     except (OSError, TypeError) as e:
         logger.error("Error saving JSON %s: %s", filepath, e)
         return None
-
 
 # Export all public symbols for backward compatibility
 __all__ = [

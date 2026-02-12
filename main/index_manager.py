@@ -9,7 +9,7 @@ import logging
 import os
 import csv
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -18,10 +18,9 @@ logger = logging.getLogger(__name__)
 # Thread-safe lock for index.csv updates
 _index_csv_lock = threading.Lock()
 
-_index_header_cache: Dict[str, List[str]] = {}
+_index_header_cache: dict[str, list[str]] = {}
 
-
-def update_index_csv(base_output_dir: str, row: Dict[str, Any]) -> None:
+def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
     """Thread-safe update of index.csv.
     
     Appends a row to the index.csv file, creating headers if the file
@@ -44,7 +43,7 @@ def update_index_csv(base_output_dir: str, row: Dict[str, Any]) -> None:
                 except OSError:
                     file_empty = False
 
-            header_cols: Optional[List[str]] = _index_header_cache.get(index_path)
+            header_cols: list[str] | None = _index_header_cache.get(index_path)
             header_from_file = False
             if header_cols is None:
                 header_cols = None
@@ -78,7 +77,6 @@ def update_index_csv(base_output_dir: str, row: Dict[str, Any]) -> None:
         except Exception:
             logger.exception("Failed to update index.csv")
 
-
 def build_index_row(
     work_id: str,
     entry_id: str | None,
@@ -90,7 +88,7 @@ def build_index_row(
     work_json_path: str,
     status: str | None = None,
     item_url: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a row dictionary for index.csv.
     
     Args:
@@ -124,7 +122,6 @@ def build_index_row(
         row["status"] = status
     return row
 
-
 def read_index_csv(base_output_dir: str) -> pd.DataFrame | None:
     """Read the index.csv file.
     
@@ -144,7 +141,6 @@ def read_index_csv(base_output_dir: str) -> pd.DataFrame | None:
         logger.exception("Failed to read index.csv")
         return None
 
-
 def get_processed_work_ids(base_output_dir: str) -> set:
     """Get set of already-processed work IDs from index.csv.
     
@@ -158,7 +154,6 @@ def get_processed_work_ids(base_output_dir: str) -> set:
     if df is None or "work_id" not in df.columns:
         return set()
     return set(df["work_id"].dropna().astype(str))
-
 
 __all__ = [
     "update_index_csv",

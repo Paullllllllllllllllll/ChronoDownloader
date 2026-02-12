@@ -1,17 +1,13 @@
+from __future__ import annotations
+
 import logging
 import os
-from typing import List, Union
 
-from .utils import (
-    save_json,
-    make_request,
-    get_max_pages,
-    download_iiif_renderings,
-    prefer_pdf_over_images,
-    download_file,
-)
+from .core.config import get_max_pages, prefer_pdf_over_images
+from .core.network import make_request
+from .utils import save_json, download_file, download_iiif_renderings
 from .iiif import extract_image_service_bases, extract_direct_image_urls, download_one_from_service
-from .model import SearchResult, convert_to_searchresult
+from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +15,10 @@ API_BASE_URL = "https://api.europeana.eu/record/v2/search.json"
 RECORD_API_BASE = "https://api.europeana.eu/record/v2"
 EUROPEANA_MANIFEST_HOST = "https://iiif.europeana.eu"
 
-
 def _api_key() -> str | None:
     """Get Europeana API key from environment."""
     # Read at call time so keys loaded from .env or environment later are picked up
     return os.getenv("EUROPEANA_API_KEY")
-
 
 def _build_manifest_url_from_id(euro_id: str, api_key: str | None, prefer_v3: bool = True) -> str | None:
     """Construct the Europeana IIIF Manifest API URL from a Europeana record id.
@@ -50,8 +44,7 @@ def _build_manifest_url_from_id(euro_id: str, api_key: str | None, prefer_v3: bo
         return url
     return None
 
-
-def search_europeana(title: str, creator: str | None = None, max_results: int = 3) -> List[SearchResult]:
+def search_europeana(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
     key = _api_key()
     if not key:
         logger.warning("Europeana API key not configured. Skipping search.")
@@ -69,7 +62,7 @@ def search_europeana(title: str, creator: str | None = None, max_results: int = 
     }
     logger.info("Searching Europeana for: %s", title)
     data = make_request(API_BASE_URL, params=params)
-    results: List[SearchResult] = []
+    results: list[SearchResult] = []
     if not isinstance(data, dict):
         return results
     if data.get("success") and data.get("items"):
@@ -122,18 +115,13 @@ def search_europeana(title: str, creator: str | None = None, max_results: int = 
         logger.error("Europeana API error: %s", data.get("error"))
     return results
 
-
-def download_europeana_work(item_data: Union[SearchResult, dict], output_folder: str) -> bool:
+def download_europeana_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     # Save search metadata
-    if isinstance(item_data, SearchResult):
-        item_id = item_data.source_id or item_data.raw.get("id") or item_data.title or "unknown_item"
-        if item_data.raw:
-            save_json(item_data.raw, output_folder, f"europeana_{item_id}_search_meta")
-        iiif_manifest_url = item_data.iiif_manifest or item_data.raw.get("iiif_manifest")
-    else:
-        item_id = item_data.get("id", item_data.get("title", "unknown_item"))
-        save_json(item_data, output_folder, f"europeana_{item_id}_search_meta")
-        iiif_manifest_url = item_data.get("iiif_manifest")
+    item_id = resolve_item_id(item_data) or resolve_item_field(item_data, "title", attr="title", default="unknown_item")
+    raw_data = item_data.raw if isinstance(item_data, SearchResult) else item_data
+    if raw_data:
+        save_json(raw_data, output_folder, f"europeana_{item_id}_search_meta")
+    iiif_manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")
 
     # If missing, construct Europeana Manifest API URL
     if not iiif_manifest_url:
@@ -223,7 +211,7 @@ def download_europeana_work(item_data: Union[SearchResult, dict], output_folder:
             rec = make_request(record_url, params=params)
             if isinstance(rec, dict):
                 # Try common fields
-                candidates: List[str] = []
+                candidates: list[str] = []
                 def _add(u: str | None):
                     if u and isinstance(u, str):
                         candidates.append(u)
