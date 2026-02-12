@@ -171,8 +171,8 @@ class DownloadScheduler:
         self,
         max_workers: int = 4,
         provider_limits: dict[str, int] | None = None,
-        on_complete: Optional[Callable[[DownloadTask, bool, Exception | None], None]] = None,
-        on_submit: Optional[Callable[[DownloadTask], None]] = None,
+        on_complete: Callable[[DownloadTask, bool, Exception | None], None] | None = None,
+        on_submit: Callable[[DownloadTask], None] | None = None,
     ):
         """Initialize the scheduler.
         

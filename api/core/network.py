@@ -348,10 +348,10 @@ def get_session() -> requests.Session:
 
 def make_request(
     url: str,
-    params: Dict | None = None,
-    headers: Dict | None = None,
+    params: dict | None = None,
+    headers: dict | None = None,
     timeout: int = 15,
-) -> Dict | str | bytes | None:
+) -> dict | str | bytes | None:
     """HTTP GET with centralized per-provider pacing, backoff, and circuit breaker.
     
     Args:
@@ -562,8 +562,8 @@ def make_request(
 
 def make_json_request(
     url: str,
-    params: Dict | None = None,
-    headers: Dict | None = None,
+    params: dict | None = None,
+    headers: dict | None = None,
     timeout: int = 15,
 ) -> dict[str, Any] | None:
     """HTTP GET expecting a JSON response, with type-safe return.

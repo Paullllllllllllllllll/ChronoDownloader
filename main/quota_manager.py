@@ -24,9 +24,12 @@ import logging
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from api.core.config import get_config, get_provider_setting
+
+if TYPE_CHECKING:
+    from main.state_manager import StateManager
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +145,14 @@ class QuotaManager:
         
         self._quotas: dict[str, ProviderQuota] = {}
         self._data_lock = threading.RLock()
-        self._state_manager = None  # Lazy init to avoid circular imports
+        self._state_manager: StateManager | None = None  # Lazy init to avoid circular imports
         
         # Load existing state
         self._load_state()
         self._initialized = True
         logger.debug("QuotaManager initialized")
     
-    def _get_state_manager(self):
+    def _get_state_manager(self) -> StateManager:
         """Get the StateManager instance (lazy init)."""
         if self._state_manager is None:
             from main.state_manager import get_state_manager

@@ -95,8 +95,8 @@ def run_batch_downloads(
     use_parallel: bool = True,
     max_workers_override: int | None = None,
     logger: logging.Logger | None = None,
-    on_submit: Optional[Callable[[DownloadTask], None]] = None,
-    on_complete: Optional[Callable[[DownloadTask, bool, Exception | None], None]] = None,
+    on_submit: Callable[[DownloadTask], None] | None = None,
+    on_complete: Callable[[DownloadTask, bool, Exception | None], None] | None = None,
     csv_path: str | None = None,
     enable_background_retry: bool = True,
 ) -> dict[str, int]:
@@ -338,7 +338,7 @@ def _run_sequential(
                 str(entry_id),
                 output_dir,
                 dry_run=dry_run,
-            )
+            ) or {}
         
         # Update CSV status if path provided
         if csv_path and not dry_run:
@@ -383,8 +383,8 @@ def _run_parallel(
     config: dict[str, Any],
     max_workers_override: int | None,
     logger: logging.Logger,
-    on_submit: Optional[Callable[[DownloadTask], None]] = None,
-    on_complete: Optional[Callable[[DownloadTask, bool, Exception | None], None]] = None,
+    on_submit: Callable[[DownloadTask], None] | None = None,
+    on_complete: Callable[[DownloadTask, bool, Exception | None], None] | None = None,
     csv_path: str | None = None,
 ) -> dict[str, int]:
     """Run downloads in parallel using DownloadScheduler.

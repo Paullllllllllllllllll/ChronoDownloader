@@ -75,7 +75,7 @@ def search_sbb_digital(title: str, creator: str | None = None, max_results: int 
                 for rec_id in mods.findall(".//mods:recordInfo/mods:recordIdentifier", ns):
                     if rec_id is None or not rec_id.text:
                         continue
-                    if rec_id.get("source") and "ppn" in rec_id.get("source").lower():
+                    if rec_id.get("source") and "ppn" in (rec_id.get("source") or "").lower():
                         record_id = rec_id.text.strip()
                         break
                     if not record_id:

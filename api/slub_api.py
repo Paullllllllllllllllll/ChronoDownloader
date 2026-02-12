@@ -73,7 +73,7 @@ def _resolve_ppn_from_source(record_id: str, output_folder: str) -> tuple[str | 
                 if isinstance(subfield, list):
                     for sf in subfield:
                         if isinstance(sf, dict) and sf.get("u"):
-                            urls.append(sf.get("u"))
+                            urls.append(str(sf["u"]))
     digital_url = urls[0] if urls else None
     ppn = _extract_ppn_from_url(digital_url)
     return ppn, digital_url

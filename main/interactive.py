@@ -496,11 +496,12 @@ class InteractiveWorkflow:
         if self.config.mode == "csv":
             print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} CSV File: {self.config.csv_path}")
             # Show CSV stats if available
-            try:
-                stats = get_stats(self.config.csv_path)
-                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Works: {stats['total']} total ({stats['pending']} pending)")
-            except Exception:
-                pass
+            if self.config.csv_path:
+                try:
+                    stats = get_stats(self.config.csv_path)
+                    print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Works: {stats['total']} total ({stats['pending']} pending)")
+                except Exception:
+                    pass
         elif self.config.mode == "single":
             print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Title: {self.config.single_title}")
             if self.config.single_creator:
@@ -748,6 +749,8 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
             stats["failed"] = 1
     elif config.mode == "direct_iiif":
         for i, url in enumerate(config.iiif_urls, start=1):
+            title: str | None
+            file_stem: str | None
             if len(config.iiif_urls) == 1 and config.iiif_name:
                 entry_id = f"IIIF_{config.iiif_name}"
                 title = config.iiif_name

@@ -89,8 +89,8 @@ class BackgroundRetryScheduler:
         }
         
         # Callbacks
-        self._on_retry_success: Optional[Callable[[DeferredItem], None]] = None
-        self._on_retry_failure: Optional[Callable[[DeferredItem, str], None]] = None
+        self._on_retry_success: Callable[[DeferredItem], None] | None = None
+        self._on_retry_failure: Callable[[DeferredItem, str], None] | None = None
         
         self._initialized = True
         logger.debug(
@@ -113,8 +113,8 @@ class BackgroundRetryScheduler:
     
     def set_callbacks(
         self,
-        on_success: Optional[Callable[[DeferredItem], None]] = None,
-        on_failure: Optional[Callable[[DeferredItem, str], None]] = None,
+        on_success: Callable[[DeferredItem], None] | None = None,
+        on_failure: Callable[[DeferredItem, str], None] | None = None,
     ) -> None:
         """Set optional callbacks for retry events.
         

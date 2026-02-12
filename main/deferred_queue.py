@@ -24,9 +24,12 @@ import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 
 from api.core.config import get_config
+
+if TYPE_CHECKING:
+    from main.state_manager import StateManager
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +181,7 @@ class DeferredQueue:
         self._items: dict[str, DeferredItem] = {}
         self._data_lock = threading.RLock()
         self._save_lock = threading.Lock()
-        self._state_manager = None  # Lazy init to avoid circular imports
+        self._state_manager: StateManager | None = None  # Lazy init to avoid circular imports
         
         # Get max retries from config
         cfg = get_config()
@@ -190,7 +193,7 @@ class DeferredQueue:
         self._initialized = True
         logger.debug("DeferredQueue initialized")
     
-    def _get_state_manager(self):
+    def _get_state_manager(self) -> StateManager:
         """Get the StateManager instance (lazy init)."""
         if self._state_manager is None:
             from main.state_manager import get_state_manager

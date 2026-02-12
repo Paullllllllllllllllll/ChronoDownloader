@@ -39,7 +39,7 @@ def _max_images() -> int | None:
     except ValueError:
         return 0
 
-def _extract_image_services(work: Dict) -> list[str]:
+def _extract_image_services(work: dict) -> list[str]:
     """Return a list of IIIF Image API service base URLs from a Work doc (with include=items).
 
     Looks for items[].locations[] entries with locationType.id == "iiif-image".
@@ -107,7 +107,7 @@ def search_wellcome(title: str, creator: str | None = None, max_results: int = 3
             break
     return results
 
-def download_wellcome_work(item_data: SearchResult | Dict, output_folder: str) -> bool:
+def download_wellcome_work(item_data: SearchResult | dict, output_folder: str) -> bool:
     """Download full-size images from Wellcome IIIF Image services.
 
     If the SearchResult contains raw.image_services, we use them directly.
