@@ -1387,6 +1387,10 @@ A: Lower `min_title_score`:
 
 A: Check `downloaded_works/index.csv` for summary. Check individual `work.json` files for detailed candidate information, scores, and selection reasoning.
 
+**Q: BnF Gallica downloads return HTTP 403 even with valid manifest URLs?**
+
+A: Gallica's IIIF manifest endpoint (`gallica.bnf.fr/iiif/...`) periodically blocks automated requests server-side, returning HTTP 403 regardless of the User-Agent header. The SRU search API continues to function normally. If you encounter this issue, check the [Gallica API status](https://api.bnf.fr) and retry later. As a workaround, download Gallica items via the `bnf_gallica` provider using the standard search-based workflow (omit the `direct_link` column), which uses the SRU endpoint and falls back gracefully when IIIF images are unavailable.
+
 **Q: I'm experiencing issues not covered here**
 
 A: Enable debug logging (`--log-level DEBUG`), check provider API status, verify API keys, test with single provider, review logs for specific error messages. For persistent issues, please open a GitHub issue.
@@ -1458,6 +1462,9 @@ Provide:
 - Fuzzy matching with configurable thresholds
 - Quota management with deferred download queue
 - Background scheduler for automatic retry
+
+**Test Infrastructure**:
+- Fixed test isolation: added global `reset_singletons` autouse fixture in `tests/conftest.py` that resets `StateManager` and `DeferredQueue` singletons and redirects the default state file to a temporary path before each test. This prevents unit tests from writing to the real `.downloader_state.json` in the project root.
 
 ## License
 

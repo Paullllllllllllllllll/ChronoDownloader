@@ -352,6 +352,28 @@ def reset_config_cache():
     config_module._CONFIG_CACHE = original_cache
 
 
+@pytest.fixture(autouse=True)
+def reset_singletons(tmp_path):
+    """Reset StateManager and DeferredQueue singletons for each test.
+
+    Redirects the default state file to a temporary path so unit tests
+    never write to the real .downloader_state.json in the project root.
+    """
+    from unittest.mock import patch
+    from main.state_manager import StateManager
+    from main.deferred_queue import DeferredQueue
+
+    StateManager._instance = None
+    DeferredQueue._instance = None
+
+    tmp_state = str(tmp_path / "test_state.json")
+    with patch("main.state_manager.DEFAULT_STATE_FILE", tmp_state):
+        yield
+
+    StateManager._instance = None
+    DeferredQueue._instance = None
+
+
 # ============================================================================
 # Budget Fixtures
 # ============================================================================
