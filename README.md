@@ -4,6 +4,9 @@ A Python tool for discovering and downloading digitized historical sources from 
 
 Designed to integrate with [ChronoTranscriber](https://github.com/Paullllllllllllllllll/ChronoTranscriber) and [ChronoMiner](https://github.com/Paullllllllllllllllll/ChronoMiner) for a complete document retrieval, transcription, and data extraction pipeline.
 
+> **Work in Progress** — ChronoDownloader is under active development. We aim to keep it well-maintained and up to date, but bugs may occur. If you encounter any issues, please report them on [GitHub Issues](https://github.com/Paullllllllllllllllll/ChronoDownloader/issues) — your feedback is greatly appreciated.
+
+
 ## Table of Contents
 
 - [Overview](#overview)
