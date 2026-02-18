@@ -80,7 +80,6 @@ class _PreparedWork:
     entry_id: str | None
     base_output_dir: str
     work_dir: str
-    work_dir_name: str
     work_stem: str
     work_id: str
     work_json_path: str
@@ -143,7 +142,7 @@ def _prepare_work(
     entry_id: str | None,
     base_output_dir: str,
 ) -> _PreparedWork | None:
-    work_dir, work_dir_name = compute_work_dir(base_output_dir, entry_id, title)
+    work_dir, work_stem = compute_work_dir(base_output_dir, entry_id, title)
 
     resume_mode = get_resume_mode()
     should_skip, skip_reason = check_work_status(work_dir, resume_mode)
@@ -172,8 +171,7 @@ def _prepare_work(
         entry_id=entry_id,
         base_output_dir=base_output_dir,
         work_dir=work_dir,
-        work_dir_name=work_dir_name,
-        work_stem=work_dir_name,
+        work_stem=work_stem,
         work_id=work_id,
         work_json_path=work_json_path,
         sel_cfg=sel_cfg,
@@ -184,6 +182,148 @@ def _prepare_work(
         selected_provider_tuple=selected_provider_tuple,
         selected_source_id=selected_source_id,
     )
+
+def _run_download_with_fallback(
+    selected: SearchResult,
+    pkey: str,
+    pname: str,
+    download_func: Callable,
+    work_dir: str,
+    all_candidates: list[SearchResult],
+    provider_list: list[ProviderTuple],
+    provider_map: dict[str, tuple[Any, Any, str]],
+    sel_cfg: dict[str, Any],
+    title: str,
+    creator: str | None,
+    entry_id: str | None,
+    base_output_dir: str,
+    selected_source_id: str | None,
+) -> tuple[bool, bool]:
+    """Download selected item with fallback to other candidates on failure.
+
+    Attempts the primary download, falls back to scored alternates on failure,
+    and handles quota exhaustion by adding the work to the deferred queue.
+    Also handles the ``download_strategy == "all"`` pass over remaining candidates.
+
+    Returns:
+        Tuple of (download_succeeded, download_deferred)
+    """
+    download_succeeded = False
+    download_deferred = False
+
+    try:
+        logger.info("Downloading selected item from %s into %s", pname, work_dir)
+        try:
+            set_current_provider(pkey)
+            ok = download_func(selected, work_dir)
+        finally:
+            try:
+                clear_current_provider()
+            except Exception:
+                pass
+
+        if ok:
+            download_succeeded = True
+        elif not ok:
+            logger.warning(
+                "Download function reported failure for %s:%s",
+                pkey,
+                selected.source_id,
+            )
+            try:
+                prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
+                ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
+                for sr in all_candidates:
+                    try:
+                        if sr.provider_key == pkey and sr.source_id == selected.source_id:
+                            continue
+                        sc = sr.raw.get("__matching__", {})
+                        if float(sc.get("score", 0.0)) < float(sel_cfg.get("min_title_score", 85)):
+                            continue
+                        pprio = prov_priority.get(sr.provider_key or "", 9999)
+                        ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))
+                    except Exception:
+                        continue
+                ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
+                for _pprio, _tot, sr in ranked_fallbacks:
+                    prov_key = sr.provider_key or "unknown"
+                    if prov_key not in provider_map:
+                        continue
+                    _s, dfunc, _pname = provider_map[prov_key]
+                    logger.info("Attempting fallback download from %s", _pname)
+                    try:
+                        set_current_provider(prov_key)
+                        if dfunc(sr, work_dir):
+                            logger.info("Fallback download from %s succeeded.", _pname)
+                            download_succeeded = True
+                            break
+                    except QuotaDeferredException as qde:
+                        logger.info(
+                            "Fallback provider %s quota exhausted: %s", _pname, qde.message
+                        )
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "Fallback download error for %s:%s", prov_key, sr.source_id
+                        )
+                    finally:
+                        try:
+                            clear_current_provider()
+                        except Exception:
+                            pass
+            except Exception:
+                logger.exception("Error while attempting fallback download candidates.")
+    except QuotaDeferredException as qde:
+        download_deferred = True
+        logger.info("Download deferred for '%s': %s", title, qde.message)
+        queue = get_deferred_queue()
+        queue.add(
+            title=title,
+            creator=creator,
+            entry_id=entry_id,
+            provider_key=pkey,
+            provider_name=pname,
+            source_id=selected_source_id,
+            work_dir=work_dir,
+            base_output_dir=base_output_dir,
+            item_url=selected.item_url,
+            reset_time=qde.reset_time,
+            raw_data=selected.raw,
+        )
+    except Exception:
+        logger.exception("Error during download for %s:%s", pkey, selected.source_id)
+
+    download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
+    if download_strategy == "all":
+        for sr in all_candidates:
+            try:
+                if sr.provider_key == pkey and sr.source_id == selected.source_id:
+                    continue
+                prov_key = sr.provider_key or "unknown"
+                if prov_key in provider_map:
+                    _s, dfunc, pname2 = provider_map[prov_key]
+                    logger.info(
+                        "Downloading additional candidate from %s into %s",
+                        pname2,
+                        work_dir,
+                    )
+                    try:
+                        set_current_provider(prov_key)
+                        dfunc(sr, work_dir)
+                    finally:
+                        try:
+                            clear_current_provider()
+                        except Exception:
+                            pass
+            except Exception:
+                logger.exception(
+                    "Failed to download additional candidate %s:%s",
+                    sr.provider_key,
+                    sr.source_id,
+                )
+
+    return download_succeeded, download_deferred
+
 
 def _persist_work_json(prep: _PreparedWork, status: str = "pending") -> None:
     create_work_json(
@@ -446,128 +586,24 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
     selected = task.selected_result
     work_dir = task.work_dir
     work_json_path = task.work_json_path
-    sel_cfg = task.selection_config
-    provider_map = task.provider_map
-    all_candidates = task.all_candidates
-    
-    download_deferred = False
-    download_succeeded = False
     selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
-    
-    try:
-        logger.info("Downloading selected item for '%s' from %s into %s", task.title, pname, work_dir)
-        try:
-            set_current_provider(pkey)
-            ok = download_func(selected, work_dir)
-        finally:
-            try:
-                clear_current_provider()
-            except Exception:
-                pass
-        
-        if ok:
-            download_succeeded = True
-        else:
-            logger.warning(
-                "Download function reported failure for %s:%s",
-                pkey,
-                selected.source_id,
-            )
-            # Fallback: try the next-best candidate based on provider priority and score
-            try:
-                provider_list = ENABLED_APIS
-                prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
-                ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
-                for sr in all_candidates:
-                    try:
-                        if sr.provider_key == pkey and sr.source_id == selected.source_id:
-                            continue
-                        sc = sr.raw.get("__matching__", {})
-                        if float(sc.get("score", 0.0)) < float(sel_cfg.get("min_title_score", 85)):
-                            continue
-                        pprio = prov_priority.get(sr.provider_key or "", 9999)
-                        ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))
-                    except Exception:
-                        continue
-                ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
-                for _pprio, _tot, sr in ranked_fallbacks:
-                    prov_key = sr.provider_key or "unknown"
-                    if prov_key not in provider_map:
-                        continue
-                    _s, dfunc, _pname = provider_map[prov_key]
-                    logger.info("Attempting fallback download from %s", _pname)
-                    try:
-                        set_current_provider(prov_key)
-                        if dfunc(sr, work_dir):
-                            logger.info("Fallback download from %s succeeded.", _pname)
-                            download_succeeded = True
-                            break
-                    except QuotaDeferredException as qde:
-                        logger.info(
-                            "Fallback provider %s quota exhausted: %s", _pname, qde.message
-                        )
-                        continue
-                    except Exception:
-                        logger.exception(
-                            "Fallback download error for %s:%s", prov_key, sr.source_id
-                        )
-                    finally:
-                        try:
-                            clear_current_provider()
-                        except Exception:
-                            pass
-            except Exception:
-                logger.exception("Error while attempting fallback download candidates.")
-    except QuotaDeferredException as qde:
-        # Quota exhausted for selected provider - add to persistent deferred queue
-        download_deferred = True
-        logger.info("Download deferred for '%s': %s", task.title, qde.message)
-        queue = get_deferred_queue()
-        queue.add(
-            title=task.title,
-            creator=task.creator,
-            entry_id=task.entry_id,
-            provider_key=pkey,
-            provider_name=pname,
-            source_id=selected_source_id,
-            work_dir=work_dir,
-            base_output_dir=task.base_output_dir,
-            item_url=selected.item_url,
-            reset_time=qde.reset_time,
-            raw_data=selected.raw,
-        )
-    except Exception:
-        logger.exception("Error during download for %s:%s", pkey, selected.source_id)
-    
-    # If 'all', also download other candidates
-    download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
-    if download_strategy == "all":
-        for sr in all_candidates:
-            try:
-                if sr.provider_key == pkey and sr.source_id == selected.source_id:
-                    continue
-                prov_key = sr.provider_key or "unknown"
-                if prov_key in provider_map:
-                    _s, dfunc, pname2 = provider_map[prov_key]
-                    logger.info(
-                        "Downloading additional candidate from %s into %s",
-                        pname2,
-                        work_dir,
-                    )
-                    try:
-                        set_current_provider(prov_key)
-                        dfunc(sr, work_dir)
-                    finally:
-                        try:
-                            clear_current_provider()
-                        except Exception:
-                            pass
-            except Exception:
-                logger.exception(
-                    "Failed to download additional candidate %s:%s",
-                    sr.provider_key,
-                    sr.source_id,
-                )
+
+    download_succeeded, download_deferred = _run_download_with_fallback(
+        selected=selected,
+        pkey=pkey,
+        pname=pname,
+        download_func=download_func,
+        work_dir=work_dir,
+        all_candidates=task.all_candidates,
+        provider_list=ENABLED_APIS,
+        provider_map=task.provider_map,
+        sel_cfg=task.selection_config,
+        title=task.title,
+        creator=task.creator,
+        entry_id=task.entry_id,
+        base_output_dir=task.base_output_dir,
+        selected_source_id=selected_source_id,
+    )
 
     # Update work.json status based on outcome
     if download_succeeded:
@@ -635,7 +671,6 @@ def process_work(
         Dict with 'status', 'item_url', 'provider' on success/failure,
         None if skipped or deferred
     """
-    logger = logging.getLogger(__name__)
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
 
     prep = _prepare_work(title, creator, entry_id, base_output_dir)
@@ -660,7 +695,6 @@ def process_work(
     except Exception:
         pass
 
-    selected_dir = prep.work_dir if (prep.selected and prep.selected_provider_tuple) else None
     selected = prep.selected
     _persist_work_json(prep, status="pending")
     if prep.sel_cfg.get("keep_non_selected_metadata", True):
@@ -677,133 +711,26 @@ def process_work(
                     sr.source_id,
                 )
 
-    # Download according to strategy
-    download_strategy = (prep.sel_cfg.get("download_strategy") or "selected_only").lower()
-    download_deferred = False  # Track if download was deferred due to quota
-    download_succeeded = False  # Track if download completed successfully
-    if not dry_run and prep.selected and prep.selected_provider_tuple and selected_dir:
-        selected = prep.selected
-        selected_provider_tuple = prep.selected_provider_tuple
-        provider_list = prep.provider_list
-        provider_map = prep.provider_map
-        sel_cfg = prep.sel_cfg
-        all_candidates = prep.all_candidates
-        work_dir = prep.work_dir
-        work_json_path = prep.work_json_path
-        selected_source_id = prep.selected_source_id
-
-        pkey, _search_func, download_func, pname = selected_provider_tuple
-        try:
-            logger.info("Downloading selected item from %s into %s", pname, selected_dir)
-            try:
-                set_current_provider(pkey)
-                ok = download_func(selected, selected_dir)
-            finally:
-                try:
-                    clear_current_provider()
-                except Exception:
-                    pass
-            if ok:
-                download_succeeded = True
-            if not ok:
-                logger.warning(
-                    "Download function reported failure for %s:%s",
-                    pkey,
-                    selected.source_id,
-                )
-                # Fallback: try the next-best candidate based on provider priority and score
-                try:
-                    prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
-                    ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
-                    for sr in all_candidates:
-                        try:
-                            if selected and sr.provider_key == selected.provider_key and sr.source_id == selected.source_id:
-                                continue
-                            sc = sr.raw.get("__matching__", {})
-                            if float(sc.get("score", 0.0)) < float(sel_cfg.get("min_title_score", 85)):
-                                continue
-                            pprio = prov_priority.get(sr.provider_key or "", 9999)
-                            ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))
-                        except Exception:
-                            continue
-                    ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
-                    for _pprio, _tot, sr in ranked_fallbacks:
-                        prov_key = sr.provider_key or "unknown"
-                        if prov_key not in provider_map:
-                            continue
-                        _s, dfunc, _pname = provider_map[prov_key]
-                        logger.info("Attempting fallback download from %s", _pname)
-                        try:
-                            set_current_provider(prov_key)
-                            if dfunc(sr, selected_dir):
-                                logger.info("Fallback download from %s succeeded.", _pname)
-                                download_succeeded = True
-                                break
-                        except QuotaDeferredException as qde:
-                            logger.info(
-                                "Fallback provider %s quota exhausted: %s", _pname, qde.message
-                            )
-                            continue  # Try next fallback provider
-                        except Exception:
-                            logger.exception(
-                                "Fallback download error for %s:%s", prov_key, sr.source_id
-                            )
-                        finally:
-                            try:
-                                clear_current_provider()
-                            except Exception:
-                                pass
-                except Exception:
-                    logger.exception("Error while attempting fallback download candidates.")
-        except QuotaDeferredException as qde:
-            # Quota exhausted for selected provider - add to persistent deferred queue
-            download_deferred = True
-            logger.info("Download deferred for '%s': %s", title, qde.message)
-            queue = get_deferred_queue()
-            queue.add(
-                title=title,
-                creator=creator,
-                entry_id=entry_id,
-                provider_key=pkey,
-                provider_name=pname,
-                source_id=selected_source_id,
-                work_dir=work_dir,
-                base_output_dir=base_output_dir,
-                item_url=selected.item_url if selected else None,
-                reset_time=qde.reset_time,
-                raw_data=selected.raw if selected else {},
-            )
-        except Exception:
-            logger.exception("Error during download for %s:%s", pkey, selected.source_id)
-        # If 'all', also download other candidates into sources/ subfolders
-        if download_strategy == "all":
-            for sr in all_candidates:
-                try:
-                    if selected and sr.provider_key == selected.provider_key and sr.source_id == selected.source_id:
-                        continue
-                    prov_key = sr.provider_key or "unknown"
-                    dest_dir = work_dir
-                    if prov_key in provider_map:
-                        _s, dfunc, pname2 = provider_map[prov_key]
-                        logger.info(
-                            "Downloading additional candidate from %s into %s",
-                            pname2,
-                            dest_dir,
-                        )
-                        try:
-                            set_current_provider(prov_key)
-                            dfunc(sr, dest_dir)
-                        finally:
-                            try:
-                                clear_current_provider()
-                            except Exception:
-                                pass
-                except Exception:
-                    logger.exception(
-                        "Failed to download additional candidate %s:%s",
-                        sr.provider_key,
-                        sr.source_id,
-                    )
+    download_deferred = False
+    download_succeeded = False
+    if not dry_run and prep.selected and prep.selected_provider_tuple:
+        pkey, _search_func, download_func, pname = prep.selected_provider_tuple
+        download_succeeded, download_deferred = _run_download_with_fallback(
+            selected=prep.selected,
+            pkey=pkey,
+            pname=pname,
+            download_func=download_func,
+            work_dir=prep.work_dir,
+            all_candidates=prep.all_candidates,
+            provider_list=prep.provider_list,
+            provider_map=prep.provider_map,
+            sel_cfg=prep.sel_cfg,
+            title=title,
+            creator=creator,
+            entry_id=entry_id,
+            base_output_dir=base_output_dir,
+            selected_source_id=prep.selected_source_id,
+        )
     elif dry_run:
         logger.info("Dry-run: skipping download for selected item.")
 

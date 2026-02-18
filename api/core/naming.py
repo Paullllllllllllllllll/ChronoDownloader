@@ -53,7 +53,7 @@ PROVIDER_ABBREV = {
     "sbb_digital": "SBB",
 }
 
-def to_snake_case(value: str) -> str:
+def to_snake_case(value: str | None) -> str:
     """Convert arbitrary string to snake_case: lowercase, alnum + underscores only.
     
     Args:

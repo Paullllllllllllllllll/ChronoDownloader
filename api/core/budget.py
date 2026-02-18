@@ -105,7 +105,7 @@ class DownloadBudget:
             return True
         
         if content_type not in ["images", "pdfs", "metadata"]:
-            logger.warning(f"Unknown content type: {content_type}, defaulting to allow")
+            logger.warning("Unknown content type: %s, defaulting to allow", content_type)
             return True
         
         dl = get_download_limits()
@@ -119,7 +119,12 @@ class DownloadBudget:
         
         current_total = getattr(self, f"total_{content_type}_bytes", 0)
         if max_total is not None and (current_total + add_bytes) > max_total:
-            logger.info(f"Global {content_type} limit would be exceeded: {(current_total + add_bytes) / (1024**3):.2f} GB > {max_total / (1024**3):.2f} GB")
+            logger.info(
+                "Global %s limit would be exceeded: %.2f GB > %.2f GB",
+                content_type,
+                (current_total + add_bytes) / (1024**3),
+                max_total / (1024**3),
+            )
             if self._policy() == "stop":
                 with self._lock:
                     self._exhausted = True
@@ -139,7 +144,7 @@ class DownloadBudget:
             
             current_work = self._get(self.per_work, work_id, content_type)
             if max_work is not None and (current_work + add_bytes) > max_work:
-                logger.info(f"Per-work {content_type} limit would be exceeded for {work_id}")
+                logger.info("Per-work %s limit would be exceeded for %s", content_type, work_id)
                 if self._policy() == "stop":
                     with self._lock:
                         self._exhausted = True
@@ -156,7 +161,7 @@ class DownloadBudget:
             size_bytes: Size of downloaded content in bytes
         """
         if content_type not in ["images", "pdfs", "metadata"]:
-            logger.warning(f"Unknown content type for recording: {content_type}")
+            logger.warning("Unknown content type for recording: %s", content_type)
             return
         
         with self._lock:
@@ -173,17 +178,20 @@ class DownloadBudget:
         """Log a summary of current download statistics."""
         with self._lock:
             logger.info("=== Download Budget Summary ===")
-            logger.info(f"Images: {self.total_images_bytes / (1024**3):.2f} GB")
-            logger.info(f"PDFs: {self.total_pdfs_bytes / (1024**3):.2f} GB")
-            logger.info(f"Metadata: {self.total_metadata_bytes / (1024**2):.2f} MB")
-            logger.info(f"Total works tracked: {len(self.per_work)}")
-            
-            # Log per-work details if not too many
+            logger.info("Images: %.2f GB", self.total_images_bytes / (1024**3))
+            logger.info("PDFs: %.2f GB", self.total_pdfs_bytes / (1024**3))
+            logger.info("Metadata: %.2f MB", self.total_metadata_bytes / (1024**2))
+            logger.info("Total works tracked: %d", len(self.per_work))
+
             if len(self.per_work) <= 10:
                 for wid, stats in self.per_work.items():
-                    logger.info(f"  Work {wid}: images={stats.get('images', 0) / (1024**2):.1f}MB, "
-                              f"pdfs={stats.get('pdfs', 0) / (1024**2):.1f}MB, "
-                              f"metadata={stats.get('metadata', 0) / 1024:.1f}KB")
+                    logger.info(
+                        "  Work %s: images=%.1fMB, pdfs=%.1fMB, metadata=%.1fKB",
+                        wid,
+                        stats.get("images", 0) / (1024**2),
+                        stats.get("pdfs", 0) / (1024**2),
+                        stats.get("metadata", 0) / 1024,
+                    )
 
     # Legacy compatibility methods
     def allow_new_file(self, provider: str | None, work_id: str | None) -> bool:

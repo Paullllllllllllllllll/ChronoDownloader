@@ -53,7 +53,6 @@ def call_search_function(
                 return search_func(title)
     except Exception:
         raise
-    return []
 
 def prepare_search_result(
     provider_key: str,
@@ -294,21 +293,22 @@ def collect_candidates_all(
     max_workers = _get_max_parallel_searches()
     
     if max_workers <= 1 or len(provider_list) <= 1:
-        return _collect_candidates_sequential(provider_list, title, creator, creator_weight, max_candidates_per_provider)
-    
+        return _collect_candidates_exhaustive(provider_list, title, creator, creator_weight, max_candidates_per_provider)
+
     return _collect_candidates_parallel(provider_list, title, creator, creator_weight, max_candidates_per_provider, max_workers)
 
-def _collect_candidates_sequential(
+def _collect_candidates_exhaustive(
     provider_list: list[ProviderTuple],
     title: str,
     creator: str | None,
     creator_weight: float,
     max_candidates_per_provider: int
 ) -> list[SearchResult]:
-    """Sequential candidate collection (collect-and-select mode without early exit).
-    
-    This is a simplified version of collect_candidates_sequential that doesn't
-    perform early exit on first match - it always collects from all providers.
+    """Sequential candidate collection that always queries all providers.
+
+    Unlike ``collect_candidates_sequential`` (which exits on the first acceptable
+    match), this variant never short-circuits — it is used by the
+    ``collect_and_select`` strategy to gather all candidates before ranking.
     """
     all_candidates: list[SearchResult] = []
     

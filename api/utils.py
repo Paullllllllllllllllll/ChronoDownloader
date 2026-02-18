@@ -42,11 +42,10 @@ from .core.context import (
     clear_current_name_stem,
     clear_current_provider,
     clear_current_work,
-    get_counters as _counters,
-    get_current_entry as _current_entry_id,
-    get_current_name_stem as _current_name_stem,
-    get_current_provider as _current_provider_key,
-    get_current_work as _current_work_id,
+    get_current_entry,
+    get_current_name_stem,
+    get_current_provider,
+    get_current_work,
     increment_counter,
     reset_counters,
     set_current_entry,
@@ -55,17 +54,17 @@ from .core.context import (
     set_current_work,
 )
 from .core.naming import (
-    PROVIDER_ABBREV as _PROVIDER_ABBREV,
-    PROVIDER_SLUGS as _PROVIDER_SLUGS,
-    get_provider_slug as _provider_slug,
+    PROVIDER_ABBREV,
+    PROVIDER_SLUGS,
+    get_provider_slug,
     sanitize_filename,
     to_snake_case,
 )
 from .core.network import (
-    PROVIDER_HOST_MAP as _PROVIDER_HOST_MAP,
+    PROVIDER_HOST_MAP,
     RateLimiter,
-    get_provider_for_url as _provider_for_url,
-    get_rate_limiter as _get_rate_limiter,
+    get_provider_for_url,
+    get_rate_limiter,
     get_session,
     make_request,
 )
@@ -372,7 +371,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     os.makedirs(folder_path, exist_ok=True)
     
     session = get_session()
-    provider = _provider_for_url(url)
+    provider = get_provider_for_url(url)
     net = get_network_config(provider)
     
     max_attempts = int(net.get("max_attempts", 5) or 5)
@@ -387,8 +386,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     
     req_headers = {str(k): str(v) for k, v in provider_headers.items() if v is not None} if provider_headers else {}
     
-    rl = _get_rate_limiter(provider)
-    work_id = _current_work_id()
+    rl = get_rate_limiter(provider)
+    work_id = get_current_work()
     
     if _BUDGET.exhausted():
         logger.warning("Download budget exhausted; skipping %s", url)
@@ -422,8 +421,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             or ".bin"
         ).lower()
         
-        stem = _current_name_stem() or to_snake_case(filename) or "object"
-        prov_slug = _provider_slug(_current_provider_key(), provider)
+        stem = get_current_name_stem() or to_snake_case(filename) or "object"
+        prov_slug = get_provider_slug(get_current_provider(), provider)
         
         # Determine target directory
         dl_cfg = get_download_config()
@@ -623,16 +622,14 @@ def save_json(data: Any, folder_path: str, filename: str) -> str | None:
     os.makedirs(folder_path, exist_ok=True)
     
     # Standardize metadata naming and directory
-    stem = _current_name_stem() or to_snake_case(filename) or "item"
-    prov_slug = _provider_slug(_current_provider_key(), None)
+    stem = get_current_name_stem() or to_snake_case(filename) or "item"
+    prov_slug = get_provider_slug(get_current_provider(), None)
     meta_dir = os.path.join(folder_path, "metadata")
     os.makedirs(meta_dir, exist_ok=True)
     
     # For metadata, do not number the first file for a provider; append _2, _3... when multiple
     key = (stem, prov_slug or "unknown", "metadata")
-    counters = _counters()
-    counters[key] = int(counters.get(key, 0)) + 1
-    idx = counters[key]
+    idx = increment_counter(key)
     
     if idx <= 1:
         base = f"{stem}_{prov_slug}"

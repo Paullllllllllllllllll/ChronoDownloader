@@ -10,7 +10,7 @@ import re
 import unicodedata
 from typing import Iterable
 
-def strip_accents(text: str) -> str:
+def strip_accents(text: str | None) -> str:
     """Remove accent marks from text while preserving base characters.
 
     Args:
@@ -26,7 +26,7 @@ def strip_accents(text: str) -> str:
     nfkd = unicodedata.normalize("NFKD", str(text))
     return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
 
-def normalize_text(text: str) -> str:
+def normalize_text(text: str | None) -> str:
     """Normalize text for robust fuzzy matching.
 
     Performs lowercase conversion, accent removal, whitespace collapse,

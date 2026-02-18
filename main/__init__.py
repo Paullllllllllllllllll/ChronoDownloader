@@ -7,3 +7,11 @@ This package contains:
 - mode_selector: Mode detection for interactive vs CLI execution
 - interactive: Interactive workflow UI components
 """
+
+__all__ = [
+    "pipeline",
+    "selection",
+    "execution",
+    "downloader",
+    "mode_selector",
+]
