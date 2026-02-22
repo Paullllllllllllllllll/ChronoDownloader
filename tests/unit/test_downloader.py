@@ -102,6 +102,168 @@ class TestCreateCliParser:
         
         assert args.cleanup_deferred is True
 
+    def test_parser_accepts_provider_override_args(self):
+        """Parser accepts provider override arguments."""
+        from main.downloader import create_cli_parser
+
+        parser = create_cli_parser()
+        args = parser.parse_args([
+            "--providers", "mdz,bnf_gallica",
+            "--enable-provider", "internet_archive",
+            "--disable-provider", "bnf_gallica",
+        ])
+
+        assert args.providers == ["mdz,bnf_gallica"]
+        assert args.enable_provider == ["internet_archive"]
+        assert args.disable_provider == ["bnf_gallica"]
+
+    def test_parser_accepts_processing_scope_args(self):
+        """Parser accepts pending/filter scope arguments."""
+        from main.downloader import create_cli_parser
+
+        parser = create_cli_parser()
+        args = parser.parse_args([
+            "--pending-mode", "failed",
+            "--entry-ids", "E001,E002",
+            "--entry-ids", "E003",
+            "--limit", "2",
+        ])
+
+        assert args.pending_mode == "failed"
+        assert args.entry_ids == ["E001,E002", "E003"]
+        assert args.limit == 2
+
+    def test_parser_accepts_runtime_override_args(self):
+        """Parser accepts config override arguments for selection/download."""
+        from main.downloader import create_cli_parser
+
+        parser = create_cli_parser()
+        args = parser.parse_args([
+            "--resume-mode", "reprocess_all",
+            "--selection-strategy", "sequential_first_hit",
+            "--min-title-score", "42.5",
+            "--creator-weight", "0.3",
+            "--max-candidates-per-provider", "7",
+            "--download-strategy", "all",
+            "--no-keep-non-selected-metadata",
+            "--no-prefer-pdf-over-images",
+            "--no-download-manifest-renderings",
+            "--max-renderings-per-manifest", "3",
+            "--rendering-mime-whitelist", "application/pdf,application/epub+zip",
+            "--overwrite-existing",
+            "--no-include-metadata",
+        ])
+
+        assert args.resume_mode == "reprocess_all"
+        assert args.selection_strategy == "sequential_first_hit"
+        assert args.min_title_score == 42.5
+        assert args.creator_weight == 0.3
+        assert args.max_candidates_per_provider == 7
+        assert args.download_strategy == "all"
+        assert args.keep_non_selected_metadata is False
+        assert args.prefer_pdf_over_images is False
+        assert args.download_manifest_renderings is False
+        assert args.max_renderings_per_manifest == 3
+        assert args.rendering_mime_whitelist == ["application/pdf,application/epub+zip"]
+        assert args.overwrite_existing is True
+        assert args.include_metadata is False
+
+
+class TestCliHelpers:
+    """Tests for helper functions used by CLI argument resolution."""
+
+    def test_apply_runtime_config_overrides(self):
+        """CLI runtime overrides are merged into download/selection config."""
+        from main.downloader import _apply_runtime_config_overrides
+
+        args = argparse.Namespace(
+            resume_mode="reprocess_all",
+            prefer_pdf_over_images=False,
+            download_manifest_renderings=False,
+            max_renderings_per_manifest=9,
+            rendering_mime_whitelist=["application/pdf,application/epub+zip"],
+            overwrite_existing=True,
+            include_metadata=False,
+            selection_strategy="sequential_first_hit",
+            min_title_score=77.0,
+            creator_weight=0.4,
+            max_candidates_per_provider=8,
+            download_strategy="all",
+            keep_non_selected_metadata=False,
+        )
+        config = {
+            "download": {
+                "resume_mode": "skip_completed",
+                "prefer_pdf_over_images": True,
+            },
+            "selection": {
+                "strategy": "collect_and_select",
+                "min_title_score": 35,
+            },
+        }
+
+        merged = _apply_runtime_config_overrides(args, config, MagicMock())
+
+        assert merged["download"]["resume_mode"] == "reprocess_all"
+        assert merged["download"]["prefer_pdf_over_images"] is False
+        assert merged["download"]["download_manifest_renderings"] is False
+        assert merged["download"]["max_renderings_per_manifest"] == 9
+        assert merged["download"]["rendering_mime_whitelist"] == ["application/pdf", "application/epub+zip"]
+        assert merged["download"]["overwrite_existing"] is True
+        assert merged["download"]["include_metadata"] is False
+        assert merged["selection"]["strategy"] == "sequential_first_hit"
+        assert merged["selection"]["min_title_score"] == 77.0
+        assert merged["selection"]["creator_weight"] == 0.4
+        assert merged["selection"]["max_candidates_per_provider"] == 8
+        assert merged["selection"]["download_strategy"] == "all"
+        assert merged["selection"]["keep_non_selected_metadata"] is False
+
+    def test_apply_provider_cli_overrides(self):
+        """Provider overrides respect explicit list, enable, and disable controls."""
+        from main.downloader import _apply_provider_cli_overrides
+
+        args = argparse.Namespace(
+            providers=["mdz,bnf_gallica"],
+            enable_provider=["internet_archive"],
+            disable_provider=["bnf_gallica"],
+        )
+        providers = [
+            ("internet_archive", lambda *_: None, lambda *_: None, "Internet Archive"),
+            ("bnf_gallica", lambda *_: None, lambda *_: None, "BnF Gallica"),
+        ]
+
+        out = _apply_provider_cli_overrides(args, providers, MagicMock())
+        out_keys = [p[0] for p in out]
+
+        assert out_keys == ["mdz", "internet_archive"]
+
+    def test_filter_pending_rows_new_failed_and_limit(self):
+        """Pending row filters support mode, entry_id filter, and limit."""
+        from main.downloader import _filter_pending_rows
+
+        works_df = pd.DataFrame({
+            "entry_id": ["E001", "E002", "E003", "E004"],
+            "short_title": ["A", "B", "C", "D"],
+            "retrievable": [pd.NA, False, True, "no"],
+        })
+
+        failed_args = argparse.Namespace(pending_mode="failed", entry_ids=None, limit=None)
+        failed_df = _filter_pending_rows(works_df, failed_args)
+        assert set(failed_df["entry_id"].tolist()) == {"E002", "E004"}
+
+        new_args = argparse.Namespace(pending_mode="new", entry_ids=["E001,E003"], limit=1)
+        new_df = _filter_pending_rows(works_df, new_args)
+        assert new_df["entry_id"].tolist() == ["E001"]
+
+    def test_looks_like_cli_invocation(self):
+        """CLI invocation detection identifies command-line intent."""
+        from main.downloader import _looks_like_cli_invocation
+
+        assert _looks_like_cli_invocation(["sample.csv"]) is True
+        assert _looks_like_cli_invocation(["--dry-run"]) is True
+        assert _looks_like_cli_invocation(["--interactive", "sample.csv"]) is False
+        assert _looks_like_cli_invocation([]) is False
+
 
 class TestRunCli:
     """Tests for run_cli function."""
@@ -218,6 +380,19 @@ class TestRunCli:
                         mock_sched.return_value.is_running.return_value = True
                         
                         run_cli(mock_args, mock_config)
+
+    def test_run_cli_lists_providers_and_exits_early(self, mock_args, mock_config, capsys):
+        """run_cli handles --list-providers without loading CSV/pipeline."""
+        from main.downloader import run_cli
+
+        mock_args.list_providers = True
+
+        with patch("main.downloader.pipeline") as mock_pipeline:
+            run_cli(mock_args, mock_config)
+
+        captured = capsys.readouterr()
+        assert "Available providers:" in captured.out
+        mock_pipeline.load_enabled_apis.assert_not_called()
 
 
 class TestShowQuotaStatus:
@@ -443,6 +618,40 @@ class TestMain:
                 with patch("main.downloader.run_cli") as mock_cli:
                     main()
                     mock_cli.assert_called_once()
+
+    def test_main_auto_injects_cli_for_positional_args(self):
+        """main auto-injects --cli when argv indicates CLI usage."""
+        from main.downloader import main
+
+        mock_args = MagicMock()
+        mock_args.interactive = False
+        mock_args.cli = True
+
+        with patch.object(sys, "argv", ["downloader.py", "sample.csv"]):
+            with patch("main.downloader.run_with_mode_detection") as mock_run:
+                mock_run.return_value = ({}, False, mock_args)
+
+                with patch("main.downloader.run_cli") as mock_cli:
+                    main()
+                    assert sys.argv[1] == "--cli"
+                    mock_cli.assert_called_once()
+
+    def test_main_does_not_inject_cli_when_interactive_flag_present(self):
+        """main does not auto-inject --cli when --interactive is present."""
+        from main.downloader import main
+
+        mock_args = MagicMock()
+        mock_args.interactive = True
+        mock_args.cli = False
+
+        with patch.object(sys, "argv", ["downloader.py", "--interactive", "sample.csv"]):
+            with patch("main.downloader.run_with_mode_detection") as mock_run:
+                mock_run.return_value = ({}, True, mock_args)
+
+                with patch("main.downloader.run_interactive") as mock_interactive:
+                    main()
+                    assert "--cli" not in sys.argv
+                    mock_interactive.assert_called_once()
 
     def test_main_overrides_to_interactive_with_flag(self):
         """main overrides to interactive mode with --interactive flag."""

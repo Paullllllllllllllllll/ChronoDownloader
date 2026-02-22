@@ -36,7 +36,7 @@ ChronoDownloader enables researchers and archivists to discover and download his
 ChronoDownloader supports two execution modes:
 
 - **Interactive Mode**: Guided workflow with colored console UI, provider status display, CSV discovery, navigation options (back/quit), and input validation. Ideal for exploratory work and first-time users.
-- **CLI Mode**: Command-line arguments for automation, scripting, and batch jobs. Set `interactive_mode: false` in `config.json` or use `--cli` flag.
+- **CLI Mode**: Command-line arguments for automation, scripting, and batch jobs. Use `--cli`, set `interactive_mode: false`, or invoke with CLI-style args (auto-detected).
 
 ### Key Capabilities
 
@@ -722,6 +722,32 @@ python main/downloader.py my_books.csv --config config_small.json
 - `--name STEM`: Custom file naming stem for `--iiif` downloads
 - `--quota-status`: Display quota usage and deferred queue status, then exit
 - `--cleanup-deferred`: Remove completed items from deferred queue, then exit
+- `--list-providers`: List available provider keys and exit
+
+**Provider selection overrides**:
+- `--providers KEYS`: Restrict run to comma-separated provider keys
+- `--enable-provider KEYS`: Add provider keys to the active set
+- `--disable-provider KEYS`: Remove provider keys from the active set
+
+**Processing scope overrides**:
+- `--pending-mode {all,new,failed}`: Process all pending+failed, only new, or only failed rows
+- `--entry-ids IDS`: Restrict processing to specific entry IDs (repeatable; comma-separated)
+- `--limit N`: Process at most N filtered rows
+
+**Runtime config overrides (concurrency remains config-only)**:
+- `--resume-mode {skip_completed,reprocess_all,skip_if_has_objects,resume_from_csv}`
+- `--selection-strategy {collect_and_select,sequential_first_hit}`
+- `--min-title-score FLOAT`
+- `--creator-weight FLOAT`
+- `--max-candidates-per-provider INT`
+- `--download-strategy {selected_only,all}`
+- `--[no-]keep-non-selected-metadata`
+- `--[no-]prefer-pdf-over-images`
+- `--[no-]download-manifest-renderings`
+- `--max-renderings-per-manifest INT`
+- `--rendering-mime-whitelist MIMES` (repeatable; comma-separated)
+- `--[no-]overwrite-existing`
+- `--[no-]include-metadata`
 
 ### Interactive Mode
 
@@ -752,7 +778,7 @@ python main/downloader.py --interactive
 
 ### CLI Mode
 
-When `interactive_mode: false` or using `--cli` flag:
+When `interactive_mode: false`, using `--cli`, or providing CLI-style arguments:
 
 ```bash
 # Basic usage

@@ -15,11 +15,14 @@ All orchestration logic has been moved to main/pipeline.py.
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 # Ensure parent directory is in path for direct script execution
 if __package__ is None or __package__ == "":
@@ -32,7 +35,12 @@ from main.execution import run_batch_downloads, process_direct_iiif
 from main.background_scheduler import get_background_scheduler
 from main.deferred_queue import get_deferred_queue
 from main.quota_manager import get_quota_manager
+from api.providers import PROVIDERS
+import api.core.config as core_config
 from main.unified_csv import (
+    DIRECT_LINK_COL,
+    ENTRY_ID_COL,
+    STATUS_COL,
     load_works_csv,
     get_pending_works,
     get_stats,
@@ -75,7 +83,7 @@ Examples:
         "csv_file",
         nargs="?",
         default=None,
-        help="Path to the CSV file containing works to download. Must have a 'Title' column."
+        help="Path to CSV file. Must contain 'short_title' or 'direct_link' (with required 'entry_id')."
     )
     
     parser.add_argument(
@@ -143,8 +151,387 @@ Examples:
         action="store_true",
         help="Remove completed items from deferred queue, then exit."
     )
+
+    # Provider selection overrides (keep provider concurrency in config)
+    parser.add_argument(
+        "--providers",
+        action="append",
+        default=None,
+        metavar="KEYS",
+        help="Comma-separated provider keys to use for this run (e.g. mdz,bnf_gallica,slub)."
+    )
+
+    parser.add_argument(
+        "--enable-provider",
+        action="append",
+        default=None,
+        metavar="KEYS",
+        help="Provider key(s) to force-enable for this run (comma-separated or repeat flag)."
+    )
+
+    parser.add_argument(
+        "--disable-provider",
+        action="append",
+        default=None,
+        metavar="KEYS",
+        help="Provider key(s) to force-disable for this run (comma-separated or repeat flag)."
+    )
+
+    parser.add_argument(
+        "--list-providers",
+        action="store_true",
+        help="List all available provider keys and exit."
+    )
+
+    # Processing scope controls for agentic workflows
+    parser.add_argument(
+        "--pending-mode",
+        default="all",
+        choices=["all", "new", "failed"],
+        help="Which CSV rows to process: all pending+failed (default), only never-tried rows, or only failed rows."
+    )
+
+    parser.add_argument(
+        "--entry-ids",
+        action="append",
+        default=None,
+        metavar="IDS",
+        help="Restrict processing to specific entry_id values (comma-separated or repeat flag)."
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Process at most N pending rows after filters are applied."
+    )
+
+    # Configurable processing options exposed to CLI (concurrency remains config-only)
+    parser.add_argument(
+        "--resume-mode",
+        choices=["skip_completed", "reprocess_all", "skip_if_has_objects", "resume_from_csv"],
+        default=None,
+        help="Override download.resume_mode for this run."
+    )
+
+    parser.add_argument(
+        "--selection-strategy",
+        choices=["collect_and_select", "sequential_first_hit"],
+        default=None,
+        help="Override selection.strategy for this run."
+    )
+
+    parser.add_argument(
+        "--min-title-score",
+        type=float,
+        default=None,
+        help="Override selection.min_title_score for this run."
+    )
+
+    parser.add_argument(
+        "--creator-weight",
+        type=float,
+        default=None,
+        help="Override selection.creator_weight for this run (0.0-1.0)."
+    )
+
+    parser.add_argument(
+        "--max-candidates-per-provider",
+        type=int,
+        default=None,
+        help="Override selection.max_candidates_per_provider for this run."
+    )
+
+    parser.add_argument(
+        "--download-strategy",
+        choices=["selected_only", "all"],
+        default=None,
+        help="Override selection.download_strategy for this run."
+    )
+
+    parser.add_argument(
+        "--keep-non-selected-metadata",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override selection.keep_non_selected_metadata for this run."
+    )
+
+    parser.add_argument(
+        "--prefer-pdf-over-images",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override download.prefer_pdf_over_images for this run."
+    )
+
+    parser.add_argument(
+        "--download-manifest-renderings",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override download.download_manifest_renderings for this run."
+    )
+
+    parser.add_argument(
+        "--max-renderings-per-manifest",
+        type=int,
+        default=None,
+        help="Override download.max_renderings_per_manifest for this run."
+    )
+
+    parser.add_argument(
+        "--rendering-mime-whitelist",
+        action="append",
+        default=None,
+        metavar="MIMES",
+        help="Override download.rendering_mime_whitelist (comma-separated MIME values)."
+    )
+
+    parser.add_argument(
+        "--overwrite-existing",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override download.overwrite_existing for this run."
+    )
+
+    parser.add_argument(
+        "--include-metadata",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override download.include_metadata for this run."
+    )
     
     return parser
+
+
+_TRUTHY = frozenset({"true", "1", "yes", "y"})
+_FALSY = frozenset({"false", "0", "no", "n"})
+
+
+def _split_csv_values(values: list[str] | None) -> list[str]:
+    """Split comma-separated CLI values and strip whitespace."""
+    if not values:
+        return []
+    result: list[str] = []
+    for raw in values:
+        if not raw:
+            continue
+        for part in str(raw).split(","):
+            item = part.strip()
+            if item:
+                result.append(item)
+    return result
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    """Deduplicate strings while preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _classify_status(value: Any) -> str:
+    """Classify CSV status cell as completed, failed, or pending."""
+    if pd.isna(value):
+        return "pending"
+    if isinstance(value, bool):
+        return "completed" if value else "failed"
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in _TRUTHY:
+            return "completed"
+        if lowered in _FALSY:
+            return "failed"
+    return "pending"
+
+
+def _apply_runtime_config_overrides(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    """Apply CLI overrides to runtime config and refresh config cache."""
+    merged = copy.deepcopy(config or {})
+    merged.setdefault("download", {})
+    merged.setdefault("selection", {})
+
+    dl_cfg = dict(merged.get("download") or {})
+    sel_cfg = dict(merged.get("selection") or {})
+
+    resume_mode = getattr(args, "resume_mode", None)
+    prefer_pdf = getattr(args, "prefer_pdf_over_images", None)
+    manifest_renderings = getattr(args, "download_manifest_renderings", None)
+    max_renderings = getattr(args, "max_renderings_per_manifest", None)
+    rendering_mimes = getattr(args, "rendering_mime_whitelist", None)
+    overwrite_existing = getattr(args, "overwrite_existing", None)
+    include_metadata = getattr(args, "include_metadata", None)
+
+    selection_strategy = getattr(args, "selection_strategy", None)
+    min_title_score = getattr(args, "min_title_score", None)
+    creator_weight = getattr(args, "creator_weight", None)
+    max_candidates_per_provider = getattr(args, "max_candidates_per_provider", None)
+    download_strategy = getattr(args, "download_strategy", None)
+    keep_non_selected_metadata = getattr(args, "keep_non_selected_metadata", None)
+
+    if resume_mode is not None:
+        dl_cfg["resume_mode"] = resume_mode
+    if prefer_pdf is not None:
+        dl_cfg["prefer_pdf_over_images"] = bool(prefer_pdf)
+    if manifest_renderings is not None:
+        dl_cfg["download_manifest_renderings"] = bool(manifest_renderings)
+    if max_renderings is not None:
+        dl_cfg["max_renderings_per_manifest"] = int(max(0, max_renderings))
+    if rendering_mimes:
+        mime_values = _dedupe_keep_order(_split_csv_values(rendering_mimes))
+        if mime_values:
+            dl_cfg["rendering_mime_whitelist"] = mime_values
+    if overwrite_existing is not None:
+        dl_cfg["overwrite_existing"] = bool(overwrite_existing)
+    if include_metadata is not None:
+        dl_cfg["include_metadata"] = bool(include_metadata)
+
+    if selection_strategy is not None:
+        sel_cfg["strategy"] = selection_strategy
+    if min_title_score is not None:
+        sel_cfg["min_title_score"] = float(min_title_score)
+    if creator_weight is not None:
+        sel_cfg["creator_weight"] = float(creator_weight)
+    if max_candidates_per_provider is not None:
+        sel_cfg["max_candidates_per_provider"] = int(max(1, max_candidates_per_provider))
+    if download_strategy is not None:
+        sel_cfg["download_strategy"] = download_strategy
+    if keep_non_selected_metadata is not None:
+        sel_cfg["keep_non_selected_metadata"] = bool(keep_non_selected_metadata)
+
+    merged["download"] = dl_cfg
+    merged["selection"] = sel_cfg
+
+    # Ensure config consumers using get_config() see the same runtime overrides.
+    core_config._CONFIG_CACHE = merged
+    logger.debug("Applied CLI runtime config overrides to in-memory config cache")
+    return merged
+
+
+def _apply_provider_cli_overrides(
+    args: argparse.Namespace,
+    providers: list[Any],
+    logger: logging.Logger,
+) -> list[Any]:
+    """Apply provider selection overrides while preserving provider ordering."""
+    explicit_keys = _dedupe_keep_order(_split_csv_values(getattr(args, "providers", None)))
+    force_enable = _dedupe_keep_order(_split_csv_values(getattr(args, "enable_provider", None)))
+    force_disable = set(_dedupe_keep_order(_split_csv_values(getattr(args, "disable_provider", None))))
+
+    if not explicit_keys and not force_enable and not force_disable:
+        return providers
+
+    available = set(PROVIDERS.keys())
+    unknown = [k for k in explicit_keys + force_enable + list(force_disable) if k not in available]
+    if unknown:
+        logger.warning("Ignoring unknown provider key(s): %s", ", ".join(sorted(set(unknown))))
+
+    current_keys = [p[0] for p in providers if isinstance(p, tuple) and len(p) >= 4]
+
+    if explicit_keys:
+        ordered_keys = [k for k in explicit_keys if k in available]
+    else:
+        ordered_keys = list(current_keys)
+
+    for key in force_enable:
+        if key in available and key not in ordered_keys:
+            ordered_keys.append(key)
+
+    ordered_keys = [k for k in ordered_keys if k not in force_disable and k in available]
+
+    overridden: list[Any] = []
+    for key in ordered_keys:
+        search_fn, download_fn, name = PROVIDERS[key]
+        overridden.append((key, search_fn, download_fn, name))
+
+    logger.info("Provider override active. Effective providers: %s", ", ".join(ordered_keys) or "(none)")
+    return overridden
+
+
+def _filter_pending_rows(works_df: pd.DataFrame, args: argparse.Namespace) -> pd.DataFrame:
+    """Apply pending-mode, entry-id, and limit filters to the work DataFrame."""
+    pending_mode = getattr(args, "pending_mode", "all")
+    if pending_mode == "all":
+        pending_df = get_pending_works(works_df)
+    else:
+        status_series = works_df[STATUS_COL] if STATUS_COL in works_df.columns else pd.Series([pd.NA] * len(works_df))
+        status_labels = status_series.apply(_classify_status)
+        if pending_mode == "new":
+            pending_df = works_df[status_labels == "pending"].copy()
+        else:  # pending_mode == "failed"
+            pending_df = works_df[status_labels == "failed"].copy()
+
+    requested_ids = _dedupe_keep_order(_split_csv_values(getattr(args, "entry_ids", None)))
+    if requested_ids:
+        id_set = {str(i) for i in requested_ids}
+        pending_df = pending_df[pending_df[ENTRY_ID_COL].astype(str).isin(id_set)].copy()
+
+    limit = getattr(args, "limit", None)
+    if limit is not None and limit >= 0:
+        pending_df = pending_df.head(limit).copy()
+
+    return pending_df
+
+
+def _looks_like_cli_invocation(argv: list[str]) -> bool:
+    """Heuristically detect CLI intent so automation need not toggle config first."""
+    if not argv:
+        return False
+
+    if "--interactive" in argv:
+        return False
+
+    cli_flags = {
+        "--cli",
+        "--help",
+        "-h",
+        "--output_dir",
+        "--dry-run",
+        "--log-level",
+        "--config",
+        "--iiif",
+        "--name",
+        "--providers",
+        "--enable-provider",
+        "--disable-provider",
+        "--list-providers",
+        "--pending-mode",
+        "--entry-ids",
+        "--limit",
+        "--resume-mode",
+        "--selection-strategy",
+        "--min-title-score",
+        "--creator-weight",
+        "--max-candidates-per-provider",
+        "--download-strategy",
+        "--keep-non-selected-metadata",
+        "--no-keep-non-selected-metadata",
+        "--prefer-pdf-over-images",
+        "--no-prefer-pdf-over-images",
+        "--download-manifest-renderings",
+        "--no-download-manifest-renderings",
+        "--max-renderings-per-manifest",
+        "--rendering-mime-whitelist",
+        "--overwrite-existing",
+        "--no-overwrite-existing",
+        "--include-metadata",
+        "--no-include-metadata",
+    }
+
+    for token in argv:
+        if token in cli_flags:
+            return True
+        if not token.startswith("-"):
+            return True
+    return False
 
 def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> None:
     """Run the downloader in CLI mode.
@@ -182,14 +569,23 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> None:
 
     logger = logging.getLogger(__name__)
 
+    if getattr(args, "list_providers", False):
+        print("Available providers:")
+        for key, (_search_fn, _download_fn, name) in sorted(PROVIDERS.items(), key=lambda kv: kv[0]):
+            print(f"  - {key}: {name}")
+        return
+
     # Ensure utils.get_config() reads the same config path
     try:
         os.environ["CHRONO_CONFIG_PATH"] = args.config
     except Exception:
         pass
 
+    config = _apply_runtime_config_overrides(args, config, logger)
+
     # Load and validate providers
     providers = pipeline.load_enabled_apis(args.config)
+    providers = _apply_provider_cli_overrides(args, providers, logger)
     providers = pipeline.filter_enabled_providers_for_keys(providers)
     pipeline.ENABLED_APIS = providers
     
@@ -222,23 +618,36 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> None:
         return
     
     # Validate required column
-    if TITLE_COL not in works_df.columns:
+    if TITLE_COL not in works_df.columns and DIRECT_LINK_COL not in works_df.columns:
         logger.error(
-            "CSV file must contain a '%s' column (sampling notebook format).",
-            TITLE_COL
+            "CSV file must contain '%s' or '%s'.",
+            TITLE_COL,
+            DIRECT_LINK_COL,
         )
         return
     
     # Filter to pending works only (resume support)
     initial_stats = get_stats(csv_path)
-    pending_df = get_pending_works(works_df)
+    pending_df = _filter_pending_rows(works_df, args)
     
     logger.info("CSV status: %d total, %d completed, %d failed, %d pending",
                 initial_stats["total"], initial_stats["completed"],
                 initial_stats["failed"], initial_stats["pending"])
+
+    pending_mode = getattr(args, "pending_mode", "all")
+    if pending_mode != "all":
+        logger.info("Pending filter active: mode=%s", pending_mode)
+
+    entry_ids = getattr(args, "entry_ids", None)
+    if entry_ids:
+        logger.info("Entry filter active: %d requested entry_id value(s)", len(_split_csv_values(entry_ids)))
+
+    limit = getattr(args, "limit", None)
+    if limit is not None:
+        logger.info("Limit filter active: processing at most %d row(s)", max(0, limit))
     
     if len(pending_df) == 0:
-        logger.info("No pending works to process. All items already have a status.")
+        logger.info("No works to process after applying pending/entry/limit filters.")
         return
 
     # Get parallel download configuration
@@ -461,6 +870,9 @@ def main() -> None:
         if "--cleanup-deferred" in sys.argv:
             cleanup_deferred_queue()
             return
+
+        if "--cli" not in sys.argv and _looks_like_cli_invocation(sys.argv[1:]):
+            sys.argv.insert(1, "--cli")
         
         # Use centralized mode detection
         config, interactive_mode, args = run_with_mode_detection(
