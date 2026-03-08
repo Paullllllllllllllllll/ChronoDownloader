@@ -83,7 +83,7 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
             pass
         return p
 
-    def _try(q: str, use_filter: str | None):
+    def _try(q: str, use_filter: str | None) -> dict | str | bytes | None:
         """Make a request to the Google Books API."""
         return make_request(API_BASE_URL, params=_params(q, use_filter))
 
@@ -114,13 +114,13 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
     for q in queries:
         for flt in filters:
             data = _try(q, flt)
-            if data and data.get("items"):
+            if isinstance(data, dict) and data.get("items"):
                 break
-        if data and data.get("items"):
+        if isinstance(data, dict) and data.get("items"):
             break
 
     results: list[SearchResult] = []
-    if data and data.get("items"):
+    if isinstance(data, dict) and data.get("items"):
         for item in data["items"]:
             volume_info = item.get("volumeInfo", {})
             vol_id = item.get("id")

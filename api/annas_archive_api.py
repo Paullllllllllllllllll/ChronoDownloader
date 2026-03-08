@@ -46,6 +46,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
+from typing import Any
 
 from bs4 import BeautifulSoup
 
@@ -69,7 +70,7 @@ MIRRORS = [
 ]
 
 # Import centralized quota manager
-def _get_quota_manager():
+def _get_quota_manager() -> Any:
     """Lazy import to avoid circular dependencies."""
     from main.quota_manager import get_quota_manager
     return get_quota_manager()
@@ -243,7 +244,7 @@ def _collect_title_candidates(texts: list[str]) -> list[str]:
 
     return candidates
 
-def _extract_title_candidates(title_cell) -> list[str]:
+def _extract_title_candidates(title_cell: Any) -> list[str]:
     """Extract potential title strings from the table title cell."""
     if not title_cell:
         return []
@@ -269,7 +270,7 @@ def _extract_title_candidates(title_cell) -> list[str]:
 
     return _collect_title_candidates(snippets)
 
-def _extract_creators_from_cell(creator_cell) -> list[str]:
+def _extract_creators_from_cell(creator_cell: Any) -> list[str]:
     """Extract creator names from the creators cell."""
     if not creator_cell:
         return []

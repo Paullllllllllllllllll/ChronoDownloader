@@ -43,7 +43,7 @@ DIRECT_LINK_COL = "direct_link"
 _TRUTHY = frozenset({"true", "1", "yes", "y"})
 _FALSY = frozenset({"false", "0", "no", "n"})
 
-def _parse_status(val) -> str:
+def _parse_status(val: object) -> str:
     """Classify a single status cell value.
 
     Returns:

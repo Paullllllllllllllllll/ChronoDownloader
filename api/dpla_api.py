@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from .core.config import get_max_pages, prefer_pdf_over_images
 from .core.network import make_request
@@ -121,7 +122,7 @@ def download_dpla_work(item_data: SearchResult | dict, output_folder: str) -> bo
             break
     if not manifest_url:
         hv = item_details.get("hasView")
-        def _from_hv(hv) -> str | None:
+        def _from_hv(hv: Any) -> str | None:
             if isinstance(hv, list):
                 for it in hv:
                     if isinstance(it, str) and "manifest" in it and "iiif" in it:
@@ -186,7 +187,7 @@ def download_dpla_work(item_data: SearchResult | dict, output_folder: str) -> bo
 
     # Fallbacks when we have no manifest or no images from manifest:
     # Try isShownBy (often a direct media resource), then hasView entries, then object (thumbnail).
-    def _as_list(v):
+    def _as_list(v: Any) -> list:
         if v is None:
             return []
         return v if isinstance(v, list) else [v]

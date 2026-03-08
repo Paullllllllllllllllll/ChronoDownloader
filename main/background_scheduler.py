@@ -53,7 +53,7 @@ class BackgroundRetryScheduler:
                 cls._instance = instance
             return cls._instance
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the background scheduler."""
         if getattr(self, "_initialized", False):
             return

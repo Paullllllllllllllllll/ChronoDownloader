@@ -32,7 +32,7 @@ class DownloadBudget:
     }
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         # Global counters by content type (in bytes)
         self.total_images_bytes = 0

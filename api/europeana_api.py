@@ -212,7 +212,7 @@ def download_europeana_work(item_data: SearchResult | dict, output_folder: str) 
             if isinstance(rec, dict):
                 # Try common fields
                 candidates: list[str] = []
-                def _add(u: str | None):
+                def _add(u: str | None) -> None:
                     if u and isinstance(u, str):
                         candidates.append(u)
                 obj = rec.get("object") or {}

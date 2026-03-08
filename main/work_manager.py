@@ -15,6 +15,7 @@ from typing import Any
 from api.core.config import get_config, get_resume_mode
 from api.core.naming import build_work_directory_name
 from api.matching import normalize_text
+from api.model import SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def format_candidates_for_json(candidates: list) -> list:
         for sr in candidates
     ]
 
-def format_selected_for_json(selected, source_id: str | None) -> dict[str, Any] | None:
+def format_selected_for_json(selected: SearchResult | None, source_id: str | None) -> dict[str, Any] | None:
     """Format selected SearchResult for work.json storage.
     
     Args:

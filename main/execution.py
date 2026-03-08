@@ -44,7 +44,7 @@ from main.background_scheduler import (
     BackgroundRetryScheduler,
     get_background_scheduler,
 )
-from main.deferred_queue import get_deferred_queue
+from main.deferred_queue import DeferredItem, get_deferred_queue
 from api.providers import PROVIDERS
 
 def _setup_background_scheduler(
@@ -72,10 +72,10 @@ def _setup_background_scheduler(
         scheduler.set_provider_download_fn(provider_key, download_fn)
     
     # Set up callbacks for logging
-    def on_success(item):
+    def on_success(item: DeferredItem) -> None:
         logger.info("Background retry succeeded: '%s'", item.title)
-    
-    def on_failure(item, error):
+
+    def on_failure(item: DeferredItem, error: str) -> None:
         logger.warning("Background retry failed: '%s' - %s", item.title, error)
     
     scheduler.set_callbacks(on_success=on_success, on_failure=on_failure)
@@ -601,7 +601,9 @@ def _run_parallel(
         "skipped": skipped_count,
     }
 
-def create_interactive_callbacks(logger: logging.Logger):
+def create_interactive_callbacks(
+    logger: logging.Logger,
+) -> tuple[Callable[[DownloadTask], None], Callable[[DownloadTask, bool, Exception | None], None]]:
     """Create progress callbacks suitable for interactive mode.
     
     Args:

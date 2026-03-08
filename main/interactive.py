@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 class InteractiveWorkflow:
     """Interactive workflow for configuring and running downloads."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the workflow."""
         ConsoleUI.enable_ansi()
         self.config = DownloadConfiguration()

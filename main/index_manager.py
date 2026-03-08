@@ -11,6 +11,8 @@ import csv
 import threading
 from typing import Any
 
+from api.model import SearchResult
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ def build_index_row(
     work_dir: str,
     title: str,
     creator: str | None,
-    selected,
+    selected: SearchResult | None,
     selected_source_id: str | None,
     work_json_path: str,
     status: str | None = None,
