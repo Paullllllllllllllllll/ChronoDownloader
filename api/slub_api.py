@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any, cast
 
 from .download_helpers import download_iiif_manifest_and_images
 from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
@@ -21,7 +22,7 @@ SOURCE_URL = "https://data.slub-dresden.de/source/kxp-de14/{record_id}"
 IIIF_MANIFEST_URL = "https://iiif.slub-dresden.de/iiif/2/{ppn}/manifest.json"
 DIGITAL_ITEM_URL = "https://digital.slub-dresden.de/id{ppn}"
 
-def _extract_title(item: dict) -> str:
+def _extract_title(item: dict[str, Any]) -> str:
     title = item.get("preferredName") or ""
     if isinstance(item.get("title"), dict):
         title = item["title"].get("mainTitle") or item["title"].get("preferredName") or title
@@ -29,7 +30,7 @@ def _extract_title(item: dict) -> str:
         title = item.get("title")
     return title or "N/A"
 
-def _extract_creator(item: dict) -> str:
+def _extract_creator(item: dict[str, Any]) -> str:
     contrib = item.get("contributor") or []
     if isinstance(contrib, list):
         for c in contrib:
@@ -37,10 +38,10 @@ def _extract_creator(item: dict) -> str:
                 return str(c.get("name"))
     return "N/A"
 
-def _extract_record_id(item: dict) -> str | None:
+def _extract_record_id(item: dict[str, Any]) -> str | None:
     record_id = item.get("@id") or item.get("id")
     if record_id and isinstance(record_id, str):
-        return record_id.rstrip("/").split("/")[-1]
+        return cast(str, record_id.rstrip("/").split("/")[-1])
     return None
 
 def _extract_ppn_from_url(url: str | None) -> str | None:
@@ -119,7 +120,7 @@ def search_slub(title: str, creator: str | None = None, max_results: int = 3) ->
 
     return results
 
-def download_slub_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_slub_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download SLUB item via IIIF manifest derived from the source record."""
     record_id = resolve_item_id(item_data)
     manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")

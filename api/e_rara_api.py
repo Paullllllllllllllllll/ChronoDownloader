@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
+from typing import Any
 
 from .download_helpers import download_iiif_manifest_and_images
 from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
@@ -98,7 +99,7 @@ def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) 
 
     return results
 
-def download_e_rara_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_e_rara_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download via e-rara IIIF manifest."""
     vlid = resolve_item_id(item_data)
     manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")

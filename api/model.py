@@ -104,7 +104,7 @@ def _as_list(value: Any) -> list[str]:
     return [str(value)]
 
 def resolve_item_field(
-    item_data: SearchResult | dict,
+    item_data: SearchResult | dict[str, Any],
     raw_key: str,
     *,
     attr: str | None = None,
@@ -139,7 +139,7 @@ def resolve_item_field(
     return default
 
 def resolve_item_id(
-    item_data: SearchResult | dict,
+    item_data: SearchResult | dict[str, Any],
     *raw_keys: str,
 ) -> str | None:
     """Extract the primary identifier from a SearchResult or dict.

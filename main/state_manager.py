@@ -17,7 +17,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from api.core.config import get_config
 
@@ -167,7 +167,7 @@ class StateManager:
             Quota data dict or None
         """
         with self._data_lock:
-            return self._state["quotas"].get(provider_key)
+            return cast(dict[str, Any] | None, self._state["quotas"].get(provider_key))
     
     def set_quota(self, provider_key: str, quota_data: dict[str, Any]) -> None:
         """Set quota state for a provider.
@@ -192,18 +192,18 @@ class StateManager:
     
     # === Deferred Queue Methods ===
     
-    def get_deferred_items(self) -> list:
+    def get_deferred_items(self) -> list[Any]:
         """Get all deferred items.
-        
+
         Returns:
             List of deferred item dicts
         """
         with self._data_lock:
             return list(self._state["deferred_items"])
-    
-    def set_deferred_items(self, items: list) -> None:
+
+    def set_deferred_items(self, items: list[Any]) -> None:
         """Set all deferred items (replaces existing).
-        
+
         Args:
             items: List of deferred item dicts
         """

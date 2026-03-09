@@ -224,7 +224,7 @@ class ConsoleUI:
                 raise KeyboardInterrupt()
     
     @staticmethod
-    def print_config_summary(config_data: dict, title: str = "Configuration") -> None:
+    def print_config_summary(config_data: dict[str, Any], title: str = "Configuration") -> None:
         """Print a formatted configuration summary.
         
         Args:

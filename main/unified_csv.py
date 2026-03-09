@@ -16,6 +16,7 @@ import os
 import shutil
 import threading
 from datetime import datetime, timezone
+from typing import Any
 
 import pandas as pd
 
@@ -118,7 +119,7 @@ def get_pending_works(df: pd.DataFrame) -> pd.DataFrame:
     mask = status.apply(lambda v: _parse_status(v) != "completed")
     return df[mask].copy()
 
-def get_completed_entry_ids(df: pd.DataFrame) -> set:
+def get_completed_entry_ids(df: pd.DataFrame) -> set[str]:
     """Get set of entry_ids that are already completed.
     
     Args:
@@ -323,7 +324,7 @@ def mark_deferred(
             logger.exception("Failed to mark entry %s as deferred", entry_id)
             return False
 
-def get_stats(csv_path: str) -> dict:
+def get_stats(csv_path: str) -> dict[str, Any]:
     """Get download statistics from the CSV.
     
     Args:

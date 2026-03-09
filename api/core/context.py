@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from typing import Generator
+from typing import Generator, cast
 
 # Thread-local storage for current work context
 _TLS = threading.local()
@@ -104,7 +104,7 @@ def get_counters() -> dict[tuple[str, str, str], int]:
     _init_tls()
     if not hasattr(_TLS, "counters") or _TLS.counters is None:
         _TLS.counters = {}
-    return _TLS.counters
+    return cast(dict[tuple[str, str, str], int], _TLS.counters)
 
 def reset_counters() -> None:
     """Reset the file counters (typically called at the start of a new work)."""

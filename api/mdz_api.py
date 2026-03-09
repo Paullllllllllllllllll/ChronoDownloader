@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import urllib.parse
+from typing import Any
 
 from .download_helpers import download_page_images
 from .iiif import extract_image_service_bases
@@ -92,7 +93,7 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
     # Legacy Solr endpoints are deprecated and removed as of 2024/2025
     return results
 
-def download_mdz_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_mdz_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download the IIIF manifest and page images for an MDZ item.
 
     - Fetches the IIIF Presentation manifest (v2 or v3).

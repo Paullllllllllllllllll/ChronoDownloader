@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
+from typing import Any
 
 from .iiif import extract_image_service_bases, download_one_from_service
 from .model import SearchResult, convert_to_searchresult, resolve_item_id
@@ -67,7 +68,7 @@ def search_internet_archive(
             results.append(sr)
     return results
 
-def download_ia_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_ia_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download available objects for an Internet Archive item.
 
     Download strategy prioritizes PDFs over IIIF images for better availability:
@@ -108,7 +109,7 @@ def download_ia_work(item_data: SearchResult | dict, output_folder: str) -> bool
         files = metadata.get("files")
         preferred_exts = [".pdf", ".epub", ".djvu"]
         
-        def _download_from_list(fl: list) -> tuple[bool, bool]:
+        def _download_from_list(fl: list[Any]) -> tuple[bool, bool]:
             """Try to download primary content from file list."""
             ok = False
             got_primary = False

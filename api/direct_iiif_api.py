@@ -23,7 +23,7 @@ import hashlib
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, cast
 
 from .core.budget import budget_exhausted
 from .core.config import get_config, get_max_pages, prefer_pdf_over_images
@@ -449,7 +449,7 @@ def get_naming_template() -> str:
     """
     config = get_config()
     direct_iiif_cfg = config.get("direct_iiif", {})
-    return direct_iiif_cfg.get("naming_template", "{provider}_{item_id}")
+    return cast(str, direct_iiif_cfg.get("naming_template", "{provider}_{item_id}"))
 
 def resolve_file_stem(
     template: str,
@@ -497,7 +497,7 @@ def is_direct_download_enabled() -> bool:
     """
     config = get_config()
     direct_iiif_cfg = config.get("direct_iiif", {})
-    return direct_iiif_cfg.get("enabled", True)
+    return cast(bool, direct_iiif_cfg.get("enabled", True))
 
 def get_direct_link_column() -> str:
     """Get the column name used for direct links.
@@ -507,7 +507,7 @@ def get_direct_link_column() -> str:
     """
     config = get_config()
     direct_iiif_cfg = config.get("direct_iiif", {})
-    return direct_iiif_cfg.get("link_column", "direct_link")
+    return cast(str, direct_iiif_cfg.get("link_column", "direct_link"))
 
 __all__ = [
     "is_iiif_manifest_url",

@@ -15,7 +15,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from api.core.config import get_config
 from api.core.context import (
@@ -76,7 +76,7 @@ class BackgroundRetryScheduler:
         self._quota_manager: QuotaManager | None = None
         
         # Provider download functions (set during integration)
-        self._provider_download_fns: dict[str, Callable] = {}
+        self._provider_download_fns: dict[str, Callable[..., Any]] = {}
         
         # Statistics
         self._stats_lock = threading.Lock()

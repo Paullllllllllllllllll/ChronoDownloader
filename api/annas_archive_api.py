@@ -75,7 +75,7 @@ def _get_quota_manager() -> Any:
     from main.quota_manager import get_quota_manager
     return get_quota_manager()
 
-def _get_quota_config() -> dict:
+def _get_quota_config() -> dict[str, Any]:
     """Get Anna's Archive quota configuration.
     
     Supports both new quota.* structure and legacy config for backward compatibility.
@@ -510,7 +510,7 @@ def search_annas_archive(title: str, creator: str | None = None, max_results: in
     logger.info("Found %d results from Anna's Archive", len(results))
     return results
 
-def download_annas_archive_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_annas_archive_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download a work from Anna's Archive.
     
     Anna's Archive aggregates files from multiple sources. This function:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
+from typing import Any, cast
 
 from .core.config import get_max_pages, prefer_pdf_over_images
 from .core.network import make_request
@@ -47,20 +48,20 @@ def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> 
     
     results: list[SearchResult] = []
 
-    def _extract_iiif_manifest(item: dict) -> str | None:
+    def _extract_iiif_manifest(item: dict[str, Any]) -> str | None:
         iiif_manifest = item.get("iiif_manifest_url")
         if iiif_manifest:
-            return iiif_manifest
+            return cast(str, iiif_manifest)
         resources = item.get("resources") or []
         if isinstance(resources, list):
             for res in resources:
                 if isinstance(res, dict) and res.get("iiif_manifest"):
-                    return res.get("iiif_manifest")
+                    return cast(str, res.get("iiif_manifest"))
         elif isinstance(resources, dict):
-            return resources.get("iiif_manifest") or iiif_manifest
+            return cast(str | None, resources.get("iiif_manifest") or iiif_manifest)
         return None
 
-    def _item_to_search_result(item: dict) -> SearchResult:
+    def _item_to_search_result(item: dict[str, Any]) -> SearchResult:
         item_id = item.get("id")
         if item_id:
             item_id = item_id.strip("/").split("/")[-1]
@@ -84,7 +85,7 @@ def search_loc(title: str, creator: str | None = None, max_results: int = 3) -> 
             results.append(_item_to_search_result(item))
     return results
 
-def download_loc_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_loc_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download a Library of Congress work.
     
     Args:

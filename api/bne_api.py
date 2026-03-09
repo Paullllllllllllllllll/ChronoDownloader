@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from .core.config import get_max_pages, prefer_pdf_over_images
 from .core.network import make_request
@@ -60,7 +61,7 @@ def search_bne(title: str, creator: str | None = None, max_results: int = 3) -> 
 
     return results
 
-def download_bne_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_bne_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download IIIF manifest and page images for a BNE item."""
 
     item_id = resolve_item_id(item_data)

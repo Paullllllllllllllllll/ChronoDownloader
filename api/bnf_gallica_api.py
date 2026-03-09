@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
+from typing import Any
 
 from .core.budget import budget_exhausted
 from .core.config import get_max_pages, prefer_pdf_over_images
@@ -89,7 +90,7 @@ def search_gallica(title: str, creator: str | None = None, max_results: int = 3)
         logger.exception("Unexpected error during Gallica XML parsing: %s", e)
     return results
 
-def download_gallica_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_gallica_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download Gallica IIIF manifest and full-size page images.
 
     - Fetches IIIF manifest (usually v2; handle v3 structures too).

@@ -71,7 +71,7 @@ from main.work_manager import (
 logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
-ProviderTuple = tuple[str, Callable, Callable, str]
+ProviderTuple = tuple[str, Callable[..., Any], Callable[..., Any], str]
 
 @dataclasses.dataclass
 class _PreparedWork:
@@ -187,7 +187,7 @@ def _run_download_with_fallback(
     selected: SearchResult,
     pkey: str,
     pname: str,
-    download_func: Callable,
+    download_func: Callable[..., Any],
     work_dir: str,
     all_candidates: list[SearchResult],
     provider_list: list[ProviderTuple],

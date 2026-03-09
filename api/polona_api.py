@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
+from typing import Any
 
 from .core.config import get_max_pages, prefer_pdf_over_images
 from .core.network import make_request
@@ -59,7 +60,7 @@ def search_polona(title: str, creator: str | None = None, max_results: int = 3) 
                 continue
     return results
 
-def download_polona_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_polona_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download IIIF manifest and page images for a Polona item.
 
     Polona exposes a stable IIIF manifest per item; we parse v2/v3 and download full-size images.

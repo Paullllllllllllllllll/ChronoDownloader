@@ -61,10 +61,10 @@ class DownloadTask:
     work_stem: str
     selected_result: SearchResult
     provider_key: str
-    provider_tuple: tuple[str, Callable, Callable, str]
+    provider_tuple: tuple[str, Callable[..., Any], Callable[..., Any], str]
     work_json_path: str
     all_candidates: list[SearchResult] = field(default_factory=list)
-    provider_map: dict[str, tuple[Callable, Callable, str]] = field(default_factory=dict)
+    provider_map: dict[str, tuple[Callable[..., Any], Callable[..., Any], str]] = field(default_factory=dict)
     selection_config: dict[str, Any] = field(default_factory=dict)
     base_output_dir: str = "downloaded_works"
     status: str | None = None
@@ -190,7 +190,7 @@ class DownloadScheduler:
             self._default_concurrency
         )
         self._executor: ThreadPoolExecutor | None = None
-        self._futures: dict[Future, DownloadTask] = {}
+        self._futures: dict[Future[Any], DownloadTask] = {}
         self._on_complete = on_complete
         self._on_submit = on_submit
         self._shutdown_event = threading.Event()
@@ -245,7 +245,7 @@ class DownloadScheduler:
         self, 
         task: DownloadTask, 
         download_fn: Callable[[DownloadTask], bool]
-    ) -> Future | None:
+    ) -> Future[Any] | None:
         """Submit a download task to the pool.
         
         Args:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import time
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from api.core.config import get_config, get_provider_setting, get_min_title_score
 from api.matching import combined_match_score
@@ -20,10 +20,10 @@ from api.model import SearchResult, convert_to_searchresult
 logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
-ProviderTuple = tuple[str, Callable, Callable, str]
+ProviderTuple = tuple[str, Callable[..., Any], Callable[..., Any], str]
 
 def call_search_function(
-    search_func: Callable,
+    search_func: Callable[..., Any],
     title: str,
     creator: str | None,
     max_results: int
@@ -40,17 +40,17 @@ def call_search_function(
         List of search results from the provider
     """
     try:
-        return search_func(title, creator=creator, max_results=max_results)
+        return cast(list[Any], search_func(title, creator=creator, max_results=max_results))
     except TypeError:
         try:
-            return search_func(title, max_results=max_results)
+            return cast(list[Any], search_func(title, max_results=max_results))
         except TypeError:
             try:
                 if creator is not None:
-                    return search_func(title, creator=creator)
-                return search_func(title)
+                    return cast(list[Any], search_func(title, creator=creator))
+                return cast(list[Any], search_func(title))
             except TypeError:
-                return search_func(title)
+                return cast(list[Any], search_func(title))
     except Exception:
         raise
 
@@ -356,7 +356,7 @@ def _collect_candidates_parallel(
     )
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_provider: dict[concurrent.futures.Future, ProviderTuple] = {}
+        future_to_provider: dict[concurrent.futures.Future[Any], ProviderTuple] = {}
         
         for provider_tuple in provider_list:
             future = executor.submit(

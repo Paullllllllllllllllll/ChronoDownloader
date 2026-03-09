@@ -44,7 +44,7 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
     if data.get("docs"):
         for doc in data["docs"]:
             # Try to discover a IIIF manifest URL from common DPLA fields
-            def _extract_manifest(d: dict) -> str | None:
+            def _extract_manifest(d: dict[str, Any]) -> str | None:
                 candidates = []
                 # Common top-level string fields
                 for k in ("object", "isShownAt", "isShownBy"):
@@ -96,7 +96,7 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
 
     return results
 
-def download_dpla_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_dpla_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download metadata, IIIF manifest, and page images for a DPLA item (when available)."""
 
     item_id = resolve_item_id(item_data)
@@ -187,7 +187,7 @@ def download_dpla_work(item_data: SearchResult | dict, output_folder: str) -> bo
 
     # Fallbacks when we have no manifest or no images from manifest:
     # Try isShownBy (often a direct media resource), then hasView entries, then object (thumbnail).
-    def _as_list(v: Any) -> list:
+    def _as_list(v: Any) -> list[Any]:
         if v is None:
             return []
         return v if isinstance(v, list) else [v]

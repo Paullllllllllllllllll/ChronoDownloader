@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import urllib.parse
+from typing import Any, cast
 
 from .core.config import get_provider_setting
 from .core.network import make_request
@@ -59,7 +60,7 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
     free_only = _gb_free_only()
     prefer_fmt = _gb_prefer_format()
 
-    def _params(q: str, use_filter: str | None) -> dict:
+    def _params(q: str, use_filter: str | None) -> dict[str, Any]:
         """Build query parameters for Google Books API."""
         p = {
             "q": q,
@@ -83,7 +84,7 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
             pass
         return p
 
-    def _try(q: str, use_filter: str | None) -> dict | str | bytes | None:
+    def _try(q: str, use_filter: str | None) -> dict[Any, Any] | str | bytes | None:
         """Make a request to the Google Books API."""
         return make_request(API_BASE_URL, params=_params(q, use_filter))
 
@@ -126,16 +127,16 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
             vol_id = item.get("id")
             access_info = item.get("accessInfo", {}) if isinstance(item.get("accessInfo", {}), dict) else {}
             # Determine if there is a direct downloadable link (pdf/epub)
-            def _dl(ai: dict) -> str | None:
+            def _dl(ai: dict[str, Any]) -> str | None:
                 """Get direct downloadable link from access info."""
                 if not isinstance(ai, dict):
                     return None
                 # Prefer configured format, but accept either
                 if isinstance(ai.get(prefer_fmt, {}), dict) and ai.get(prefer_fmt, {}).get("downloadLink"):
-                    return ai[prefer_fmt]["downloadLink"]
+                    return cast(str, ai[prefer_fmt]["downloadLink"])
                 for alt in ("pdf", "epub"):
                     if isinstance(ai.get(alt, {}), dict) and ai.get(alt, {}).get("downloadLink"):
-                        return ai[alt]["downloadLink"]
+                        return cast(str, ai[alt]["downloadLink"])
                 return None
             download_link = _dl(access_info)
             # If configured to free_only, accept items that are clearly free/public domain
@@ -161,7 +162,7 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
             results.append(convert_to_searchresult("Google Books", raw))
     return results
 
-def download_google_books_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_google_books_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download metadata and available files for a Google Books volume.
     
     Google Books only provides actual downloadable PDFs/EPUBs for:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
+from typing import Any
 
 from .core.config import get_max_pages, prefer_pdf_over_images
 from .core.network import make_request
@@ -153,7 +154,7 @@ def search_british_library(title: str, creator: str | None = None, max_results: 
         sparql_results = []
     return sparql_results
 
-def download_british_library_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_british_library_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download IIIF manifest and page images for a British Library item."""
 
     identifier = resolve_item_id(item_data, "identifier")

@@ -217,7 +217,7 @@ def _validate_html_not_login_page(filepath: str, url: str, provider: str | None)
 def _determine_target_directory(
     folder_path: str,
     ext: str,
-    allowed_exts: list | None,
+    allowed_exts: list[str] | None,
     save_disallowed_to_metadata: bool,
 ) -> tuple[str | None, str, bool]:
     """Determine target directory based on extension whitelist.

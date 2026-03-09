@@ -152,7 +152,7 @@ def create_work_json(
     creator: str | None,
     entry_id: str | None,
     selection_config: dict[str, Any],
-    candidates: list,
+    candidates: list[Any],
     selected: dict[str, Any] | None,
     status: str = "pending",
 ) -> None:
@@ -182,7 +182,7 @@ def create_work_json(
     except Exception:
         logger.exception("Failed to write work.json to %s", work_json_path)
 
-def format_candidates_for_json(candidates: list) -> list:
+def format_candidates_for_json(candidates: list[Any]) -> list[Any]:
     """Format SearchResult candidates for work.json storage.
     
     Args:

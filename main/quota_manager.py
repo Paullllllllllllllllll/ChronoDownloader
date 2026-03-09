@@ -24,7 +24,7 @@ import logging
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from api.core.config import get_config, get_provider_setting
 
@@ -421,7 +421,7 @@ class QuotaManager:
         # Check new config structure
         quota_config = get_provider_setting(provider_key, "quota", {})
         if isinstance(quota_config, dict):
-            return quota_config.get("enabled", False)
+            return cast(bool, quota_config.get("enabled", False))
         
         # For legacy configs, assume quota exists if daily_limit setting exists
         daily_limit = get_provider_setting(

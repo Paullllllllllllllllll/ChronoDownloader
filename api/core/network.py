@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import requests
@@ -348,10 +348,10 @@ def get_session() -> requests.Session:
 
 def make_request(
     url: str,
-    params: dict | None = None,
-    headers: dict | None = None,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, Any] | None = None,
     timeout: int = 15,
-) -> dict | str | bytes | None:
+) -> dict[Any, Any] | str | bytes | None:
     """HTTP GET with centralized per-provider pacing, backoff, and circuit breaker.
     
     Args:
@@ -471,7 +471,7 @@ def make_request(
             content_type = resp.headers.get("Content-Type", "").lower()
             if "json" in content_type:
                 try:
-                    return resp.json()
+                    return cast(dict[Any, Any], resp.json())
                 except json.JSONDecodeError as e:
                     logger.error("JSON decode error for %s: %s", url, e)
                     return None
@@ -562,8 +562,8 @@ def make_request(
 
 def make_json_request(
     url: str,
-    params: dict | None = None,
-    headers: dict | None = None,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, Any] | None = None,
     timeout: int = 15,
 ) -> dict[str, Any] | None:
     """HTTP GET expecting a JSON response, with type-safe return.

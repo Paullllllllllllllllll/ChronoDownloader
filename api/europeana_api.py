@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from .core.config import get_max_pages, prefer_pdf_over_images
 from .core.network import make_request
@@ -115,7 +116,7 @@ def search_europeana(title: str, creator: str | None = None, max_results: int = 
         logger.error("Europeana API error: %s", data.get("error"))
     return results
 
-def download_europeana_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_europeana_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     # Save search metadata
     item_id = resolve_item_id(item_data) or resolve_item_field(item_data, "title", attr="title", default="unknown_item")
     raw_data = item_data.raw if isinstance(item_data, SearchResult) else item_data

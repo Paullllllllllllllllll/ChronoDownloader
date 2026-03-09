@@ -143,7 +143,7 @@ def read_index_csv(base_output_dir: str) -> pd.DataFrame | None:
         logger.exception("Failed to read index.csv")
         return None
 
-def get_processed_work_ids(base_output_dir: str) -> set:
+def get_processed_work_ids(base_output_dir: str) -> set[str]:
     """Get set of already-processed work IDs from index.csv.
     
     Args:

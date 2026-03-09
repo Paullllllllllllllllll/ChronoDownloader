@@ -153,7 +153,7 @@ def search_hathitrust(title: str, creator: str | None = None, max_results: int =
             break
     return results
 
-def download_hathitrust_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_hathitrust_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download metadata and a representative page for a HathiTrust item.
 
     - Save Bibliographic API record (if present in raw.bib).

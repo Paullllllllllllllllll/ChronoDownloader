@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
+from typing import Any
 
 from .model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
 from .query_helpers import escape_sru_literal
@@ -133,7 +134,7 @@ def _collect_mets_urls(mets_xml: str) -> tuple[list[str], list[str]]:
 
     return pdf_urls, image_urls
 
-def download_sbb_digital_work(item_data: SearchResult | dict, output_folder: str) -> bool:
+def download_sbb_digital_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
     """Download PDF/images using METS resolver URLs."""
     ppn = resolve_item_id(item_data)
     mets_url = resolve_item_field(item_data, "mets_url")
