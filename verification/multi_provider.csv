@@ -1,0 +1,3 @@
+entry_id,short_title,main_author,direct_link,retrievable,link,download_provider,download_timestamp
+MDZ01,,,https://api.digitale-sammlungen.de/iiif/presentation/v2/bsb11280551/manifest,True,https://api.digitale-sammlungen.de/iiif/presentation/v2/bsb11280551/manifest,MDZ,2026-04-24T11:33:22.721692+00:00
+GAL01,,,https://gallica.bnf.fr/iiif/ark:/12148/btv1b8452724n/manifest.json,False,,,2026-04-24T11:34:24.786208+00:00

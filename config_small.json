@@ -1,0 +1,53 @@
+{
+  "providers": {
+    "internet_archive": true,
+    "bnf_gallica": false,
+    "loc": false,
+    "europeana": false,
+    "dpla": false,
+    "ddb": false,
+    "british_library": false,
+    "mdz": false,
+    "polona": false,
+    "bne": false,
+    "google_books": false,
+    "hathitrust": false,
+    "wellcome": false
+  },
+  "download": {
+    "prefer_pdf_over_images": true,
+    "download_manifest_renderings": true,
+    "max_renderings_per_manifest": 1,
+    "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
+    "overwrite_existing": false,
+    "include_metadata": false
+  },
+  "selection": {
+    "strategy": "collect_and_select",
+    "provider_hierarchy": ["internet_archive"],
+    "min_title_score": 60,
+    "creator_weight": 0.2,
+    "year_tolerance": 2,
+    "max_candidates_per_provider": 3,
+    "download_strategy": "selected_only",
+    "keep_non_selected_metadata": false
+  },
+  "naming": {
+    "include_creator_in_work_dir": true,
+    "include_year_in_work_dir": true,
+    "title_slug_max_len": 80
+  },
+  "download_limits": {
+    "total": {
+      "images_gb": 0.5,
+      "pdfs_gb": 0.3,
+      "metadata_gb": 0.01
+    },
+    "per_work": {
+      "images_gb": 0.2,
+      "pdfs_gb": 0.1,
+      "metadata_mb": 2
+    },
+    "on_exceed": "stop"
+  }
+}

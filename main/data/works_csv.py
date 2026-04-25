@@ -1,0 +1,376 @@
+"""Unified CSV management for ChronoDownloader.
+
+This module provides thread-safe operations for reading and writing to the
+sampling CSV file, which serves as the single source of truth for download
+status and URLs.
+
+Expected CSV columns (from bib_sampling.ipynb):
+    entry_id, short_title, primary_category, stratum_abbrev, selection_type,
+    re_sampled, full_title, main_author, earliest_year, regional_editions,
+    total_editions, pps_weight, design_weight, short_note, retrievable, link
+"""
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import threading
+from datetime import datetime, timezone
+from typing import Any
+
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# Thread-safe lock for CSV updates
+_csv_lock = threading.Lock()
+
+_csv_cache: dict[str, tuple[pd.DataFrame, float]] = {}
+
+# Column names from the sampling notebook
+ENTRY_ID_COL = "entry_id"
+TITLE_COL = "short_title"
+CREATOR_COL = "main_author"
+STATUS_COL = "retrievable"
+LINK_COL = "link"
+
+# Additional columns we may add
+PROVIDER_COL = "download_provider"
+TIMESTAMP_COL = "download_timestamp"
+
+# Direct IIIF link column (optional - for bypassing search with known IIIF manifest URLs)
+DIRECT_LINK_COL = "direct_link"
+
+_TRUTHY = frozenset({"true", "1", "yes", "y"})
+_FALSY = frozenset({"false", "0", "no", "n"})
+
+def _parse_status(val: object) -> str:
+    """Classify a single status cell value.
+
+    Returns:
+        ``"completed"``, ``"failed"``, or ``"pending"``.
+    """
+    if val is None or val is pd.NA or (isinstance(val, float) and pd.isna(val)):
+        return "pending"
+    if isinstance(val, bool):
+        return "completed" if val else "failed"
+    if isinstance(val, str):
+        lowered = val.strip().lower()
+        if lowered in _TRUTHY:
+            return "completed"
+        if lowered in _FALSY:
+            return "failed"
+    return "pending"
+
+def load_works_csv(csv_path: str) -> pd.DataFrame:
+    """Load the works CSV file.
+    
+    Args:
+        csv_path: Path to the CSV file
+        
+    Returns:
+        DataFrame with all columns preserved
+        
+    Raises:
+        FileNotFoundError: If CSV file doesn't exist
+        ValueError: If required columns are missing
+    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
+    
+    df = pd.read_csv(csv_path)
+    
+    # Validate required columns: entry_id is always required;
+    # short_title is required unless a direct_link column is present
+    # (IIIF-only CSVs may omit titles entirely).
+    if ENTRY_ID_COL not in df.columns:
+        raise ValueError(f"CSV missing required column: {ENTRY_ID_COL}")
+    if TITLE_COL not in df.columns and DIRECT_LINK_COL not in df.columns:
+        raise ValueError(
+            f"CSV must have a '{TITLE_COL}' column or a '{DIRECT_LINK_COL}' column "
+            f"(or both). Found columns: {list(df.columns)}"
+        )
+    
+    # Ensure status and link columns exist
+    if STATUS_COL not in df.columns:
+        df[STATUS_COL] = pd.NA
+    if LINK_COL not in df.columns:
+        df[LINK_COL] = pd.NA
+    
+    return df
+
+def get_pending_works(df: pd.DataFrame) -> pd.DataFrame:
+    """Get works that need to be processed.
+    
+    A work is pending if:
+    - retrievable is empty/NA (never attempted)
+    - retrievable is False (failed, eligible for retry)
+    
+    Args:
+        df: DataFrame loaded from CSV
+        
+    Returns:
+        Filtered DataFrame of pending works
+    """
+    # Convert to nullable boolean for proper comparison
+    status = df[STATUS_COL]
+    
+    # Pending = not completed
+    mask = status.apply(lambda v: _parse_status(v) != "completed")
+    return df[mask].copy()
+
+def get_completed_entry_ids(df: pd.DataFrame) -> set[str]:
+    """Get set of entry_ids that are already completed.
+    
+    Args:
+        df: DataFrame loaded from CSV
+        
+    Returns:
+        Set of entry_id values where retrievable=True
+    """
+    mask = df[STATUS_COL].apply(lambda v: _parse_status(v) == "completed")
+    return set(df.loc[mask, ENTRY_ID_COL].astype(str))
+
+def _backup_csv(csv_path: str) -> str:
+    """Create a timestamped backup of the CSV file.
+    
+    Args:
+        csv_path: Path to the CSV file
+        
+    Returns:
+        Path to the backup file
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"{csv_path}.backup_{timestamp}"
+    shutil.copy2(csv_path, backup_path)
+    return backup_path
+
+def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
+    """Save DataFrame to CSV, preserving all columns.
+    
+    Args:
+        df: DataFrame to save
+        csv_path: Path to save to
+    """
+    df.to_csv(csv_path, index=False, encoding="utf-8")
+
+def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
+    mtime = 0.0
+    try:
+        mtime = os.path.getmtime(csv_path)
+    except Exception:
+        mtime = 0.0
+
+    cached = _csv_cache.get(csv_path)
+    if cached is not None:
+        df, cached_mtime = cached
+        if cached_mtime == mtime:
+            return df
+
+    df = pd.read_csv(csv_path)
+    _csv_cache[csv_path] = (df, mtime)
+    return df
+
+def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
+    _save_csv(df, csv_path)
+    try:
+        mtime = os.path.getmtime(csv_path)
+    except Exception:
+        mtime = 0.0
+    _csv_cache[csv_path] = (df, mtime)
+
+def mark_success(
+    csv_path: str,
+    entry_id: str,
+    item_url: str,
+    provider: str | None = None,
+) -> bool:
+    """Mark a work as successfully downloaded.
+    
+    Thread-safe update that sets retrievable=True and populates link.
+    
+    Args:
+        csv_path: Path to the CSV file
+        entry_id: Entry ID to update
+        item_url: URL of the downloaded item
+        provider: Optional provider name
+        
+    Returns:
+        True if update succeeded, False otherwise
+    """
+    with _csv_lock:
+        try:
+            df = _load_csv_for_update(csv_path)
+            
+            # Find the row
+            mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
+            if not mask.any():
+                logger.warning("Entry ID %s not found in CSV", entry_id)
+                return False
+            
+            # Ensure columns have compatible dtype for mixed values
+            if STATUS_COL in df.columns:
+                df[STATUS_COL] = df[STATUS_COL].astype(object)
+            if LINK_COL in df.columns:
+                df[LINK_COL] = df[LINK_COL].astype(object)
+            
+            # Update status and link
+            df.loc[mask, STATUS_COL] = True
+            df.loc[mask, LINK_COL] = item_url
+            
+            # Add provider if column exists or create it
+            if provider:
+                if PROVIDER_COL not in df.columns:
+                    df[PROVIDER_COL] = pd.NA
+                df.loc[mask, PROVIDER_COL] = provider
+            
+            # Add timestamp
+            if TIMESTAMP_COL not in df.columns:
+                df[TIMESTAMP_COL] = pd.NA
+            df.loc[mask, TIMESTAMP_COL] = datetime.now(timezone.utc).isoformat()
+            
+            _save_csv_and_update_cache(df, csv_path)
+            logger.debug("Marked entry %s as success", entry_id)
+            return True
+            
+        except Exception:
+            logger.exception("Failed to mark entry %s as success", entry_id)
+            return False
+
+def mark_failed(
+    csv_path: str,
+    entry_id: str,
+    reason: str | None = None,
+) -> bool:
+    """Mark a work as failed to download.
+    
+    Thread-safe update that sets retrievable=False.
+    
+    Args:
+        csv_path: Path to the CSV file
+        entry_id: Entry ID to update
+        reason: Optional failure reason (not stored in CSV, just logged)
+        
+    Returns:
+        True if update succeeded, False otherwise
+    """
+    with _csv_lock:
+        try:
+            df = _load_csv_for_update(csv_path)
+            
+            # Find the row
+            mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
+            if not mask.any():
+                logger.warning("Entry ID %s not found in CSV", entry_id)
+                return False
+            
+            # Ensure column has compatible dtype for mixed values
+            if STATUS_COL in df.columns:
+                df[STATUS_COL] = df[STATUS_COL].astype(object)
+            
+            # Update status
+            df.loc[mask, STATUS_COL] = False
+            
+            # Add timestamp
+            if TIMESTAMP_COL not in df.columns:
+                df[TIMESTAMP_COL] = pd.NA
+            df.loc[mask, TIMESTAMP_COL] = datetime.now(timezone.utc).isoformat()
+            
+            _save_csv_and_update_cache(df, csv_path)
+            
+            if reason:
+                logger.debug("Marked entry %s as failed: %s", entry_id, reason)
+            else:
+                logger.debug("Marked entry %s as failed", entry_id)
+            return True
+            
+        except Exception:
+            logger.exception("Failed to mark entry %s as failed", entry_id)
+            return False
+
+def mark_deferred(
+    csv_path: str,
+    entry_id: str,
+) -> bool:
+    """Mark a work as deferred (e.g., rate-limited, will retry later).
+    
+    Deferred works are left with retrievable=NA so they will be retried.
+    
+    Args:
+        csv_path: Path to the CSV file
+        entry_id: Entry ID to update
+        
+    Returns:
+        True if update succeeded, False otherwise
+    """
+    with _csv_lock:
+        try:
+            df = _load_csv_for_update(csv_path)
+            
+            # Find the row
+            mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
+            if not mask.any():
+                logger.warning("Entry ID %s not found in CSV", entry_id)
+                return False
+            
+            # Leave status as NA (pending for retry)
+            df.loc[mask, STATUS_COL] = pd.NA
+            
+            _save_csv_and_update_cache(df, csv_path)
+            logger.debug("Marked entry %s as deferred", entry_id)
+            return True
+            
+        except Exception:
+            logger.exception("Failed to mark entry %s as deferred", entry_id)
+            return False
+
+def get_stats(csv_path: str) -> dict[str, Any]:
+    """Get download statistics from the CSV.
+    
+    Args:
+        csv_path: Path to the CSV file
+        
+    Returns:
+        Dictionary with counts: total, completed, failed, pending
+    """
+    try:
+        df = pd.read_csv(csv_path)
+        total = len(df)
+        
+        # Handle CSVs that don't have the status column yet
+        if STATUS_COL not in df.columns:
+            # All works are pending if no status column exists
+            return {
+                "total": total,
+                "completed": 0,
+                "failed": 0,
+                "pending": total,
+            }
+        
+        status_counts = df[STATUS_COL].apply(_parse_status).value_counts()
+        
+        return {
+            "total": total,
+            "completed": int(status_counts.get("completed", 0)),
+            "failed": int(status_counts.get("failed", 0)),
+            "pending": int(status_counts.get("pending", 0)),
+        }
+    except Exception:
+        logger.exception("Failed to get stats from CSV")
+        return {"total": 0, "completed": 0, "failed": 0, "pending": 0}
+
+__all__ = [
+    "ENTRY_ID_COL",
+    "TITLE_COL",
+    "CREATOR_COL",
+    "STATUS_COL",
+    "LINK_COL",
+    "DIRECT_LINK_COL",
+    "load_works_csv",
+    "get_pending_works",
+    "get_completed_entry_ids",
+    "mark_success",
+    "mark_failed",
+    "mark_deferred",
+    "get_stats",
+]

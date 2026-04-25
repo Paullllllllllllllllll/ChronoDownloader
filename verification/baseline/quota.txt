@@ -1,0 +1,32 @@
+
+============================================================
+QUOTA & DEFERRED QUEUE STATUS
+============================================================
+
+[QUOTA STATUS]
+  * annas_archive: 0/875 used (875 remaining)
+
+[DEFERRED QUEUE]
+  * Pending: 22
+  * Completed: 1
+  * Failed: 2
+  * Ready for retry NOW
+
+  Pending items:
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    - Test (Test)
+    ... and 12 more
+
+[BACKGROUND SCHEDULER]
+  * Status: STOPPED
+
+============================================================
+
