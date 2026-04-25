@@ -7,7 +7,7 @@ packages = ["api", "main"]
 
 [project]
 name = "chronodownloader"
-version = "1.0.1"
+version = "1.0.2"
 description = "Discover and download digitized historical sources from 17 digital libraries"
 readme = "README.md"
 license = "MIT"
