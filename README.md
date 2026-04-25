@@ -1,4 +1,4 @@
-# ChronoDownloader v1.0.1
+# ChronoDownloader v1.0.2
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
