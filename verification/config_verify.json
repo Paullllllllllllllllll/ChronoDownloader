@@ -1,0 +1,99 @@
+{
+  "general": {
+    "interactive_mode": false,
+    "default_output_dir": "verification/out",
+    "default_csv_path": "sample_works.csv"
+  },
+  "providers": {
+    "internet_archive": true,
+    "bnf_gallica": true,
+    "loc": false,
+    "europeana": false,
+    "dpla": false,
+    "ddb": false,
+    "british_library": false,
+    "mdz": true,
+    "polona": false,
+    "bne": false,
+    "google_books": false,
+    "hathitrust": false,
+    "wellcome": false,
+    "annas_archive": false,
+    "slub": false,
+    "e_rara": false,
+    "sbb_digital": false
+  },
+  "provider_settings": {
+    "mdz": {
+      "max_pages": 3,
+      "network": {
+        "delay_ms": 200,
+        "jitter_ms": 100,
+        "max_attempts": 5,
+        "timeout_s": 30
+      }
+    },
+    "bnf_gallica": {
+      "max_pages": 3,
+      "network": {
+        "delay_ms": 1500,
+        "jitter_ms": 500,
+        "max_attempts": 5,
+        "timeout_s": 30
+      }
+    },
+    "internet_archive": {
+      "max_pages": 3,
+      "network": {
+        "delay_ms": 200,
+        "jitter_ms": 100,
+        "max_attempts": 5,
+        "timeout_s": 30
+      }
+    }
+  },
+  "download": {
+    "resume_mode": "skip_if_has_objects",
+    "prefer_pdf_over_images": false,
+    "download_manifest_renderings": false,
+    "overwrite_existing": false,
+    "include_metadata": true,
+    "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2"],
+    "max_parallel_downloads": 1
+  },
+  "download_limits": {
+    "total": {
+      "images_gb": 1,
+      "pdfs_gb": 1,
+      "metadata_gb": 0.1
+    },
+    "per_work": {
+      "images_gb": 0.5,
+      "pdfs_gb": 0.5,
+      "metadata_mb": 5
+    },
+    "on_exceed": "skip"
+  },
+  "selection": {
+    "strategy": "collect_and_select",
+    "max_parallel_searches": 2,
+    "provider_hierarchy": ["mdz", "bnf_gallica", "internet_archive"],
+    "min_title_score": 60,
+    "creator_weight": 0.2,
+    "year_tolerance": 2,
+    "max_candidates_per_provider": 3,
+    "download_strategy": "selected_only",
+    "keep_non_selected_metadata": false
+  },
+  "naming": {
+    "include_creator_in_work_dir": true,
+    "include_year_in_work_dir": true,
+    "title_slug_max_len": 80
+  },
+  "direct_iiif": {
+    "enabled": true,
+    "link_column": "direct_link",
+    "check_link_column": true,
+    "naming_template": "{provider}_{item_id}"
+  }
+}

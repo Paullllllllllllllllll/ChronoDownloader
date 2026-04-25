@@ -1,0 +1,128 @@
+usage: downloader.py [-h] [--output_dir OUTPUT_DIR] [--dry-run]
+                     [--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}]
+                     [--config CONFIG] [--iiif URL] [--name NAME]
+                     [--id IDENTIFIER] [--provider KEY] [--interactive]
+                     [--cli] [--quota-status] [--cleanup-deferred]
+                     [--providers KEYS] [--enable-provider KEYS]
+                     [--disable-provider KEYS] [--list-providers]
+                     [--pending-mode {all,new,failed}] [--entry-ids IDS]
+                     [--limit N]
+                     [--resume-mode {skip_completed,reprocess_all,skip_if_has_objects,resume_from_csv}]
+                     [--selection-strategy {collect_and_select,sequential_first_hit}]
+                     [--min-title-score MIN_TITLE_SCORE]
+                     [--creator-weight CREATOR_WEIGHT]
+                     [--max-candidates-per-provider MAX_CANDIDATES_PER_PROVIDER]
+                     [--download-strategy {selected_only,all}]
+                     [--keep-non-selected-metadata | --no-keep-non-selected-metadata]
+                     [--prefer-pdf-over-images | --no-prefer-pdf-over-images]
+                     [--download-manifest-renderings | --no-download-manifest-renderings]
+                     [--max-renderings-per-manifest MAX_RENDERINGS_PER_MANIFEST]
+                     [--rendering-mime-whitelist MIMES]
+                     [--overwrite-existing | --no-overwrite-existing]
+                     [--include-metadata | --no-include-metadata]
+                     [csv_file]
+
+ChronoDownloader - Historical Document Download Tool (CLI Mode)
+
+positional arguments:
+  csv_file              Path to CSV file. Must contain 'short_title' or
+                        'direct_link' (with required 'entry_id').
+
+options:
+  -h, --help            show this help message and exit
+  --output_dir OUTPUT_DIR
+                        Directory to save downloaded files.
+  --dry-run             Run searches and create folders, but skip downloads.
+  --log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}
+                        Logging level
+  --config CONFIG       Path to JSON config file to enable/disable providers.
+  --iiif URL            Direct IIIF manifest URL(s) to download (repeatable).
+                        Bypasses CSV and search.
+  --name NAME           Output name stem for IIIF and identifier downloads
+                        (e.g. 'Taillevent_Viandier'). Used for folder and file
+                        naming.
+  --id IDENTIFIER       Provider-specific item identifier (e.g., bsb11280551
+                        for MDZ, bpt6k1511262r for Gallica). Use with
+                        --provider to specify the source, or let auto-
+                        detection determine it.
+  --provider KEY        Provider key for --id lookup (e.g., mdz, bnf_gallica,
+                        internet_archive). See --list-providers for valid
+                        keys.
+  --interactive         Force interactive mode regardless of config setting.
+  --cli                 Force CLI mode regardless of config setting.
+  --quota-status        Display quota and deferred queue status, then exit.
+  --cleanup-deferred    Remove completed items from deferred queue, then exit.
+  --providers KEYS      Comma-separated provider keys to use for this run
+                        (e.g. mdz,bnf_gallica,slub).
+  --enable-provider KEYS
+                        Provider key(s) to force-enable for this run (comma-
+                        separated or repeat flag).
+  --disable-provider KEYS
+                        Provider key(s) to force-disable for this run (comma-
+                        separated or repeat flag).
+  --list-providers      List all available provider keys and exit.
+  --pending-mode {all,new,failed}
+                        Which CSV rows to process: all pending+failed
+                        (default), only never-tried rows, or only failed rows.
+  --entry-ids IDS       Restrict processing to specific entry_id values
+                        (comma-separated or repeat flag).
+  --limit N             Process at most N pending rows after filters are
+                        applied.
+  --resume-mode {skip_completed,reprocess_all,skip_if_has_objects,resume_from_csv}
+                        Override download.resume_mode for this run.
+  --selection-strategy {collect_and_select,sequential_first_hit}
+                        Override selection.strategy for this run.
+  --min-title-score MIN_TITLE_SCORE
+                        Override selection.min_title_score for this run.
+  --creator-weight CREATOR_WEIGHT
+                        Override selection.creator_weight for this run
+                        (0.0-1.0).
+  --max-candidates-per-provider MAX_CANDIDATES_PER_PROVIDER
+                        Override selection.max_candidates_per_provider for
+                        this run.
+  --download-strategy {selected_only,all}
+                        Override selection.download_strategy for this run.
+  --keep-non-selected-metadata, --no-keep-non-selected-metadata
+                        Override selection.keep_non_selected_metadata for this
+                        run.
+  --prefer-pdf-over-images, --no-prefer-pdf-over-images
+                        Override download.prefer_pdf_over_images for this run.
+  --download-manifest-renderings, --no-download-manifest-renderings
+                        Override download.download_manifest_renderings for
+                        this run.
+  --max-renderings-per-manifest MAX_RENDERINGS_PER_MANIFEST
+                        Override download.max_renderings_per_manifest for this
+                        run.
+  --rendering-mime-whitelist MIMES
+                        Override download.rendering_mime_whitelist (comma-
+                        separated MIME values).
+  --overwrite-existing, --no-overwrite-existing
+                        Override download.overwrite_existing for this run.
+  --include-metadata, --no-include-metadata
+                        Override download.include_metadata for this run.
+
+Examples:
+  # Download works from a CSV file
+  python main/downloader.py sample_works.csv --output_dir my_downloads
+
+  # Dry run (search only, no downloads)
+  python main/downloader.py works.csv --dry-run --log-level DEBUG
+
+  # Use a different config file
+  python main/downloader.py works.csv --config config_small.json
+
+  # Force interactive mode
+  python main/downloader.py --interactive
+
+  # Download from a single IIIF manifest URL
+  python main/downloader.py --iiif "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k1511262r/manifest.json" --name Taillevent
+
+  # Download multiple IIIF manifests
+  python main/downloader.py --iiif URL1 --iiif URL2 --output_dir my_downloads
+
+  # Download by identifier with explicit provider
+  python main/downloader.py --id bsb11280551 --provider mdz --name Kochbuch
+
+  # Download by identifier with auto-detection
+  python main/downloader.py --id bpt6k1511262r --output_dir my_downloads
+        

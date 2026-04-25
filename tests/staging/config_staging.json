@@ -1,0 +1,301 @@
+{
+  "general": {
+    "interactive_mode": false,
+    "default_output_dir": "tests/staging/output",
+    "default_csv_path": "tests/staging/staging_search.csv"
+  },
+  "providers": {
+    "internet_archive": true,
+    "bnf_gallica": true,
+    "loc": true,
+    "europeana": true,
+    "dpla": false,
+    "ddb": true,
+    "british_library": true,
+    "mdz": true,
+    "polona": true,
+    "bne": true,
+    "google_books": true,
+    "hathitrust": true,
+    "wellcome": true,
+    "annas_archive": true,
+    "slub": true,
+    "e_rara": true,
+    "sbb_digital": true
+  },
+  "provider_settings": {
+    "mdz": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "gallica": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 8000,
+        "jitter_ms": 2000,
+        "max_attempts": 5,
+        "base_backoff_s": 3.0,
+        "backoff_multiplier": 1.8,
+        "max_backoff_s": 120.0,
+        "timeout_s": 30
+      }
+    },
+    "loc": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30,
+        "headers": { "Accept": "application/json" }
+      }
+    },
+    "ddb": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 200,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "polona": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 600,
+        "jitter_ms": 200,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30,
+        "ssl_error_policy": "retry_insecure_once"
+      }
+    },
+    "europeana": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 400,
+        "jitter_ms": 200,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "google_books": {
+      "free_only": true,
+      "prefer": "pdf",
+      "allow_drm": false,
+      "max_files": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 2000,
+        "jitter_ms": 500,
+        "max_attempts": 3,
+        "base_backoff_s": 2.0,
+        "backoff_multiplier": 2.0,
+        "max_backoff_s": 30.0,
+        "timeout_s": 30,
+        "circuit_breaker_enabled": true,
+        "circuit_breaker_threshold": 2,
+        "circuit_breaker_cooldown_s": 600.0,
+        "headers": { "Referer": "https://books.google.com/" }
+      }
+    },
+    "wellcome": {
+      "max_images": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "annas_archive": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "quota": {
+        "enabled": true,
+        "daily_limit": 5,
+        "reset_hours": 24,
+        "wait_for_reset": false
+      },
+      "network": {
+        "delay_ms": 800,
+        "jitter_ms": 300,
+        "max_attempts": 3,
+        "base_backoff_s": 2.0,
+        "backoff_multiplier": 2.0,
+        "max_backoff_s": 45.0,
+        "timeout_s": 45,
+        "ssl_error_policy": "retry_insecure_once"
+      }
+    },
+    "slub": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 600,
+        "jitter_ms": 200,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "e_rara": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 600,
+        "jitter_ms": 200,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "sbb_digital": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 700,
+        "jitter_ms": 250,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 40,
+        "headers": { "Accept": "application/xml" }
+      }
+    },
+    "british_library": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 600,
+        "jitter_ms": 200,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "bne": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 600,
+        "jitter_ms": 200,
+        "max_attempts": 5,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
+    "hathitrust": {
+      "max_pages": 3,
+      "min_title_score": 25,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 3,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    }
+  },
+  "download": {
+    "resume_mode": "reprocess_all",
+    "prefer_pdf_over_images": false,
+    "download_manifest_renderings": false,
+    "max_renderings_per_manifest": 1,
+    "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
+    "overwrite_existing": true,
+    "include_metadata": true,
+    "allowed_object_extensions": [".pdf", ".epub", ".jpg", ".jpeg", ".png", ".jp2", ".tif", ".tiff", ".webp"],
+    "save_disallowed_to_metadata": true,
+    "max_parallel_downloads": 1,
+    "provider_concurrency": { "default": 1 },
+    "queue_size": 10,
+    "worker_timeout_s": 300
+  },
+  "selection": {
+    "strategy": "collect_and_select",
+    "max_parallel_searches": 1,
+    "provider_hierarchy": [
+      "mdz", "slub", "bnf_gallica", "e_rara", "annas_archive",
+      "internet_archive", "wellcome", "google_books", "loc",
+      "europeana", "dpla", "ddb", "polona", "sbb_digital",
+      "british_library", "bne", "hathitrust"
+    ],
+    "min_title_score": 25,
+    "creator_weight": 0.2,
+    "year_tolerance": 5,
+    "max_candidates_per_provider": 3,
+    "download_strategy": "selected_only",
+    "keep_non_selected_metadata": false
+  },
+  "naming": {
+    "include_creator_in_work_dir": true,
+    "include_year_in_work_dir": true,
+    "title_slug_max_len": 80
+  },
+  "download_limits": {
+    "total": {
+      "images_gb": 0.5,
+      "pdfs_gb": 0.5,
+      "metadata_gb": 0.05
+    },
+    "per_work": {
+      "images_gb": 0.1,
+      "pdfs_gb": 0.1,
+      "metadata_mb": 5
+    },
+    "on_exceed": "skip"
+  },
+  "deferred": {
+    "background_enabled": false,
+    "state_file": "tests/staging/.staging_state.json",
+    "check_interval_minutes": 9999,
+    "max_retries": 1
+  },
+  "direct_iiif": {
+    "enabled": true,
+    "link_column": "direct_link",
+    "check_link_column": true,
+    "naming_template": "{provider}_{item_id}"
+  }
+}

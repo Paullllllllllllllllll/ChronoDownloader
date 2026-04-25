@@ -1,0 +1,6 @@
+ImportError while loading conftest 'C:\Users\pagoetz\PycharmProjects\ChronoDownloader\tests\conftest.py'.
+tests\conftest.py:12: in <module>
+    import pandas as pd
+.venv\Lib\site-packages\pandas\__init__.py:34: in <module>
+    from pandas.compat import (
+E   SyntaxError: source code string cannot contain null bytes

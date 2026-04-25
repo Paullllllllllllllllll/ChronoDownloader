@@ -1,0 +1,18 @@
+Available providers:
+  - annas_archive: Anna's Archive
+  - bne: BNE
+  - bnf_gallica: BnF Gallica
+  - british_library: British Library
+  - ddb: DDB
+  - dpla: DPLA
+  - e_rara: e-rara
+  - europeana: Europeana
+  - google_books: Google Books
+  - hathitrust: HathiTrust
+  - internet_archive: Internet Archive
+  - loc: Library of Congress
+  - mdz: MDZ
+  - polona: Polona
+  - sbb_digital: SBB Digital Collections
+  - slub: SLUB Dresden
+  - wellcome: Wellcome Collection

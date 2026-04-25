@@ -1,0 +1,24 @@
+{
+  "general": {"interactive_mode": false},
+  "providers": {
+    "internet_archive": false, "bnf_gallica": false, "loc": false,
+    "europeana": false, "dpla": false, "ddb": false,
+    "british_library": false, "mdz": true, "polona": false,
+    "bne": false, "google_books": false, "hathitrust": false,
+    "wellcome": false, "annas_archive": false, "slub": false,
+    "e_rara": false, "sbb_digital": false
+  },
+  "provider_settings": {
+    "mdz": {"max_pages": 2, "network": {"delay_ms": 100, "timeout_s": 30, "max_attempts": 5}}
+  },
+  "download": {
+    "resume_mode": "reprocess_all",
+    "max_parallel_downloads": 3,
+    "provider_concurrency": {"default": 1, "mdz": 2},
+    "include_metadata": false,
+    "overwrite_existing": true,
+    "allowed_object_extensions": [".jpg", ".jpeg", ".png", ".jp2"]
+  },
+  "selection": {"strategy": "collect_and_select", "min_title_score": 60},
+  "direct_iiif": {"enabled": true, "link_column": "direct_link", "naming_template": "{provider}_{item_id}"}
+}

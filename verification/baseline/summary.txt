@@ -1,0 +1,4 @@
+Baseline summary
+pytest: 1010 passed in 8.73s
+mypy --strict: Success: no issues found in 49 source files
+CLI smoke: --help, --list-providers (17 providers), --quota-status all succeed
