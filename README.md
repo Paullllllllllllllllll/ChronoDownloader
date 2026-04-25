@@ -1,4 +1,4 @@
-# ChronoDownloader v1.0.0
+# ChronoDownloader v1.0.1
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -28,7 +28,6 @@ extraction pipeline.
 - [Output Structure](#output-structure)
 - [Advanced Usage](#advanced-usage)
 - [Architecture](#architecture)
-- [Migration](#migration)
 - [FAQ](#faq)
 - [Versioning](#versioning)
 - [Contributing](#contributing)
@@ -95,19 +94,31 @@ tracking (875/day).
 
 ## Installation
 
-**Requirements**: Python 3.10+ (3.11+ recommended), pip, internet
-connection.
+**Requirements**: Python 3.10+ (3.11+ recommended),
+[uv](https://docs.astral.sh/uv/), internet connection.
 
 ```bash
 git clone https://github.com/Paullllllllllllllllll/ChronoDownloader.git
 cd ChronoDownloader
 
-# Create and activate virtual environment
+uv sync
+```
+
+For development (includes type checkers and test tools):
+
+```bash
+uv sync --extra dev
+```
+
+Alternatively, with pip:
+
+```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 source .venv/bin/activate     # Linux / macOS
 
-pip install -r requirements.txt
+pip install -e .
+pip install -e ".[dev]"       # development dependencies
 ```
 
 ### API Keys
@@ -148,8 +159,8 @@ variables or shell profile.
 ### Verify Installation
 
 ```bash
-python -m main.cli --help
-python -m main.cli --list-providers
+uv run python -m main.cli --help
+uv run python -m main.cli --list-providers
 ```
 
 
@@ -926,13 +937,6 @@ Summary report
 
 ## Migration
 
-The `python main/downloader.py` entry point and all pre-refactor
-import paths were removed on 2026-04-24. Use
-`python -m main.cli` instead. See
-[MIGRATION.md](MIGRATION.md) for the complete old-to-new
-import-path table.
-
-
 ## FAQ
 
 **Which providers should I enable?**
@@ -1007,5 +1011,4 @@ For code contributions:
 
 ## License
 
-MIT License. Copyright (c) 2025 Paul Goetz. See
-[LICENSE](LICENSE) for the full text.
+MIT License. Copyright (c) 2025 Paul Goetz.
