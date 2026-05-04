@@ -23,6 +23,7 @@ dist/
 *.swp
 .windsurf
 .claude
+CLAUDE.md
 
 # Caches
 .mypy_cache/

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -87,14 +88,17 @@ class TestLooksLikeCLI:
 class TestRunIdentifierCLI:
     """Tests for the _run_identifier_cli handler."""
 
-    @staticmethod
-    def _make_args(**overrides: bool | str | None) -> argparse.Namespace:
+    @pytest.fixture(autouse=True)
+    def _test_output_dir(self, tmp_path: Path) -> None:
+        self._output_dir = str(tmp_path / "downloaded_works")
+
+    def _make_args(self, **overrides: bool | str | None) -> argparse.Namespace:
         defaults: dict[str, bool | str | None] = {
             "id": "bsb11280551",
             "provider": "mdz",
             "name": None,
             "dry_run": False,
-            "output_dir": "downloaded_works",
+            "output_dir": self._output_dir,
             "config": "config.json",
             "log_level": "INFO",
         }
@@ -182,7 +186,6 @@ class TestRunIdentifierCLI:
         args = self._make_args(id="md5hash123", provider="annas_archive")
         logger = logging.getLogger("test")
 
-        # Sanity-only: the native-download path should not raise.
         _run_identifier_cli(args, {}, logger)
 
     @patch("main.cli.commands.identifier.process_direct_iiif")
@@ -210,5 +213,4 @@ class TestRunIdentifierCLI:
         logger = logging.getLogger("test")
 
         _run_identifier_cli(args, {}, logger)
-        # Should have been called; function should not crash
         mock_process.assert_called_once()
