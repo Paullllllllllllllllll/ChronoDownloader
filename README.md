@@ -1,4 +1,4 @@
-# ChronoDownloader v1.1.0
+# ChronoDownloader v1.1.1
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -14,7 +14,6 @@ extraction pipeline.
 > **Work in Progress** -- ChronoDownloader is under active
 > development. If you encounter any issues, please report them on
 > [GitHub Issues](https://github.com/Paullllllllllllllllll/ChronoDownloader/issues).
-
 
 ## Table of Contents
 
@@ -32,7 +31,6 @@ extraction pipeline.
 - [Versioning](#versioning)
 - [Contributing](#contributing)
 - [License](#license)
-
 
 ## Features
 
@@ -64,7 +62,6 @@ extraction pipeline.
 - **Metadata preservation**: search results, IIIF manifests,
   selection decisions, and scores saved for auditing
 
-
 ## Supported Providers
 
 | Provider | Region | API Key | IIIF |
@@ -90,7 +87,6 @@ extraction pipeline.
 \* Anna's Archive works without an API key using public download
 links. A member API key enables faster downloads with daily quota
 tracking (875/day).
-
 
 ## Installation
 
@@ -163,7 +159,6 @@ uv run python -m main.cli --help
 uv run python -m main.cli --list-providers
 ```
 
-
 ## Quick Start
 
 ### Interactive Mode
@@ -231,7 +226,6 @@ python -m main.cli sample_works.csv --dry-run --log-level INFO
 only, `config_quality.json` with European libraries and high
 `min_title_score`) and pass via `--config`.
 
-
 ## CSV Format
 
 ChronoDownloader uses a unified CSV as both input and output.
@@ -278,7 +272,6 @@ entry_id,direct_link
 1,https://api.digitale-sammlungen.de/iiif/presentation/v2/bsb11280551/manifest
 2,https://gallica.bnf.fr/iiif/ark:/12148/bpt6k1510024v/manifest.json
 ```
-
 
 ## Command-Line Reference
 
@@ -347,7 +340,6 @@ optional in interactive).
 - `--rendering-mime-whitelist MIMES` -- comma-separated, repeatable
 - `--[no-]overwrite-existing`
 - `--[no-]include-metadata`
-
 
 ## Configuration
 
@@ -678,7 +670,6 @@ sequentially.
   `{item_id}`; page suffix (`_p00001.jpg`) appended
   automatically
 
-
 ## Output Structure
 
 ### Folder Layout
@@ -725,7 +716,6 @@ Each work directory contains a `work.json` with input parameters,
 current status, all search candidates with fuzzy match scores,
 selection decision and reasoning, timestamps, and download
 summary.
-
 
 ## Advanced Usage
 
@@ -865,7 +855,6 @@ for failure reasons, adjust configuration (lower
 `min_title_score`, change provider hierarchy), and re-run with the
 same CSV. Resume mode automatically skips completed items.
 
-
 ## Architecture
 
 ```
@@ -934,7 +923,6 @@ DOWNLOAD PHASE (worker threads):
 Summary report
 ```
 
-
 ## Migration
 
 ## FAQ
@@ -983,7 +971,6 @@ SRU search API continues to work. Retry later or use the standard
 search-based workflow (omit `direct_link`), which falls back
 gracefully when IIIF images are unavailable.
 
-
 ## Versioning
 
 This project uses semantic versioning. The commit history was
@@ -991,6 +978,12 @@ squashed to a single baseline commit at v1.0.0 on 25 April 2026.
 All prior development history was consolidated; version numbers
 before v1.0.0 do not exist.
 
+## Changelog
+
+- **v1.1.1** (19 May 2026) -- dependency refresh from
+    environment-wide CVE audit: bump `urllib3` 2.6.3 -> 2.7.0
+    (audit-surface consolidation).
+- **v1.1.0** -- prior release.
 
 ## Contributing
 
@@ -1007,7 +1000,6 @@ For code contributions:
 4. Update documentation
 5. Test with multiple providers
 6. Submit a pull request with a clear description
-
 
 ## License
 
