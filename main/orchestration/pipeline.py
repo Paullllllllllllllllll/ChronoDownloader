@@ -26,19 +26,20 @@ Adjacent packages consumed by this module:
 - main.state: deferred queue (for quota defers), quota manager
 - main.orchestration.selection: candidate scoring
 """
+
 from __future__ import annotations
 
 import dataclasses
 import json
 import logging
 import os
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from main.orchestration.scheduler import DownloadTask
 
 from api.core.config import get_config, get_resume_mode
-from api.core.download import save_json
 from api.core.context import (
     clear_all_context,
     clear_current_provider,
@@ -51,15 +52,10 @@ from api.core.context import (
     set_current_work,
     work_context,
 )
+from api.core.download import save_json
 from api.model import QuotaDeferredException, SearchResult
 from api.providers import PROVIDERS
-from main.state.deferred import get_deferred_queue
 from main.data.index import build_index_row, update_index_csv
-from main.orchestration.selection import (
-    collect_candidates_all,
-    collect_candidates_sequential,
-    select_best_candidate,
-)
 from main.data.work import (
     check_work_status,
     compute_work_dir,
@@ -69,6 +65,12 @@ from main.data.work import (
     format_selected_for_json,
     update_work_status,
 )
+from main.orchestration.selection import (
+    collect_candidates_all,
+    collect_candidates_sequential,
+    select_best_candidate,
+)
+from main.state.deferred import get_deferred_queue
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +116,8 @@ def _quota_preflight(pkey: str) -> None:
     # Lazy import avoids a load-time dependency between pipeline and the
     # state layer; the quota manager lives in main.quota_manager today and
     # will move to main.state in Step 6.
-    from main.state.quota import get_quota_manager
-
     from api.core.config import get_provider_setting
+    from main.state.quota import get_quota_manager
 
     qm = get_quota_manager()
     can_download, wait_seconds = qm.can_download(pkey)
@@ -168,6 +169,7 @@ def _quota_record(pkey: str) -> None:
     except Exception:
         logger.exception("Failed to record quota consumption for %s", pkey)
 
+
 @dataclasses.dataclass
 class _PreparedWork:
     title: str
@@ -186,10 +188,16 @@ class _PreparedWork:
     selected_provider_tuple: ProviderTuple | None
     selected_source_id: str | None
 
+
 def _compute_selected_source_id(selected: SearchResult | None) -> str | None:
     if not selected:
         return None
-    return selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
+    return (
+        selected.source_id
+        or selected.raw.get("identifier")
+        or selected.raw.get("ark_id")
+    )
+
 
 def _collect_and_select(
     title: str,
@@ -207,13 +215,15 @@ def _collect_and_select(
 
     strategy = (sel_cfg.get("strategy") or "collect_and_select").lower()
     if strategy == "sequential_first_hit":
-        all_candidates, selected, selected_provider_tuple = collect_candidates_sequential(
-            provider_list,
-            title,
-            creator,
-            min_title_score,
-            creator_weight,
-            max_candidates_per_provider,
+        all_candidates, selected, selected_provider_tuple = (
+            collect_candidates_sequential(
+                provider_list,
+                title,
+                creator,
+                min_title_score,
+                creator_weight,
+                max_candidates_per_provider,
+            )
         )
     else:
         all_candidates = collect_candidates_all(
@@ -231,6 +241,7 @@ def _collect_and_select(
 
     return all_candidates, selected, selected_provider_tuple
 
+
 def _prepare_work(
     title: str,
     creator: str | None,
@@ -242,12 +253,18 @@ def _prepare_work(
     resume_mode = get_resume_mode()
     should_skip, skip_reason = check_work_status(work_dir, resume_mode)
     if should_skip:
-        logger.info("Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode)
+        logger.info(
+            "Skipping '%s': %s (resume_mode=%s)", title, skip_reason, resume_mode
+        )
         return None
 
     sel_cfg = _get_selection_config()
-    provider_list = _provider_order(ENABLED_APIS, sel_cfg.get("provider_hierarchy") or [])
-    provider_map: dict[str, tuple[Any, Any, str]] = {pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list}
+    provider_list = _provider_order(
+        ENABLED_APIS, sel_cfg.get("provider_hierarchy") or []
+    )
+    provider_map: dict[str, tuple[Any, Any, str]] = {
+        pkey: (s, d, pname) for (pkey, s, d, pname) in provider_list
+    }
 
     all_candidates, selected, selected_provider_tuple = _collect_and_select(
         title,
@@ -258,7 +275,9 @@ def _prepare_work(
 
     work_id = compute_work_id(title, creator)
     work_json_path = os.path.join(work_dir, "work.json")
-    selected_source_id = _compute_selected_source_id(selected if selected and selected_provider_tuple else None)
+    selected_source_id = _compute_selected_source_id(
+        selected if selected and selected_provider_tuple else None
+    )
 
     return _PreparedWork(
         title=title,
@@ -277,6 +296,7 @@ def _prepare_work(
         selected_provider_tuple=selected_provider_tuple,
         selected_source_id=selected_source_id,
     )
+
 
 def _run_download_with_fallback(
     selected: SearchResult,
@@ -332,13 +352,20 @@ def _run_download_with_fallback(
                 ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
                 for sr in all_candidates:
                     try:
-                        if sr.provider_key == pkey and sr.source_id == selected.source_id:
+                        if (
+                            sr.provider_key == pkey
+                            and sr.source_id == selected.source_id
+                        ):
                             continue
                         sc = sr.raw.get("__matching__", {})
-                        if float(sc.get("score", 0.0)) < float(sel_cfg.get("min_title_score", 85)):
+                        if float(sc.get("score", 0.0)) < float(
+                            sel_cfg.get("min_title_score", 85)
+                        ):
                             continue
                         pprio = prov_priority.get(sr.provider_key or "", 9999)
-                        ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))
+                        ranked_fallbacks.append(
+                            (pprio, float(sc.get("total", 0.0)), sr)
+                        )
                     except Exception:
                         continue
                 ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
@@ -358,7 +385,9 @@ def _run_download_with_fallback(
                             break
                     except QuotaDeferredException as qde:
                         logger.info(
-                            "Fallback provider %s quota exhausted: %s", _pname, qde.message
+                            "Fallback provider %s quota exhausted: %s",
+                            _pname,
+                            qde.message,
                         )
                         continue
                     except Exception:
@@ -445,22 +474,35 @@ def _persist_work_json(prep: _PreparedWork, status: str = "pending") -> None:
         status=status,
     )
 
+
+def _save_candidate_search_results(prep: _PreparedWork) -> None:
+    """Persist each candidate's search_result JSON under the active context.
+
+    Assumes the work context (work_id/entry_id/name_stem) is already set by
+    the caller; only provider context is managed per candidate.
+    """
+    for sr in prep.all_candidates:
+        if not sr.provider_key:
+            continue
+        try:
+            with provider_context(sr.provider_key):
+                save_json(sr.to_dict(include_raw=True), prep.work_dir, "search_result")
+        except Exception:
+            logger.exception(
+                "Failed to persist candidate metadata for %s:%s",
+                sr.provider_key,
+                sr.source_id,
+            )
+
+
 def _persist_candidates_metadata(prep: _PreparedWork) -> None:
     if not prep.sel_cfg.get("keep_non_selected_metadata", True):
         return
-    with work_context(work_id=prep.work_id, entry_id=prep.entry_id, name_stem=prep.work_stem):
-        for sr in prep.all_candidates:
-            if not sr.provider_key:
-                continue
-            try:
-                with provider_context(sr.provider_key):
-                    save_json(sr.to_dict(include_raw=True), prep.work_dir, "search_result")
-            except Exception:
-                logger.exception(
-                    "Failed to persist candidate metadata for %s:%s",
-                    sr.provider_key,
-                    sr.source_id,
-                )
+    with work_context(
+        work_id=prep.work_id, entry_id=prep.entry_id, name_stem=prep.work_stem
+    ):
+        _save_candidate_search_results(prep)
+
 
 def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
     """Load enabled providers from a JSON config file.
@@ -483,9 +525,9 @@ def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
         )
         s, d, n = PROVIDERS["internet_archive"]
         return [("internet_archive", s, d, n)]
-    
+
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception as e:
         logger.error(
@@ -495,25 +537,27 @@ def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
         )
         s, d, n = PROVIDERS["internet_archive"]
         return [("internet_archive", s, d, n)]
-    
+
     enabled: list[ProviderTuple] = []
     for key, flag in (cfg.get("providers") or {}).items():
         if flag and key in PROVIDERS:
             s, d, n = PROVIDERS[key]
             enabled.append((key, s, d, n))
-    
+
     if not enabled:
         logger.warning(
             "No providers enabled in config; nothing to do. Enable providers in %s under 'providers'.",
             config_path,
         )
-    
+
     return enabled
+
 
 # Default to Internet Archive only; this will be overridden by the CLI using this module
 ENABLED_APIS: list[ProviderTuple] = [
     ("internet_archive",) + PROVIDERS["internet_archive"],
 ]
+
 
 def _required_provider_envvars() -> dict[str, str]:
     """Return mapping of provider_key -> required environment variable name for API keys.
@@ -528,8 +572,9 @@ def _required_provider_envvars() -> dict[str, str]:
         # HathiTrust key is optional and not required for search (HATHI_API_KEY)
     }
 
+
 def filter_enabled_providers_for_keys(
-    enabled: list[ProviderTuple]
+    enabled: list[ProviderTuple],
 ) -> list[ProviderTuple]:
     """Filter out providers missing required API keys in the environment.
 
@@ -542,14 +587,14 @@ def filter_enabled_providers_for_keys(
     req = _required_provider_envvars()
     kept: list[ProviderTuple] = []
     missing: list[tuple[str, str, str]] = []  # (provider_key, provider_name, envvar)
-    
+
     for pkey, s, d, pname in enabled:
         envvar = req.get(pkey)
         if envvar and not os.getenv(envvar):
             missing.append((pkey, pname, envvar))
             continue
         kept.append((pkey, s, d, pname))
-    
+
     if missing:
         for _pkey, pname, envvar in missing:
             logger.warning(
@@ -561,21 +606,24 @@ def filter_enabled_providers_for_keys(
             "Missing required API keys for %d provider(s). See messages above.",
             len(missing),
         )
-    
+
     return kept
+
 
 def _get_selection_config() -> dict[str, Any]:
     """Get selection configuration with defaults.
-    
+
     Returns:
         Dictionary with selection strategy, thresholds, and download preferences
     """
     cfg = get_config()
     sel = dict(cfg.get("selection", {}) or {})
-    
+
     # Defaults
     sel.setdefault("strategy", "collect_and_select")  # or "sequential_first_hit"
-    sel.setdefault("max_parallel_searches", 1)  # 1 = sequential, >1 = parallel provider searches
+    sel.setdefault(
+        "max_parallel_searches", 1
+    )  # 1 = sequential, >1 = parallel provider searches
     sel.setdefault("provider_hierarchy", [])
     sel.setdefault("min_title_score", 85)
     sel.setdefault("creator_weight", 0.2)
@@ -583,58 +631,62 @@ def _get_selection_config() -> dict[str, Any]:
     sel.setdefault("max_candidates_per_provider", 5)
     sel.setdefault("download_strategy", "selected_only")
     sel.setdefault("keep_non_selected_metadata", True)
-    
+
     return sel
+
 
 def _provider_order(
     enabled: list[ProviderTuple], hierarchy: list[str]
 ) -> list[ProviderTuple]:
     """Reorder providers according to hierarchy preference.
-    
+
     Args:
         enabled: List of enabled provider tuples
         hierarchy: Ordered list of preferred provider keys
-        
+
     Returns:
         Reordered provider list with hierarchy-specified providers first
     """
     if not hierarchy:
         return enabled
-    
+
     key_to_tuple = {e[0]: e for e in enabled}
     ordered = [key_to_tuple[k] for k in hierarchy if k in key_to_tuple]
-    
+
     # Append any enabled not explicitly listed
     for item in enabled:
         if item[0] not in hierarchy:
             ordered.append(item)
-    
+
     return ordered
+
 
 def search_and_select(
     title: str,
     creator: str | None = None,
     entry_id: str | None = None,
     base_output_dir: str = "downloaded_works",
-) -> "DownloadTask" | None:
+) -> DownloadTask | None:
     """Phase 1: Search providers and select best candidate.
-    
+
     This function performs the search phase and returns a DownloadTask
     that can be executed by a worker thread. It creates the work directory
     and persists work.json but does NOT perform the actual download.
-    
+
     Args:
         title: Work title to search for
         creator: Optional creator/author name
         entry_id: Optional unique identifier for this work
         base_output_dir: Base directory for downloaded works
-        
+
     Returns:
         DownloadTask if a candidate was found, None otherwise.
     """
     from main.orchestration.scheduler import DownloadTask
-    
-    logger.info("Searching for work: '%s'%s", title, f" by '{creator}'" if creator else "")
+
+    logger.info(
+        "Searching for work: '%s'%s", title, f" by '{creator}'" if creator else ""
+    )
 
     prep = _prepare_work(title, creator, entry_id, base_output_dir)
     if prep is None:
@@ -670,31 +722,38 @@ def search_and_select(
         base_output_dir=base_output_dir,
     )
 
-    logger.info("Created download task for '%s' from %s", title, prep.selected_provider_tuple[3])
+    logger.info(
+        "Created download task for '%s' from %s", title, prep.selected_provider_tuple[3]
+    )
     return task
 
-def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
+
+def execute_download(task: DownloadTask, dry_run: bool = False) -> bool:
     """Phase 2: Execute download for a task.
-    
+
     This function is designed to be called by worker threads. Thread-local
     context should be set by the scheduler before calling this function.
-    
+
     Args:
         task: DownloadTask from search_and_select()
         dry_run: If True, skip actual downloads
-        
+
     Returns:
         True if download succeeded, False otherwise.
     """
     if dry_run:
         logger.info("Dry-run: skipping download for '%s'", task.title)
         return True
-    
+
     pkey, _search_func, download_func, pname = task.provider_tuple
     selected = task.selected_result
     work_dir = task.work_dir
     work_json_path = task.work_json_path
-    selected_source_id = selected.source_id or selected.raw.get("identifier") or selected.raw.get("ark_id")
+    selected_source_id = (
+        selected.source_id
+        or selected.raw.get("identifier")
+        or selected.raw.get("ark_id")
+    )
 
     download_succeeded, download_deferred = _run_download_with_fallback(
         selected=selected,
@@ -715,18 +774,26 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
 
     # Update work.json status based on outcome
     if download_succeeded:
-        update_work_status(work_json_path, "completed", {
-            "provider": selected.provider,
-            "provider_key": selected.provider_key,
-            "source_id": selected_source_id,
-        })
+        update_work_status(
+            work_json_path,
+            "completed",
+            {
+                "provider": selected.provider,
+                "provider_key": selected.provider_key,
+                "source_id": selected_source_id,
+            },
+        )
     elif download_deferred:
         update_work_status(work_json_path, "deferred")
     else:
         update_work_status(work_json_path, "failed")
 
     # Update index.csv summary (thread-safe)
-    final_status = "completed" if download_succeeded else ("deferred" if download_deferred else "failed")
+    final_status = (
+        "completed"
+        if download_succeeded
+        else ("deferred" if download_deferred else "failed")
+    )
     row = build_index_row(
         work_id=task.work_id,
         entry_id=task.entry_id,
@@ -749,11 +816,18 @@ def execute_download(task: "DownloadTask", dry_run: bool = False) -> bool:
         pass
 
     if download_succeeded:
-        logger.info("Download completed for '%s'. Check '%s' for results.", task.title, work_dir)
+        logger.info(
+            "Download completed for '%s'. Check '%s' for results.", task.title, work_dir
+        )
     else:
-        logger.info("Download %s for '%s'.", "deferred" if download_deferred else "failed", task.title)
-    
+        logger.info(
+            "Download %s for '%s'.",
+            "deferred" if download_deferred else "failed",
+            task.title,
+        )
+
     return download_succeeded
+
 
 def process_work(
     title: str,
@@ -767,14 +841,14 @@ def process_work(
     This function orchestrates provider searches and the download phase for a
     single input work (title/creator), writing a per-work folder under
     `base_output_dir` and adding an entry to `index.csv`.
-    
+
     Args:
         title: Work title to search for
         creator: Optional creator/author name
         entry_id: Optional unique identifier for this work
         base_output_dir: Base directory for downloaded works
         dry_run: If True, skip actual downloads
-        
+
     Returns:
         Dict with 'status', 'item_url', 'provider' on success/failure,
         None if skipped or deferred
@@ -791,7 +865,12 @@ def process_work(
             clear_current_work()
         except Exception:
             pass
-        return {"status": "failed", "item_url": "", "provider": "", "reason": "no_candidates"}
+        return {
+            "status": "failed",
+            "item_url": "",
+            "provider": "",
+            "reason": "no_candidates",
+        }
 
     os.makedirs(prep.work_dir, exist_ok=True)
 
@@ -806,18 +885,7 @@ def process_work(
     selected = prep.selected
     _persist_work_json(prep, status="pending")
     if prep.sel_cfg.get("keep_non_selected_metadata", True):
-        for sr in prep.all_candidates:
-            if not sr.provider_key:
-                continue
-            try:
-                with provider_context(sr.provider_key):
-                    save_json(sr.to_dict(include_raw=True), prep.work_dir, "search_result")
-            except Exception:
-                logger.exception(
-                    "Failed to persist candidate metadata for %s:%s",
-                    sr.provider_key,
-                    sr.source_id,
-                )
+        _save_candidate_search_results(prep)
 
     download_deferred = False
     download_succeeded = False
@@ -845,11 +913,15 @@ def process_work(
     # Update work.json status based on outcome
     if not dry_run:
         if download_succeeded:
-            update_work_status(prep.work_json_path, "completed", {
-                "provider": selected.provider if selected else None,
-                "provider_key": selected.provider_key if selected else None,
-                "source_id": prep.selected_source_id,
-            })
+            update_work_status(
+                prep.work_json_path,
+                "completed",
+                {
+                    "provider": selected.provider if selected else None,
+                    "provider_key": selected.provider_key if selected else None,
+                    "source_id": prep.selected_source_id,
+                },
+            )
         elif download_deferred:
             update_work_status(prep.work_json_path, "deferred")
         elif selected:
@@ -884,9 +956,11 @@ def process_work(
 
     # Clear per-work context
     clear_all_context()
-    
-    logger.info("Finished processing '%s'. Check '%s' for results.", title, prep.work_dir)
-    
+
+    logger.info(
+        "Finished processing '%s'. Check '%s' for results.", title, prep.work_dir
+    )
+
     # Return result for unified CSV updates
     if dry_run:
         return {
@@ -903,6 +977,16 @@ def process_work(
     elif download_deferred:
         return None  # Deferred - don't update CSV yet
     elif selected:
-        return {"status": "failed", "item_url": "", "provider": selected.provider, "reason": "download_failed"}
+        return {
+            "status": "failed",
+            "item_url": "",
+            "provider": selected.provider,
+            "reason": "download_failed",
+        }
     else:
-        return {"status": "failed", "item_url": "", "provider": "", "reason": "no_selection"}
+        return {
+            "status": "failed",
+            "item_url": "",
+            "provider": "",
+            "reason": "no_selection",
+        }

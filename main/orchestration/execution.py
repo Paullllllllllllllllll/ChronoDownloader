@@ -15,49 +15,52 @@ Expected CSV columns (from bib_sampling.ipynb):
 - retrievable: Download status (True/False/empty)
 - link: Item URL (populated after download)
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import pandas as pd
 
 from api.core.budget import budget_exhausted
-
-from . import pipeline
-from .scheduler import DownloadScheduler, DownloadTask, get_parallel_download_config
-from main.data.works_csv import (
-    TITLE_COL,
-    CREATOR_COL,
-    ENTRY_ID_COL,
-    DIRECT_LINK_COL,
-    LINK_COL,
-    mark_success,
-    mark_failed,
-)
 from api.iiif import (
-    is_iiif_manifest_url,
     download_from_iiif_manifest,
     is_direct_download_enabled,
+    is_iiif_manifest_url,
     preview_manifest,
+)
+from api.providers import PROVIDERS
+from main.data.works_csv import (
+    CREATOR_COL,
+    DIRECT_LINK_COL,
+    ENTRY_ID_COL,
+    LINK_COL,
+    TITLE_COL,
+    mark_failed,
+    mark_success,
 )
 from main.state.background import (
     BackgroundRetryScheduler,
     get_background_scheduler,
 )
 from main.state.deferred import DeferredItem, get_deferred_queue
-from api.providers import PROVIDERS
+
+from . import pipeline
+from .scheduler import DownloadScheduler, DownloadTask, get_parallel_download_config
+
 
 def _setup_background_scheduler(
     config: dict[str, Any],
     logger: logging.Logger,
 ) -> BackgroundRetryScheduler | None:
     """Set up and start the background retry scheduler.
-    
+
     Args:
         config: Configuration dictionary
         logger: Logger instance
-        
+
     Returns:
         BackgroundRetryScheduler instance if started, None if disabled
     """
@@ -65,28 +68,29 @@ def _setup_background_scheduler(
     if not deferred_cfg.get("background_enabled", True):
         logger.debug("Background retry scheduler disabled in config")
         return None
-    
+
     scheduler = get_background_scheduler()
-    
+
     # Register download functions for all providers
     for provider_key, (search_fn, download_fn, provider_name) in PROVIDERS.items():
         scheduler.set_provider_download_fn(provider_key, download_fn)
-    
+
     # Set up callbacks for logging
     def on_success(item: DeferredItem) -> None:
         logger.info("Background retry succeeded: '%s'", item.title)
 
     def on_failure(item: DeferredItem, error: str) -> None:
         logger.warning("Background retry failed: '%s' - %s", item.title, error)
-    
+
     scheduler.set_callbacks(on_success=on_success, on_failure=on_failure)
-    
+
     # Start the scheduler
     if scheduler.start():
         logger.info("Background retry scheduler started")
         return scheduler
-    
+
     return None
+
 
 def run_batch_downloads(
     works_df: pd.DataFrame,
@@ -102,7 +106,7 @@ def run_batch_downloads(
     enable_background_retry: bool = True,
 ) -> dict[str, int]:
     """Run batch downloads with automatic mode selection.
-    
+
     Args:
         works_df: DataFrame with columns from sampling notebook:
                   short_title, main_author, entry_id, retrievable, link
@@ -115,7 +119,7 @@ def run_batch_downloads(
         on_submit: Optional callback when a task is submitted (parallel mode)
         on_complete: Optional callback when a task completes (parallel mode)
         csv_path: Path to the source CSV for status updates (unified CSV mode)
-        
+
     Returns:
         Dictionary with execution statistics:
         - 'processed': Total works processed
@@ -125,43 +129,52 @@ def run_batch_downloads(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     # Start background retry scheduler if enabled
     bg_scheduler: BackgroundRetryScheduler | None = None
     if enable_background_retry and not dry_run:
         bg_scheduler = _setup_background_scheduler(config, logger)
-    
+
     try:
         # Determine effective parallel settings
         dl_config = config.get("download", {})
-        max_parallel = max_workers_override or int(dl_config.get("max_parallel_downloads", 1) or 1)
-        
+        max_parallel = max_workers_override or int(
+            dl_config.get("max_parallel_downloads", 1) or 1
+        )
+
         # Use parallel mode only when configured and not dry-run
         if use_parallel and max_parallel > 1 and not dry_run:
             stats = _run_parallel(
-                works_df, output_dir, config, max_workers_override, logger,
-                on_submit, on_complete, csv_path
+                works_df,
+                output_dir,
+                config,
+                max_workers_override,
+                logger,
+                on_submit,
+                on_complete,
+                csv_path,
             )
         else:
             stats = _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
-        
+
         # Add deferred count to stats
         queue = get_deferred_queue()
         deferred_count = len(queue.get_pending())
         stats["deferred"] = deferred_count
-        
+
         if deferred_count > 0:
             logger.info(
                 "%d download(s) deferred due to quota limits. "
                 "Background scheduler will retry when quotas reset.",
-                deferred_count
+                deferred_count,
             )
-        
+
         return stats
     finally:
         # Don't stop the background scheduler here - let it continue running
         # It will be stopped by the main downloader when appropriate
         pass
+
 
 def process_direct_iiif(
     manifest_url: str,
@@ -245,15 +258,16 @@ def process_direct_iiif(
         "error": dl_result.get("error", "unknown"),
     }
 
+
 def _get_direct_link(row: pd.Series) -> str | None:
     """Extract a direct IIIF link from a CSV row if present and valid.
-    
+
     Checks both the 'direct_link' column (preferred) and the 'link' column
     for IIIF manifest URLs.
-    
+
     Args:
         row: DataFrame row
-        
+
     Returns:
         IIIF manifest URL if found and valid, None otherwise
     """
@@ -275,6 +289,49 @@ def _get_direct_link(row: pd.Series) -> str | None:
 
     return None
 
+
+def _parse_work_row(
+    row: pd.Series,
+    index: Any,
+    logger: logging.Logger,
+) -> tuple[Any, Any, Any, str | None, bool] | None:
+    """Extract and validate the searchable fields from a works_df row.
+
+    Returns ``(title, creator, entry_id, direct_link, title_missing)`` when the
+    row is processable, or ``None`` (after logging a skip warning) when the row
+    must be skipped due to a missing entry_id or a missing title without a
+    usable direct IIIF link. Callers increment their own skip counter on None.
+
+    Args:
+        row: DataFrame row
+        index: Row index (for one-based logging)
+        logger: Logger instance
+
+    Returns:
+        Parsed field tuple or None when the row must be skipped
+    """
+    title = row.get(TITLE_COL)
+    creator = row.get(CREATOR_COL)
+    entry_id = row.get(ENTRY_ID_COL)
+
+    # entry_id is required from the sampling CSV
+    if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
+        logger.warning("Skipping row %d due to missing entry_id.", cast(int, index) + 1)
+        return None
+
+    # Check for direct IIIF link first (bypasses search)
+    direct_link = _get_direct_link(row) if is_direct_download_enabled() else None
+
+    title_missing = pd.isna(title) or not str(title).strip()
+    if title_missing and not direct_link:
+        logger.warning(
+            "Skipping row %d due to missing or empty title.", cast(int, index) + 1
+        )
+        return None
+
+    return title, creator, entry_id, direct_link, title_missing
+
+
 def _run_sequential(
     works_df: pd.DataFrame,
     output_dir: str,
@@ -283,14 +340,14 @@ def _run_sequential(
     csv_path: str | None = None,
 ) -> dict[str, int]:
     """Run downloads sequentially.
-    
+
     Args:
         works_df: DataFrame with works (using notebook column names)
         output_dir: Output directory
         dry_run: Whether to skip downloads
         logger: Logger instance
         csv_path: Path to source CSV for status updates
-        
+
     Returns:
         Statistics dictionary
     """
@@ -299,29 +356,20 @@ def _run_sequential(
     failed = 0
     skipped = 0
     direct_iiif_count = 0
-    
+
     for index, row in works_df.iterrows():
-        title = row.get(TITLE_COL)
-        creator = row.get(CREATOR_COL)
-        entry_id = row.get(ENTRY_ID_COL)
-        
-        # entry_id is required from the sampling CSV
-        if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
-            logger.warning("Skipping row %d due to missing entry_id.", cast(int, index) + 1)
+        parsed = _parse_work_row(row, index, logger)
+        if parsed is None:
             skipped += 1
             continue
-        
-        # Check for direct IIIF link first (bypasses search)
-        direct_link = _get_direct_link(row) if is_direct_download_enabled() else None
-        
-        title_missing = pd.isna(title) or not str(title).strip()
-        if title_missing and not direct_link:
-            logger.warning("Skipping row %d due to missing or empty title.", cast(int, index) + 1)
-            skipped += 1
-            continue
-        
+        title, creator, entry_id, direct_link, title_missing = parsed
+
         if direct_link:
-            logger.info("Direct IIIF link detected for '%s': %s", title if not title_missing else entry_id, direct_link)
+            logger.info(
+                "Direct IIIF link detected for '%s': %s",
+                title if not title_missing else entry_id,
+                direct_link,
+            )
             direct_iiif_count += 1
             result = process_direct_iiif(
                 manifest_url=direct_link,
@@ -333,14 +381,17 @@ def _run_sequential(
             )
         else:
             # Standard search-based download
-            result = pipeline.process_work(
-                str(title),
-                None if pd.isna(creator) else str(creator),
-                str(entry_id),
-                output_dir,
-                dry_run=dry_run,
-            ) or {}
-        
+            result = (
+                pipeline.process_work(
+                    str(title),
+                    None if pd.isna(creator) else str(creator),
+                    str(entry_id),
+                    output_dir,
+                    dry_run=dry_run,
+                )
+                or {}
+            )
+
         # Update CSV status if path provided
         if csv_path and not dry_run:
             if result and isinstance(result, dict):
@@ -350,33 +401,49 @@ def _run_sequential(
                     item_url = result.get("item_url", "")
                     provider = result.get("provider", "")
                     if mark_success(csv_path, str(entry_id), item_url, provider):
-                        logger.debug("Marked entry %s as success in source CSV", entry_id)
+                        logger.debug(
+                            "Marked entry %s as success in source CSV", entry_id
+                        )
                     else:
-                        logger.warning("Failed to mark entry %s as success in source CSV", entry_id)
+                        logger.warning(
+                            "Failed to mark entry %s as success in source CSV", entry_id
+                        )
                     succeeded += 1
                 elif status == "failed":
                     # Explicit failure
                     if mark_failed(csv_path, str(entry_id)):
-                        logger.debug("Marked entry %s as failed in source CSV", entry_id)
+                        logger.debug(
+                            "Marked entry %s as failed in source CSV", entry_id
+                        )
                     else:
-                        logger.warning("Failed to mark entry %s as failed in source CSV", entry_id)
+                        logger.warning(
+                            "Failed to mark entry %s as failed in source CSV", entry_id
+                        )
                     failed += 1
                 # Other statuses (dry_run, no_match) - don't update CSV
             # result is None means deferred/skipped - don't update CSV
-        
+
         processed += 1
         logger.info("%s", "-" * 50)
-        
+
         # Stop early if the global download budget has been exhausted
         try:
             if budget_exhausted():
-                logger.warning("Download budget exhausted; stopping further processing.")
+                logger.warning(
+                    "Download budget exhausted; stopping further processing."
+                )
                 break
         except Exception:
             pass
-    
+
     logger.info("All works processed.")
-    return {"processed": processed, "succeeded": succeeded, "failed": failed, "skipped": skipped}
+    return {
+        "processed": processed,
+        "succeeded": succeeded,
+        "failed": failed,
+        "skipped": skipped,
+    }
+
 
 def _run_parallel(
     works_df: pd.DataFrame,
@@ -389,10 +456,10 @@ def _run_parallel(
     csv_path: str | None = None,
 ) -> dict[str, int]:
     """Run downloads in parallel using DownloadScheduler.
-    
+
     Searches are sequential to avoid overwhelming providers,
     but downloads are parallelized across works.
-    
+
     Args:
         works_df: DataFrame with works (using notebook column names)
         output_dir: Output directory
@@ -402,41 +469,45 @@ def _run_parallel(
         on_submit: Optional callback for task submission
         on_complete: Optional callback for task completion
         csv_path: Path to source CSV for status updates
-        
+
     Returns:
         Statistics dictionary
     """
     # Get parallel download settings
     dl_config = get_parallel_download_config()
-    max_workers = max_workers_override or int(dl_config.get("max_parallel_downloads", 4) or 4)
+    max_workers = max_workers_override or int(
+        dl_config.get("max_parallel_downloads", 4) or 4
+    )
     provider_concurrency = dict(dl_config.get("provider_concurrency", {}) or {})
     worker_timeout = float(dl_config.get("worker_timeout_s", 600) or 600)
-    
+
     # Track statistics
     submitted_count = 0
     skipped_count = 0
-    
+
     # Default callbacks if none provided
     def default_on_submit(task: DownloadTask) -> None:
         nonlocal submitted_count
         submitted_count += 1
         logger.debug("Queued download %d: '%s'", submitted_count, task.title)
-    
+
     # Note: CSV sync is handled in wrapped_complete, not in callbacks
     # This default is only used for logging when no custom callback provided
-    
+
     # Use provided callbacks or defaults
     submit_callback = on_submit or default_on_submit
     complete_callback = on_complete if on_complete else None
-    
+
     # Wrap callbacks to track stats while calling user callbacks
     actual_submitted = [0]
-    
+
     def wrapped_submit(task: DownloadTask) -> None:
         actual_submitted[0] += 1
         submit_callback(task)
-    
-    def wrapped_complete(task: DownloadTask, success: bool, error: Exception | None) -> None:
+
+    def wrapped_complete(
+        task: DownloadTask, success: bool, error: Exception | None
+    ) -> None:
         # Always perform CSV sync (critical for resume functionality)
         if csv_path and task.entry_id:
             try:
@@ -444,17 +515,31 @@ def _run_parallel(
                     item_url = getattr(task, "item_url", "") or ""
                     provider = getattr(task, "provider", "") or ""
                     if mark_success(csv_path, task.entry_id, item_url, provider):
-                        logger.debug("Marked entry %s as success in source CSV", task.entry_id)
+                        logger.debug(
+                            "Marked entry %s as success in source CSV", task.entry_id
+                        )
                     else:
-                        logger.warning("Failed to mark entry %s as success in source CSV", task.entry_id)
+                        logger.warning(
+                            "Failed to mark entry %s as success in source CSV",
+                            task.entry_id,
+                        )
                 else:
                     if mark_failed(csv_path, task.entry_id):
-                        logger.debug("Marked entry %s as failed in source CSV", task.entry_id)
+                        logger.debug(
+                            "Marked entry %s as failed in source CSV", task.entry_id
+                        )
                     else:
-                        logger.warning("Failed to mark entry %s as failed in source CSV", task.entry_id)
+                        logger.warning(
+                            "Failed to mark entry %s as failed in source CSV",
+                            task.entry_id,
+                        )
             except Exception as csv_err:
-                logger.error("Exception updating source CSV for entry %s: %s", task.entry_id, csv_err)
-        
+                logger.error(
+                    "Exception updating source CSV for entry %s: %s",
+                    task.entry_id,
+                    csv_err,
+                )
+
         # Call custom callback if provided, otherwise use default logging
         if complete_callback:
             complete_callback(task, success, error)
@@ -464,7 +549,7 @@ def _run_parallel(
                 logger.warning("Download %s for '%s': %s", status, task.title, error)
             else:
                 logger.info("Download %s for '%s'", status, task.title)
-    
+
     # Initialize scheduler
     scheduler = DownloadScheduler(
         max_workers=max_workers,
@@ -473,46 +558,39 @@ def _run_parallel(
         on_complete=wrapped_complete,
     )
     scheduler.start()
-    
+
     logger.info(
         "Parallel download scheduler started: %d workers, provider limits: %s",
         max_workers,
-        provider_concurrency or "default"
+        provider_concurrency or "default",
     )
-    
+
     try:
         # Phase 1: Search and queue downloads
         for index, row in works_df.iterrows():
             # Check budget before searching
             try:
                 if budget_exhausted():
-                    logger.warning("Download budget exhausted; stopping further searches.")
+                    logger.warning(
+                        "Download budget exhausted; stopping further searches."
+                    )
                     break
             except Exception:
                 pass
-            
-            title = row.get(TITLE_COL)
-            creator = row.get(CREATOR_COL)
-            entry_id = row.get(ENTRY_ID_COL)
-            
-            # entry_id is required from the sampling CSV
-            if pd.isna(entry_id) or (isinstance(entry_id, str) and not entry_id.strip()):
-                logger.warning("Skipping row %d due to missing entry_id.", cast(int, index) + 1)
+
+            parsed = _parse_work_row(row, index, logger)
+            if parsed is None:
                 skipped_count += 1
                 continue
-            
-            # Check for direct IIIF link first (bypasses search)
-            direct_link = _get_direct_link(row) if is_direct_download_enabled() else None
-            
-            title_missing = pd.isna(title) or not str(title).strip()
-            if title_missing and not direct_link:
-                logger.warning("Skipping row %d due to missing or empty title.", cast(int, index) + 1)
-                skipped_count += 1
-                continue
-            
+            title, creator, entry_id, direct_link, title_missing = parsed
+
             if direct_link:
                 # Direct IIIF download - handle synchronously in parallel mode
-                logger.info("Direct IIIF link detected for '%s': %s", title if not title_missing else entry_id, direct_link)
+                logger.info(
+                    "Direct IIIF link detected for '%s': %s",
+                    title if not title_missing else entry_id,
+                    direct_link,
+                )
                 dl_result = process_direct_iiif(
                     manifest_url=direct_link,
                     output_dir=output_dir,
@@ -520,19 +598,32 @@ def _run_parallel(
                     title=None if title_missing else str(title),
                     creator=None if pd.isna(creator) else str(creator),
                 )
-                
+
                 # Update CSV for direct downloads
                 if csv_path and entry_id:
                     try:
                         if dl_result.get("status") == "completed":
-                            if mark_success(csv_path, str(entry_id), direct_link, dl_result.get("provider", "")):
-                                logger.debug("Marked entry %s as success (direct IIIF)", entry_id)
+                            if mark_success(
+                                csv_path,
+                                str(entry_id),
+                                direct_link,
+                                dl_result.get("provider", ""),
+                            ):
+                                logger.debug(
+                                    "Marked entry %s as success (direct IIIF)", entry_id
+                                )
                         else:
                             if mark_failed(csv_path, str(entry_id)):
-                                logger.debug("Marked entry %s as failed (direct IIIF)", entry_id)
+                                logger.debug(
+                                    "Marked entry %s as failed (direct IIIF)", entry_id
+                                )
                     except Exception as csv_err:
-                        logger.error("Exception updating CSV for direct IIIF entry %s: %s", entry_id, csv_err)
-                
+                        logger.error(
+                            "Exception updating CSV for direct IIIF entry %s: %s",
+                            entry_id,
+                            csv_err,
+                        )
+
                 actual_submitted[0] += 1
             else:
                 # Search and select (runs in main thread)
@@ -542,18 +633,20 @@ def _run_parallel(
                     None if pd.isna(entry_id) else str(entry_id),
                     output_dir,
                 )
-                
+
                 if task:
                     # Submit download to worker pool
                     scheduler.submit(task, pipeline.execute_download)
-            
+
             logger.info("%s", "-" * 50)
-        
+
         # Phase 2: Wait for all downloads to complete
         pending = scheduler.pending_count
         if pending > 0:
-            logger.info("Search phase complete. Waiting for %d pending download(s)...", pending)
-            
+            logger.info(
+                "Search phase complete. Waiting for %d pending download(s)...", pending
+            )
+
             try:
                 results = scheduler.wait_all(timeout=worker_timeout)
             except TimeoutError as te:
@@ -561,20 +654,20 @@ def _run_parallel(
                 # The scheduler tracks completed/succeeded/failed counts independently
                 logger.warning(
                     "Timeout waiting for all futures: %s. Some downloads may still be in progress.",
-                    te
+                    te,
                 )
-            
+
             stats = scheduler.get_stats()
             logger.info(
                 "Download phase complete: %d succeeded, %d failed",
                 stats["succeeded"],
-                stats["failed"]
+                stats["failed"],
             )
-    
+
     except KeyboardInterrupt:
         logger.warning("Interrupt received; shutting down scheduler...")
         scheduler.request_shutdown()
-        
+
         # Wait briefly for in-progress downloads
         pending = scheduler.pending_count
         if pending > 0:
@@ -582,8 +675,10 @@ def _run_parallel(
             try:
                 scheduler.wait_all(timeout=30)
             except TimeoutError:
-                logger.warning("Timeout waiting for in-progress downloads after interrupt")
-    
+                logger.warning(
+                    "Timeout waiting for in-progress downloads after interrupt"
+                )
+
     finally:
         scheduler.shutdown(wait=True)
         stats = scheduler.get_stats()
@@ -591,9 +686,9 @@ def _run_parallel(
             "Scheduler shutdown. Final stats: %d completed (%d succeeded, %d failed)",
             stats["completed"],
             stats["succeeded"],
-            stats["failed"]
+            stats["failed"],
         )
-    
+
     final_stats = scheduler.get_stats()
     return {
         "processed": actual_submitted[0],
@@ -602,27 +697,31 @@ def _run_parallel(
         "skipped": skipped_count,
     }
 
+
 def create_interactive_callbacks(
     logger: logging.Logger,
-) -> tuple[Callable[[DownloadTask], None], Callable[[DownloadTask, bool, Exception | None], None]]:
+) -> tuple[
+    Callable[[DownloadTask], None],
+    Callable[[DownloadTask, bool, Exception | None], None],
+]:
     """Create progress callbacks suitable for interactive mode.
-    
+
     Args:
         logger: Logger instance
-        
+
     Returns:
         Tuple of (on_submit, on_complete) callback functions
     """
     from main.ui.console import ConsoleUI
-    
+
     submitted = [0]
     completed = [0]
-    
+
     def on_submit(task: DownloadTask) -> None:
         submitted[0] += 1
         title_short = task.title[:50] + "..." if len(task.title) > 50 else task.title
         ConsoleUI.print_info(f"Queued [{submitted[0]}]", title_short)
-    
+
     def on_complete(task: DownloadTask, success: bool, error: Exception | None) -> None:
         completed[0] += 1
         title_short = task.title[:50] + "..." if len(task.title) > 50 else task.title
@@ -633,7 +732,8 @@ def create_interactive_callbacks(
             if error:
                 msg += f" - {error}"
             ConsoleUI.print_error(msg)
-    
+
     return on_submit, on_complete
+
 
 __all__ = ["run_batch_downloads", "create_interactive_callbacks", "process_direct_iiif"]

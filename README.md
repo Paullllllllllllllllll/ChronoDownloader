@@ -1,4 +1,4 @@
-# ChronoDownloader v1.2.0
+# ChronoDownloader v1.3.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -980,6 +980,20 @@ before v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.3.0** (20 June 2026) -- Consolidated five within-module duplications behind
+    new private helpers without changing any public interface or runtime behavior. In
+    selection.py a _search_provider_logged helper now carries the shared search banner,
+    search call, and empty/hit-count logging for both the sequential first-hit and
+    exhaustive collectors. In pipeline.py the per-candidate search_result persistence
+    loop moved into _save_candidate_search_results, called from both
+    _persist_candidates_metadata and process_work. In execution.py the row field
+    extraction and skip validation moved into _parse_work_row, shared by the sequential
+    and parallel runners. In iiif/_parsing.py the v2 and v3 manifest traversals moved
+    into _iter_v2_resources and_iter_v3_bodies, shared by extract_image_service_bases
+    and extract_direct_image_urls. In annas_archive.py the raw-dict build, SearchResult
+    conversion, and score attachment moved into_build_annas_result, used by both search
+    strategies. No dead code was removed: the only queue_file occurrences are
+    backward-compatible public parameters.
 - **v1.2.0** (20 June 2026) -- Removed three confirmed-unused dev dependencies
     (mypy, pandas-stubs, and types-requests), which also dropped their transitive
     packages from the lockfile. Upgraded requests (2.33.1 to 2.34.2),
