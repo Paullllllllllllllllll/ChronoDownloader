@@ -7,24 +7,21 @@ packages = ["api", "main"]
 
 [project]
 name = "chronodownloader"
-version = "1.1.1"
+version = "1.2.0"
 description = "Discover and download digitized historical sources from 17 digital libraries"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
-    "requests>=2.33",
+    "requests>=2.34",
     "urllib3>=2.6",
-    "beautifulsoup4>=4.14",
+    "beautifulsoup4>=4.15",
     "pandas>=2.3,<3.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0",
-    "mypy>=1.20",
-    "pandas-stubs>=2.3,<3.0",
-    "types-requests>=2.33",
+    "pytest>=9.1",
 ]
 
 [tool.pytest.ini_options]

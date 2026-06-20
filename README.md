@@ -1,4 +1,4 @@
-# ChronoDownloader v1.1.1
+# ChronoDownloader v1.2.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -980,6 +980,14 @@ before v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.2.0** (20 June 2026) -- Removed three confirmed-unused dev dependencies
+    (mypy, pandas-stubs, and types-requests), which also dropped their transitive
+    packages from the lockfile. Upgraded requests (2.33.1 to 2.34.2),
+    beautifulsoup4 (4.14.3 to 4.15.0), and pytest (9.0.3 to 9.1.1) to the latest
+    stable releases within their current majors, raising each lower-bound floor
+    accordingly. Held pandas at the 2.x major (current 2.3.3, latest 3.0.3) under
+    the conservative majors-gated policy, retaining its <3.0 pin; urllib3 was
+    already current within its major.
 - **v1.1.1** (19 May 2026) -- dependency refresh from
     environment-wide CVE audit: bump `urllib3` 2.6.3 -> 2.7.0
     (audit-surface consolidation).
