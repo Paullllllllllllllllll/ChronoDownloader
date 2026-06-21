@@ -1,4 +1,4 @@
-# ChronoDownloader v1.3.0
+# ChronoDownloader v1.4.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -979,6 +979,12 @@ All prior development history was consolidated; version numbers
 before v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.4.0** (21 June 2026) -- Adopted pandas 3.x and dropped Python 3.10 support.
+    Raised `requires-python` to `>=3.11` (pandas 3.0 requires 3.11+), relaxed the
+    pin from `pandas>=2.3,<3.0` to `pandas>=3.0` (`pandas` 2.3.3 -> 3.0.3), and set
+    the ruff target to `py311`. The CSV index/works I/O paths pass all 1,020 tests
+    under pandas 3.0. Note: Python 3.10 is no longer supported.
 
 - **v1.3.0** (20 June 2026) -- Consolidated five within-module duplications behind
     new private helpers without changing any public interface or runtime behavior. In
