@@ -63,3 +63,15 @@ ignore = []
 [tool.ruff.format]
 quote-style = "double"
 docstring-code-format = false
+
+[tool.deptry]
+# Treat the dev extra as development dependencies (pytest is not imported in the
+# shipped source tree).
+pep621_dev_dependency_groups = ["dev"]
+# tests/ carries analysis-only imports that are intentionally undeclared.
+extend_exclude = ["tests"]
+
+[tool.deptry.package_module_name_map]
+# beautifulsoup4's import name is bs4; declaring it keeps scans accurate even
+# when deptry runs outside the project venv.
+beautifulsoup4 = ["bs4"]
