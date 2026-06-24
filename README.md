@@ -973,10 +973,11 @@ gracefully when IIIF images are unavailable.
 
 ## Versioning
 
-This project uses semantic versioning. The commit history was
-squashed to a single baseline commit at v1.0.0 on 25 April 2026.
-All prior development history was consolidated; version numbers
-before v1.0.0 do not exist.
+This project follows semantic versioning (`MAJOR.MINOR.PATCH`). The version in
+`pyproject.toml` is the single source of truth; it is mirrored in the title
+heading above and tagged in git as `vX.Y.Z`. The commit history was squashed to
+a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
+v1.0.0 do not exist.
 
 ## Changelog
 
@@ -988,30 +989,36 @@ before v1.0.0 do not exist.
 
 - **v1.3.0** (20 June 2026) -- Consolidated five within-module duplications behind
     new private helpers without changing any public interface or runtime behavior. In
-    selection.py a _search_provider_logged helper now carries the shared search banner,
-    search call, and empty/hit-count logging for both the sequential first-hit and
-    exhaustive collectors. In pipeline.py the per-candidate search_result persistence
-    loop moved into _save_candidate_search_results, called from both
-    _persist_candidates_metadata and process_work. In execution.py the row field
-    extraction and skip validation moved into _parse_work_row, shared by the sequential
-    and parallel runners. In iiif/_parsing.py the v2 and v3 manifest traversals moved
-    into _iter_v2_resources and_iter_v3_bodies, shared by extract_image_service_bases
-    and extract_direct_image_urls. In annas_archive.py the raw-dict build, SearchResult
-    conversion, and score attachment moved into_build_annas_result, used by both search
-    strategies. No dead code was removed: the only queue_file occurrences are
-    backward-compatible public parameters.
+    `selection.py` a `_search_provider_logged` helper now carries the shared search
+    banner, search call, and empty/hit-count logging for both the sequential first-hit
+    and exhaustive collectors. In `pipeline.py` the per-candidate search_result
+    persistence loop moved into `_save_candidate_search_results`, called from both
+    `_persist_candidates_metadata` and `process_work`. In `execution.py` the row field
+    extraction and skip validation moved into `_parse_work_row`, shared by the
+    sequential and parallel runners. In `iiif/_parsing.py` the v2 and v3 manifest
+    traversals moved into `_iter_v2_resources` and `_iter_v3_bodies`, shared by
+    `extract_image_service_bases` and `extract_direct_image_urls`. In
+    `annas_archive.py` the raw-dict build, `SearchResult` conversion, and score
+    attachment moved into `_build_annas_result`, used by both search strategies. No
+    dead code was removed: the only `queue_file` occurrences are backward-compatible
+    public parameters.
+
 - **v1.2.0** (20 June 2026) -- Removed three confirmed-unused dev dependencies
-    (mypy, pandas-stubs, and types-requests), which also dropped their transitive
-    packages from the lockfile. Upgraded requests (2.33.1 to 2.34.2),
-    beautifulsoup4 (4.14.3 to 4.15.0), and pytest (9.0.3 to 9.1.1) to the latest
+    (`mypy`, `pandas-stubs`, and `types-requests`), which also dropped their
+    transitive packages from the lockfile. Upgraded `requests` (2.33.1 to 2.34.2),
+    `beautifulsoup4` (4.14.3 to 4.15.0), and `pytest` (9.0.3 to 9.1.1) to the latest
     stable releases within their current majors, raising each lower-bound floor
-    accordingly. Held pandas at the 2.x major (current 2.3.3, latest 3.0.3) under
-    the conservative majors-gated policy, retaining its <3.0 pin; urllib3 was
+    accordingly. Held `pandas` at the 2.x major (current 2.3.3, latest 3.0.3) under
+    the conservative majors-gated policy, retaining its `<3.0` pin; `urllib3` was
     already current within its major.
-- **v1.1.1** (19 May 2026) -- dependency refresh from
-    environment-wide CVE audit: bump `urllib3` 2.6.3 -> 2.7.0
-    (audit-surface consolidation).
-- **v1.1.0** -- prior release.
+
+- **v1.1.1** (19 May 2026) -- Dependency refresh from environment-wide CVE audit:
+    bump `urllib3` 2.6.3 -> 2.7.0 (audit-surface consolidation).
+
+- **v1.1.0** (4 May 2026) -- Migrated dependency management to `pyproject.toml`
+    and `uv`; added ruff linter and formatter configuration.
+
+- **v1.0.0** (25 April 2026) -- Initial public release; squashed baseline.
 
 ## Contributing
 
