@@ -1,8 +1,0 @@
-{
-  "europeana": "EUROPEANA_API_KEY",
-  "dpla": "DPLA_API_KEY",
-  "ddb": "DDB_API_KEY",
-  "google_books": "GOOGLE_BOOKS_API_KEY",
-  "hathitrust": "HATHI_API_KEY",
-  "annas_archive": "ANNAS_ARCHIVE_API_KEY"
-}

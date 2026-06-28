@@ -60,3 +60,4 @@ sampled_books.csv
 # Staging test outputs
 tests/staging/output/
 tests/staging/.staging_state.json
+api_keys.json
