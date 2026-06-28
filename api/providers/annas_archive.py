@@ -37,7 +37,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from ..core.config import get_provider_setting
+from ..core.config import get_api_key_envvar, get_provider_setting
 from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ..matching import normalize_text, title_score
@@ -259,8 +259,9 @@ def _get_api_key() -> str | None:
     Returns:
         API key string or None if not configured
     """
-    # Try environment variable first
-    api_key = os.environ.get("ANNAS_ARCHIVE_API_KEY")
+    # Try environment variable first (name may be remapped via api_keys.json)
+    envvar = get_api_key_envvar("annas_archive", "ANNAS_ARCHIVE_API_KEY")
+    api_key = os.environ.get(envvar)
     if api_key:
         return api_key
 

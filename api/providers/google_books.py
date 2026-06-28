@@ -1,4 +1,5 @@
 """Connector for the Google Books API."""
+
 from __future__ import annotations
 
 import hashlib
@@ -8,34 +9,39 @@ import re
 import urllib.parse
 from typing import Any, cast
 
-from ..core.config import get_provider_setting
-from ..core.network import make_request
+from ..core.config import get_api_key_envvar, get_provider_setting
 from ..core.download import download_file, save_json
+from ..core.network import make_request
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://www.googleapis.com/books/v1/volumes"
 
+
 def _api_key() -> str | None:
     """Get Google Books API key from environment."""
     # Environment-only API key
-    return os.getenv("GOOGLE_BOOKS_API_KEY")
+    return os.getenv(get_api_key_envvar("google_books", "GOOGLE_BOOKS_API_KEY"))
+
 
 def _gb_free_only() -> bool:
     """Check if only free books should be searched."""
     val = get_provider_setting("google_books", "free_only", True)
     return bool(val)
 
+
 def _gb_prefer_format() -> str:
     """Get preferred download format (pdf or epub)."""
     val = get_provider_setting("google_books", "prefer", "pdf")
     return str(val or "pdf").lower()
 
+
 def _gb_allow_drm() -> bool:
     """Check if DRM-protected content is allowed."""
     val = get_provider_setting("google_books", "allow_drm", False)
     return bool(val)
+
 
 def _gb_max_files() -> int:
     """Get maximum number of files to download per work."""
@@ -45,14 +51,17 @@ def _gb_max_files() -> int:
     except Exception:
         return 2
 
-def search_google_books(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_google_books(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search Google Books API for works.
-    
+
     Args:
         title: Work title to search for
         creator: Optional creator/author name
         max_results: Maximum number of results to return
-        
+
     Returns:
         List of SearchResult objects
     """
@@ -94,9 +103,9 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
     if creator:
         q1 += f'+inauthor:"{creator}"'
     # 2) unquoted fields (helps with punctuation-heavy titles)
-    q2 = f'intitle:{title}'
+    q2 = f"intitle:{title}"
     if creator:
-        q2 += f'+inauthor:{creator}'
+        q2 += f"+inauthor:{creator}"
     # 3) plain text title+creator
     q3 = f"{title} {creator}" if creator else f"{title}"
     # 4) heavily sanitized plain title only
@@ -125,25 +134,45 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
         for item in data["items"]:
             volume_info = item.get("volumeInfo", {})
             vol_id = item.get("id")
-            access_info = item.get("accessInfo", {}) if isinstance(item.get("accessInfo", {}), dict) else {}
+            access_info = (
+                item.get("accessInfo", {})
+                if isinstance(item.get("accessInfo", {}), dict)
+                else {}
+            )
+
             # Determine if there is a direct downloadable link (pdf/epub)
             def _dl(ai: dict[str, Any]) -> str | None:
                 """Get direct downloadable link from access info."""
                 if not isinstance(ai, dict):
                     return None
                 # Prefer configured format, but accept either
-                if isinstance(ai.get(prefer_fmt, {}), dict) and ai.get(prefer_fmt, {}).get("downloadLink"):
+                if isinstance(ai.get(prefer_fmt, {}), dict) and ai.get(
+                    prefer_fmt, {}
+                ).get("downloadLink"):
                     return cast(str, ai[prefer_fmt]["downloadLink"])
                 for alt in ("pdf", "epub"):
-                    if isinstance(ai.get(alt, {}), dict) and ai.get(alt, {}).get("downloadLink"):
+                    if isinstance(ai.get(alt, {}), dict) and ai.get(alt, {}).get(
+                        "downloadLink"
+                    ):
                         return cast(str, ai[alt]["downloadLink"])
                 return None
+
             download_link = _dl(access_info)
             # If configured to free_only, accept items that are clearly free/public domain
             # even when the API does not expose a direct downloadLink.
             public_domain = bool(access_info.get("publicDomain"))
-            viewability = str(access_info.get("viewability") or volume_info.get("viewability") or "").lower()
-            is_full_view = any(k in viewability for k in ("all_pages", "all_pages_public_domain", "full_public_domain", "full"))
+            viewability = str(
+                access_info.get("viewability") or volume_info.get("viewability") or ""
+            ).lower()
+            is_full_view = any(
+                k in viewability
+                for k in (
+                    "all_pages",
+                    "all_pages_public_domain",
+                    "full_public_domain",
+                    "full",
+                )
+            )
             # Only accept clearly downloadable or fully viewable items when free_only is requested
             # Some items report generic ebook availability without a direct download; exclude those
             if free_only and not (download_link or public_domain or is_full_view):
@@ -153,7 +182,9 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
                 "title": volume_info.get("title", "N/A"),
                 "creator": ", ".join(volume_info.get("authors", [])),
                 "id": vol_id,
-                "item_url": f"https://books.google.com/books?id={vol_id}" if vol_id else None,
+                "item_url": f"https://books.google.com/books?id={vol_id}"
+                if vol_id
+                else None,
                 "accessInfo": access_info,
                 "viewability": viewability,
                 "publicDomain": public_domain,
@@ -162,21 +193,24 @@ def search_google_books(title: str, creator: str | None = None, max_results: int
             results.append(convert_to_searchresult("Google Books", raw))
     return results
 
-def download_google_books_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_google_books_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download metadata and available files for a Google Books volume.
-    
+
     Google Books only provides actual downloadable PDFs/EPUBs for:
     - Books purchased by the authenticated user
     - True public domain books with full download access (uncommon)
-    
+
     For most "public domain" books, the download links redirect to HTML error pages.
     This function attempts API download links first, then falls back to extracting
     page images via the embedded viewer API for books with full preview.
-    
+
     Args:
         item_data: SearchResult or dict containing volume data
         output_folder: Folder to save files to
-        
+
     Returns:
         True if any object was downloaded
     """
@@ -192,7 +226,7 @@ def download_google_books_work(item_data: SearchResult | dict[str, Any], output_
 
     if not isinstance(volume_data, dict):
         return False
-        
+
     save_json(volume_data, output_folder, f"google_{volume_id}_metadata")
 
     access_info = volume_data.get("accessInfo", {})
@@ -204,7 +238,7 @@ def download_google_books_work(item_data: SearchResult | dict[str, Any], output_
     public_domain = bool(access_info.get("publicDomain"))
     viewability = str(access_info.get("viewability") or "").lower()
     is_full_view = "all_pages" in viewability or viewability == "full"
-    
+
     def _collect_links() -> list[str]:
         """Collect download links from access info."""
         links: list[str] = []
@@ -235,12 +269,17 @@ def download_google_books_work(item_data: SearchResult | dict[str, Any], output_
         path = download_file(url, output_folder, fallback)
         if path:
             any_ok = True
-            logger.info("Google Books: Successfully downloaded file from API for %s", volume_id)
+            logger.info(
+                "Google Books: Successfully downloaded file from API for %s", volume_id
+            )
 
     # For public domain / full view books, try page-by-page image extraction
     # This works when direct PDF download fails (which is common)
     if not any_ok and (public_domain or is_full_view):
-        logger.info("Google Books: No direct download available for %s, attempting page image extraction", volume_id)
+        logger.info(
+            "Google Books: No direct download available for %s, attempting page image extraction",
+            volume_id,
+        )
         any_ok = _download_page_images(volume_id, output_folder, max_files)
 
     # Fallback: Save cover images (at least get something)
@@ -255,10 +294,12 @@ def download_google_books_work(item_data: SearchResult | dict[str, Any], output_
         # Heuristic high-quality cover via books/content endpoint
         if not cover_candidates:
             for zoom in [5, 4, 3]:
-                cover_candidates.append((
-                    f"https://books.google.com/books/content?id={urllib.parse.quote(volume_id)}&printsec=frontcover&img=1&zoom={zoom}&edge=curl",
-                    f"content_zoom{zoom}",
-                ))
+                cover_candidates.append(
+                    (
+                        f"https://books.google.com/books/content?id={urllib.parse.quote(volume_id)}&printsec=frontcover&img=1&zoom={zoom}&edge=curl",
+                        f"content_zoom{zoom}",
+                    )
+                )
 
         used = set()
         for url, label in cover_candidates:
@@ -272,6 +313,7 @@ def download_google_books_work(item_data: SearchResult | dict[str, Any], output_
 
     return any_ok
 
+
 # Known Google Books "image not available" placeholder signatures
 # These are detected by file size and MD5 hash
 GB_PLACEHOLDER_SIGNATURES = {
@@ -284,58 +326,65 @@ GB_PLACEHOLDER_SIGNATURES = {
 # Minimum file size for a valid page image (placeholders are typically small)
 GB_MIN_VALID_IMAGE_SIZE = 15000  # 15KB - real scanned pages are usually larger
 
+
 def _is_placeholder_image(filepath: str) -> bool:
     """Check if a downloaded image is a Google Books placeholder.
-    
+
     Google Books returns a placeholder image instead of 404 for unavailable pages.
     These placeholders have consistent file sizes and content hashes.
-    
+
     Args:
         filepath: Path to the downloaded image file
-        
+
     Returns:
         True if the file appears to be a placeholder image
     """
     try:
         file_size = os.path.getsize(filepath)
-        
+
         # Quick check: if file is very small, likely a placeholder
         if file_size < GB_MIN_VALID_IMAGE_SIZE:
             # Compute MD5 hash for verification
             with open(filepath, "rb") as f:
                 file_hash = hashlib.md5(f.read()).hexdigest().lower()
-            
+
             # Check against known placeholder signatures
             for sig_size, sig_hash in GB_PLACEHOLDER_SIGNATURES:
                 if file_size == sig_size:
                     if sig_hash is None or file_hash == sig_hash:
                         return True
-            
+
             # Also flag very small images as suspicious
             if file_size < 10000:  # Less than 10KB is almost certainly a placeholder
-                logger.debug("Google Books: Detected small image (%d bytes), likely placeholder: %s", 
-                           file_size, filepath)
+                logger.debug(
+                    "Google Books: Detected small image (%d bytes), likely placeholder: %s",
+                    file_size,
+                    filepath,
+                )
                 return True
-        
+
         return False
     except Exception as e:
         logger.debug("Error checking placeholder status for %s: %s", filepath, e)
         return False
 
-def _download_page_images(volume_id: str, output_folder: str, max_pages: int = 50) -> bool:
+
+def _download_page_images(
+    volume_id: str, output_folder: str, max_pages: int = 50
+) -> bool:
     """Attempt to download page images from Google Books for full-view books.
-    
+
     For public domain books with full view, Google Books allows accessing
     individual page images via the books/content endpoint with pg parameter.
-    
+
     This function detects and rejects placeholder images that Google Books
     returns for unavailable pages (instead of 404 errors).
-    
+
     Args:
         volume_id: Google Books volume ID
         output_folder: Target directory
         max_pages: Maximum number of pages to download
-        
+
     Returns:
         True if any valid (non-placeholder) pages were downloaded
     """
@@ -345,17 +394,23 @@ def _download_page_images(volume_id: str, output_folder: str, max_pages: int = 5
     max_consecutive_placeholders = 3  # Stop if 3 consecutive placeholders
     consecutive_failures = 0
     max_consecutive_failures = 5  # Stop after 5 consecutive failures
-    
+
     for page_num in range(1, max_pages + 1):
         if consecutive_failures >= max_consecutive_failures:
-            logger.info("Google Books: Stopping page extraction after %d consecutive failures", max_consecutive_failures)
+            logger.info(
+                "Google Books: Stopping page extraction after %d consecutive failures",
+                max_consecutive_failures,
+            )
             break
-        
+
         if consecutive_placeholders >= max_consecutive_placeholders:
-            logger.info("Google Books: Stopping page extraction after %d consecutive placeholder images for %s", 
-                       max_consecutive_placeholders, volume_id)
+            logger.info(
+                "Google Books: Stopping page extraction after %d consecutive placeholder images for %s",
+                max_consecutive_placeholders,
+                volume_id,
+            )
             break
-        
+
         # Try different page URL formats
         # Format 1: PA{n} for page number
         # Format 2: PT{n} for page type (used in some books)
@@ -363,17 +418,20 @@ def _download_page_images(volume_id: str, output_folder: str, max_pages: int = 5
             f"https://books.google.com/books/content?id={urllib.parse.quote(volume_id)}&pg=PA{page_num}&img=1&zoom=3",
             f"https://books.google.com/books/content?id={urllib.parse.quote(volume_id)}&pg=PT{page_num}&img=1&zoom=3",
         ]
-        
+
         page_downloaded = False
         for url in page_urls:
             filename = f"google_{volume_id}_page_{page_num:04d}.jpg"
             downloaded_path = download_file(url, output_folder, filename)
-            
+
             if downloaded_path:
                 # Check if it's a placeholder image
                 if _is_placeholder_image(downloaded_path):
-                    logger.debug("Google Books: Detected placeholder image for page %d, removing: %s", 
-                               page_num, downloaded_path)
+                    logger.debug(
+                        "Google Books: Detected placeholder image for page %d, removing: %s",
+                        page_num,
+                        downloaded_path,
+                    )
                     try:
                         os.remove(downloaded_path)
                     except Exception:
@@ -381,7 +439,9 @@ def _download_page_images(volume_id: str, output_folder: str, max_pages: int = 5
                     placeholder_count += 1
                     consecutive_placeholders += 1
                     # Don't count as downloaded, but don't count as failure either
-                    page_downloaded = True  # Mark as "attempted" to avoid trying alternate URL
+                    page_downloaded = (
+                        True  # Mark as "attempted" to avoid trying alternate URL
+                    )
                     break
                 else:
                     # Valid page image
@@ -390,15 +450,22 @@ def _download_page_images(volume_id: str, output_folder: str, max_pages: int = 5
                     consecutive_failures = 0
                     page_downloaded = True
                     break
-        
+
         if not page_downloaded:
             consecutive_failures += 1
-    
+
     if valid_pages_downloaded > 0:
-        logger.info("Google Books: Downloaded %d valid page images for %s (rejected %d placeholders)", 
-                   valid_pages_downloaded, volume_id, placeholder_count)
+        logger.info(
+            "Google Books: Downloaded %d valid page images for %s (rejected %d placeholders)",
+            valid_pages_downloaded,
+            volume_id,
+            placeholder_count,
+        )
     elif placeholder_count > 0:
-        logger.warning("Google Books: All %d downloaded images were placeholders for %s - book may not have full preview",
-                      placeholder_count, volume_id)
-    
+        logger.warning(
+            "Google Books: All %d downloaded images were placeholders for %s - book may not have full preview",
+            placeholder_count,
+            volume_id,
+        )
+
     return valid_pages_downloaded > 0

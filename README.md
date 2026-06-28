@@ -1,4 +1,4 @@
-# ChronoDownloader v1.4.0
+# ChronoDownloader v1.5.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -151,6 +151,30 @@ variables or shell profile.
 - [Google Cloud Console](https://console.cloud.google.com/apis/library/books.googleapis.com)
 - [Anna's Archive](https://annas-archive.org) membership (optional,
   for fast downloads)
+
+### Remapping Key Environment Variables (optional)
+
+By default each provider reads its API key from the environment variable
+named above. To swap keys between runs without editing the environment,
+place an optional `api_keys.json` next to your `config.json` (the file
+resolved via `--config` or `CHRONO_CONFIG_PATH`). It maps each
+key-bearing provider to the name of the environment variable holding its
+key:
+
+```json
+{
+  "europeana": "EUROPEANA_API_KEY_2",
+  "dpla": "DPLA_API_KEY",
+  "ddb": "DDB_API_KEY",
+  "google_books": "GOOGLE_BOOKS_API_KEY",
+  "hathitrust": "HATHI_API_KEY",
+  "annas_archive": "ANNAS_ARCHIVE_API_KEY"
+}
+```
+
+The file is fully optional. A missing file or a missing provider entry
+falls back to the default variable name shown above, so existing setups
+are unaffected.
 
 ### Verify Installation
 
@@ -980,6 +1004,12 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.5.0** (28 June 2026) -- Add optional api_keys.json for per-provider
+    API-key environment-variable remapping (backward-compatible). The file sits
+    next to the resolved config.json and maps each key-bearing provider to the
+    name of the environment variable holding its key; a missing file or entry
+    falls back to the historical default name, so existing setups are unchanged.
 
 - **v1.4.0** (21 June 2026) -- Adopted pandas 3.x and dropped Python 3.10 support.
     Raised `requires-python` to `>=3.11` (pandas 3.0 requires 3.11+), relaxed the

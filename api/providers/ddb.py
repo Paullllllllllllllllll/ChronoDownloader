@@ -5,6 +5,7 @@ external providers (e.g., Heidelberg, Göttingen libraries) which have their own
 IIIF manifests. This connector attempts to construct IIIF manifest URLs from
 the provider's isShownAt links.
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,12 +13,20 @@ import os
 import re
 from typing import Any
 
-from ..core.config import get_max_pages, prefer_pdf_over_images
-from ..core.network import make_request
+from ..core.config import get_api_key_envvar, get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
-from ..iiif import download_iiif_renderings
-from ..iiif import extract_image_service_bases, download_one_from_service
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
+from ..core.network import make_request
+from ..iiif import (
+    download_iiif_renderings,
+    download_one_from_service,
+    extract_image_service_bases,
+)
+from ..model import (
+    SearchResult,
+    convert_to_searchresult,
+    resolve_item_field,
+    resolve_item_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,21 +35,28 @@ API_BASE_URL = "https://api.deutsche-digitale-bibliothek.de/"
 # Known patterns for IIIF manifest URLs from DDB providers
 IIIF_MANIFEST_PATTERNS = [
     # Heidelberg University Library
-    (r"digi\.ub\.uni-heidelberg\.de/diglit/([^/]+)", 
-     "https://digi.ub.uni-heidelberg.de/diglit/iiif/{}/manifest.json"),
+    (
+        r"digi\.ub\.uni-heidelberg\.de/diglit/([^/]+)",
+        "https://digi.ub.uni-heidelberg.de/diglit/iiif/{}/manifest.json",
+    ),
     # Göttingen State and University Library
-    (r"resolver\.sub\.uni-goettingen\.de/purl\?([^/&]+)",
-     "https://manifests.sub.uni-goettingen.de/iiif/presentation/{}/manifest"),
+    (
+        r"resolver\.sub\.uni-goettingen\.de/purl\?([^/&]+)",
+        "https://manifests.sub.uni-goettingen.de/iiif/presentation/{}/manifest",
+    ),
     # Bavarian State Library (BSB/MDZ)
-    (r"(?:mdz-nbn-resolving\.de|digitale-sammlungen\.de)/\w+/(bsb\d+)",
-     "https://api.digitale-sammlungen.de/iiif/presentation/v2/{}/manifest"),
+    (
+        r"(?:mdz-nbn-resolving\.de|digitale-sammlungen\.de)/\w+/(bsb\d+)",
+        "https://api.digitale-sammlungen.de/iiif/presentation/v2/{}/manifest",
+    ),
 ]
+
 
 def _extract_iiif_manifest_url(is_shown_at: str) -> str | None:
     """Try to construct IIIF manifest URL from isShownAt link."""
     if not is_shown_at:
         return None
-    
+
     for pattern, template in IIIF_MANIFEST_PATTERNS:
         match = re.search(pattern, is_shown_at)
         if match:
@@ -48,14 +64,18 @@ def _extract_iiif_manifest_url(is_shown_at: str) -> str | None:
             manifest_url = template.format(item_id)
             logger.debug("DDB: Constructed IIIF manifest URL: %s", manifest_url)
             return manifest_url
-    
+
     return None
+
 
 def _api_key() -> str | None:
     """Get DDB API key from environment."""
-    return os.getenv("DDB_API_KEY")
+    return os.getenv(get_api_key_envvar("ddb", "DDB_API_KEY"))
 
-def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_ddb(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search the DDB API for a title and optional creator."""
 
     key = _api_key()
@@ -88,19 +108,21 @@ def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> 
                 # Clean title by removing <match> tags
                 title = item.get("label") or item.get("title") or "N/A"
                 title = title.replace("<match>", "").replace("</match>", "")
-                
+
                 # Extract creator from view array if available
                 creator = ""
                 view = item.get("view", [])
                 if len(view) > 6:
                     creator = view[6]  # Provider/creator is often at index 6
-                
+
                 ddb_id = item.get("id")
                 raw = {
                     "title": title,
                     "creator": creator,
                     "id": ddb_id,
-                    "item_url": f"https://www.deutsche-digitale-bibliothek.de/item/{ddb_id}" if ddb_id else None,
+                    "item_url": f"https://www.deutsche-digitale-bibliothek.de/item/{ddb_id}"
+                    if ddb_id
+                    else None,
                     "thumbnail": item.get("thumbnail"),
                     "iiif_manifest": None,  # Will be fetched from item metadata
                 }
@@ -112,7 +134,10 @@ def search_ddb(title: str, creator: str | None = None, max_results: int = 3) -> 
 
     return results
 
-def download_ddb_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_ddb_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download IIIF manifest and page images for a DDB item.
 
     DDB aggregates items from many German institutions. This function:
@@ -140,7 +165,7 @@ def download_ddb_work(item_data: SearchResult | dict[str, Any], output_folder: s
     manifest_url = item_meta.get("iiifManifest") or resolve_item_field(
         item_data, "iiif_manifest", attr="iiif_manifest"
     )
-    
+
     # Extract isShownAt and isShownBy from EDM metadata
     is_shown_at = None
     is_shown_by = None
@@ -148,40 +173,47 @@ def download_ddb_work(item_data: SearchResult | dict[str, Any], output_folder: s
         edm = item_meta.get("edm", {})
         rdf = edm.get("RDF", {})
         agg = rdf.get("Aggregation", {})
-        
+
         is_shown_at_obj = agg.get("isShownAt", {})
         is_shown_by_obj = agg.get("isShownBy", {})
-        
+
         if isinstance(is_shown_at_obj, dict):
             is_shown_at = is_shown_at_obj.get("@resource")
         elif isinstance(is_shown_at_obj, str):
             is_shown_at = is_shown_at_obj
-            
+
         if isinstance(is_shown_by_obj, dict):
             is_shown_by = is_shown_by_obj.get("@resource")
         elif isinstance(is_shown_by_obj, str):
             is_shown_by = is_shown_by_obj
     except Exception:
         logger.debug("DDB: Could not extract isShownAt/isShownBy from EDM metadata")
-    
+
     # Try to construct IIIF manifest URL from isShownAt if not already found
     if not manifest_url and is_shown_at:
         manifest_url = _extract_iiif_manifest_url(is_shown_at)
         if manifest_url:
-            logger.info("DDB: Constructed IIIF manifest URL from isShownAt: %s", manifest_url)
-    
+            logger.info(
+                "DDB: Constructed IIIF manifest URL from isShownAt: %s", manifest_url
+            )
+
     manifest = None
     if manifest_url:
         logger.info("DDB: Fetching IIIF manifest: %s", manifest_url)
         manifest = make_request(manifest_url)
-    
+
     if not isinstance(manifest, dict):
         # Fall back to downloading isShownBy image directly
         if is_shown_by:
-            logger.info("DDB: No IIIF manifest, falling back to isShownBy image: %s", is_shown_by)
+            logger.info(
+                "DDB: No IIIF manifest, falling back to isShownBy image: %s",
+                is_shown_by,
+            )
             if download_file(is_shown_by, output_folder, f"ddb_{item_id}_preview"):
                 return True
-        logger.warning("DDB: Could not find IIIF manifest or fallback image for %s", item_id)
+        logger.warning(
+            "DDB: Could not find IIIF manifest or fallback image for %s", item_id
+        )
         return False
 
     # Save manifest
@@ -189,12 +221,19 @@ def download_ddb_work(item_data: SearchResult | dict[str, Any], output_folder: s
 
     # Prefer manifest-level renderings (PDF/EPUB) when available
     try:
-        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"ddb_{item_id}_")
+        renders = download_iiif_renderings(
+            manifest, output_folder, filename_prefix=f"ddb_{item_id}_"
+        )
         if renders > 0 and prefer_pdf_over_images():
-            logger.info("DDB: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            logger.info(
+                "DDB: downloaded %d rendering(s); skipping image downloads per config.",
+                renders,
+            )
             return True
     except Exception:
-        logger.exception("DDB: error while downloading manifest renderings for %s", item_id)
+        logger.exception(
+            "DDB: error while downloading manifest renderings for %s", item_id
+        )
 
     # Extract IIIF image service bases from v2 or v3
     image_service_bases = extract_image_service_bases(manifest)
@@ -207,8 +246,14 @@ def download_ddb_work(item_data: SearchResult | dict[str, Any], output_folder: s
 
     max_pages = get_max_pages("ddb")
     total = len(image_service_bases)
-    to_download = image_service_bases[:max_pages] if max_pages and max_pages > 0 else image_service_bases
-    logger.info("DDB: downloading %d/%d page images for %s", len(to_download), total, item_id)
+    to_download = (
+        image_service_bases[:max_pages]
+        if max_pages and max_pages > 0
+        else image_service_bases
+    )
+    logger.info(
+        "DDB: downloading %d/%d page images for %s", len(to_download), total, item_id
+    )
     ok_any = False
     for idx, svc in enumerate(to_download, start=1):
         try:

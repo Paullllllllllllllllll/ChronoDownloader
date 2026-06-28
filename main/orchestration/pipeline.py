@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from main.orchestration.scheduler import DownloadTask
 
-from api.core.config import get_config, get_resume_mode
+from api.core.config import get_api_key_envvar, get_config, get_resume_mode
 from api.core.context import (
     clear_all_context,
     clear_current_provider,
@@ -563,13 +563,19 @@ def _required_provider_envvars() -> dict[str, str]:
     """Return mapping of provider_key -> required environment variable name for API keys.
 
     Only providers listed here will be treated as requiring keys; others work without keys.
+    Each name is resolved through ``get_api_key_envvar`` so a remapping in
+    ``api_keys.json`` is honored; the built-in defaults below apply when no
+    mapping is present.
     """
-    return {
+    defaults = {
         "europeana": "EUROPEANA_API_KEY",
         "dpla": "DPLA_API_KEY",
         "ddb": "DDB_API_KEY",
         "google_books": "GOOGLE_BOOKS_API_KEY",
         # HathiTrust key is optional and not required for search (HATHI_API_KEY)
+    }
+    return {
+        pkey: get_api_key_envvar(pkey, default) for pkey, default in defaults.items()
     }
 
 

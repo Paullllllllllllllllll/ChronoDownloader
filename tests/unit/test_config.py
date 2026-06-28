@@ -1,12 +1,11 @@
 """Unit tests for api.core.config module."""
+
 from __future__ import annotations
 
 import json
 import os
 from typing import Any
 from unittest.mock import patch
-
-import pytest
 
 import api.core.config as config_module
 from api.core.config import (
@@ -25,7 +24,7 @@ from api.core.config import (
 
 class TestGetConfig:
     """Tests for get_config function."""
-    
+
     def test_returns_dict(self, config_file: str) -> None:
         """Test that get_config returns a dictionary."""
         with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_file}):
@@ -56,7 +55,9 @@ class TestGetConfig:
             result2 = get_config()
             assert result1 is result2
 
-    def test_force_reload(self, config_file: str, sample_config: dict[str, Any]) -> None:
+    def test_force_reload(
+        self, config_file: str, sample_config: dict[str, Any]
+    ) -> None:
         """Test that force_reload refreshes the cache."""
         with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_file}):
             config_module._CONFIG_CACHE = {"old": "data"}
@@ -78,18 +79,22 @@ class TestGetConfig:
 
 class TestGetProviderSetting:
     """Tests for get_provider_setting function."""
-    
+
     def test_retrieves_existing_setting(self, mock_config: dict[str, Any]) -> None:
         """Test retrieving an existing provider setting."""
         result = get_provider_setting("gallica", "max_pages")
         assert result == 500
 
-    def test_returns_default_for_missing_setting(self, mock_config: dict[str, Any]) -> None:
+    def test_returns_default_for_missing_setting(
+        self, mock_config: dict[str, Any]
+    ) -> None:
         """Test that default is returned for missing setting."""
         result = get_provider_setting("gallica", "nonexistent", default=42)
         assert result == 42
 
-    def test_returns_default_for_missing_provider(self, mock_config: dict[str, Any]) -> None:
+    def test_returns_default_for_missing_provider(
+        self, mock_config: dict[str, Any]
+    ) -> None:
         """Test that default is returned for missing provider."""
         result = get_provider_setting("unknown_provider", "max_pages", default=100)
         assert result == 100
@@ -102,7 +107,7 @@ class TestGetProviderSetting:
 
 class TestGetDownloadConfig:
     """Tests for get_download_config function."""
-    
+
     def test_returns_download_section(self, mock_config: dict[str, Any]) -> None:
         """Test that download section is returned."""
         result = get_download_config()
@@ -128,7 +133,7 @@ class TestGetDownloadConfig:
 
 class TestPreferPdfOverImages:
     """Tests for prefer_pdf_over_images function."""
-    
+
     def test_returns_true_by_default(self) -> None:
         """Test that True is returned by default."""
         with patch("api.core.config.get_config", return_value={}):
@@ -141,7 +146,7 @@ class TestPreferPdfOverImages:
 
 class TestOverwriteExisting:
     """Tests for overwrite_existing function."""
-    
+
     def test_returns_false_by_default(self) -> None:
         """Test that False is returned by default."""
         with patch("api.core.config.get_config", return_value={}):
@@ -150,7 +155,7 @@ class TestOverwriteExisting:
 
 class TestIncludeMetadata:
     """Tests for include_metadata function."""
-    
+
     def test_returns_true_by_default(self) -> None:
         """Test that True is returned by default."""
         with patch("api.core.config.get_config", return_value={}):
@@ -159,7 +164,7 @@ class TestIncludeMetadata:
 
 class TestGetNetworkConfig:
     """Tests for get_network_config function."""
-    
+
     def test_returns_dict(self, mock_config: dict[str, Any]) -> None:
         """Test that a dictionary is returned."""
         result = get_network_config("internet_archive")
@@ -197,7 +202,7 @@ class TestGetNetworkConfig:
 
 class TestGetDownloadLimits:
     """Tests for get_download_limits function."""
-    
+
     def test_returns_limits_section(self, mock_config: dict[str, Any]) -> None:
         """Test that download_limits section is returned."""
         result = get_download_limits()
@@ -214,7 +219,7 @@ class TestGetDownloadLimits:
 
 class TestGetMaxPages:
     """Tests for get_max_pages function."""
-    
+
     def test_returns_configured_value(self, mock_config: dict[str, Any]) -> None:
         """Test that configured max_pages is returned."""
         result = get_max_pages("gallica")
@@ -228,7 +233,7 @@ class TestGetMaxPages:
 
 class TestGetResumeMode:
     """Tests for get_resume_mode function."""
-    
+
     def test_returns_default(self) -> None:
         """Test that default resume mode is returned."""
         with patch("api.core.config.get_config", return_value={}):
@@ -239,3 +244,69 @@ class TestGetResumeMode:
         """Test that configured value is returned."""
         result = get_resume_mode()
         assert result == "skip_completed"
+
+
+def _write_json(path: str, payload: dict[str, Any]) -> None:
+    """Write a JSON payload to path."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+class TestGetApiKeyEnvvar:
+    """Tests for get_api_key_envvar and the api_keys.json loader."""
+
+    def test_returns_mapped_name(self, temp_dir: str) -> None:
+        """Mapped env var name is returned when present in api_keys.json."""
+        config_path = os.path.join(temp_dir, "config.json")
+        _write_json(config_path, {})
+        _write_json(
+            os.path.join(temp_dir, "api_keys.json"),
+            {"europeana": "EUROPEANA_API_KEY_2"},
+        )
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}):
+            config_module._API_KEYS_CACHE = None
+            result = config_module.get_api_key_envvar("europeana", "EUROPEANA_API_KEY")
+            assert result == "EUROPEANA_API_KEY_2"
+
+    def test_returns_default_when_provider_absent(self, temp_dir: str) -> None:
+        """Default is returned when the provider has no mapping entry."""
+        config_path = os.path.join(temp_dir, "config.json")
+        _write_json(config_path, {})
+        _write_json(
+            os.path.join(temp_dir, "api_keys.json"),
+            {"dpla": "DPLA_API_KEY_2"},
+        )
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}):
+            config_module._API_KEYS_CACHE = None
+            result = config_module.get_api_key_envvar("europeana", "EUROPEANA_API_KEY")
+            assert result == "EUROPEANA_API_KEY"
+
+    def test_returns_default_when_value_empty(self, temp_dir: str) -> None:
+        """Default is returned when the mapped value is empty."""
+        config_path = os.path.join(temp_dir, "config.json")
+        _write_json(config_path, {})
+        _write_json(
+            os.path.join(temp_dir, "api_keys.json"),
+            {"europeana": "   "},
+        )
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}):
+            config_module._API_KEYS_CACHE = None
+            result = config_module.get_api_key_envvar("europeana", "EUROPEANA_API_KEY")
+            assert result == "EUROPEANA_API_KEY"
+
+    def test_default_used_when_file_absent(self, temp_dir: str) -> None:
+        """Default name is returned when api_keys.json is absent."""
+        config_path = os.path.join(temp_dir, "config.json")
+        _write_json(config_path, {})
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}):
+            config_module._API_KEYS_CACHE = None
+            result = config_module.get_api_key_envvar("europeana", "EUROPEANA_API_KEY")
+            assert result == "EUROPEANA_API_KEY"
+
+    def test_loader_returns_empty_when_absent(self, temp_dir: str) -> None:
+        """The api_keys.json loader returns {} when the file is absent."""
+        config_path = os.path.join(temp_dir, "config.json")
+        _write_json(config_path, {})
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}):
+            config_module._API_KEYS_CACHE = None
+            assert config_module.get_api_keys_config(force_reload=True) == {}

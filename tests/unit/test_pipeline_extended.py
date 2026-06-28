@@ -1,27 +1,24 @@
 """Extended tests for main.pipeline module — core orchestration."""
+
 from __future__ import annotations
 
+import json
 import os
-from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+import api.core.config as config_module
 from api.model import QuotaDeferredException, SearchResult
 from main.orchestration.pipeline import (
     _compute_selected_source_id,
     _get_selection_config,
-    _persist_work_json,
-    _PreparedWork,
     _provider_order,
     _required_provider_envvars,
     _run_download_with_fallback,
     execute_download,
     filter_enabled_providers_for_keys,
     load_enabled_apis,
-    search_and_select,
 )
 
 
@@ -46,12 +43,18 @@ def _make_sr(
 def _make_provider_tuple(
     key: str = "ia", name: str = "Internet Archive"
 ) -> tuple[str, MagicMock, MagicMock, str]:
-    return (key, MagicMock(name=f"search_{key}"), MagicMock(name=f"download_{key}"), name)
+    return (
+        key,
+        MagicMock(name=f"search_{key}"),
+        MagicMock(name=f"download_{key}"),
+        name,
+    )
 
 
 # ============================================================================
 # _compute_selected_source_id
 # ============================================================================
+
 
 class TestComputeSelectedSourceId:
     """Tests for source ID computation."""
@@ -78,6 +81,7 @@ class TestComputeSelectedSourceId:
 # _get_selection_config
 # ============================================================================
 
+
 class TestGetSelectionConfigExtended:
     """Extended tests for selection configuration."""
 
@@ -93,9 +97,12 @@ class TestGetSelectionConfigExtended:
         assert sel["year_tolerance"] == 2
         assert sel["max_parallel_searches"] == 1
 
-    @patch("main.orchestration.pipeline.get_config", return_value={
-        "selection": {"strategy": "sequential_first_hit", "min_title_score": 90}
-    })
+    @patch(
+        "main.orchestration.pipeline.get_config",
+        return_value={
+            "selection": {"strategy": "sequential_first_hit", "min_title_score": 90}
+        },
+    )
     def test_merges_with_config(self, mock_cfg: MagicMock) -> None:
         sel = _get_selection_config()
         assert sel["strategy"] == "sequential_first_hit"
@@ -106,6 +113,7 @@ class TestGetSelectionConfigExtended:
 # ============================================================================
 # _provider_order
 # ============================================================================
+
 
 class TestProviderOrderExtended:
     """Extended tests for provider ordering."""
@@ -136,6 +144,7 @@ class TestProviderOrderExtended:
 # _required_provider_envvars
 # ============================================================================
 
+
 class TestRequiredProviderEnvvars:
     """Tests for provider API key requirements."""
 
@@ -148,10 +157,25 @@ class TestRequiredProviderEnvvars:
     def test_europeana_requires_key(self) -> None:
         assert "EUROPEANA_API_KEY" in _required_provider_envvars()["europeana"]
 
+    def test_honors_remapped_envvar(self, temp_dir: str) -> None:
+        """A remapped env var name from api_keys.json is reflected."""
+        config_path = os.path.join(temp_dir, "config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        with open(os.path.join(temp_dir, "api_keys.json"), "w", encoding="utf-8") as f:
+            json.dump({"europeana": "EUROPEANA_API_KEY_2"}, f)
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}):
+            config_module._API_KEYS_CACHE = None
+            result = _required_provider_envvars()
+            assert result["europeana"] == "EUROPEANA_API_KEY_2"
+            # Unmapped providers keep their default name.
+            assert result["dpla"] == "DPLA_API_KEY"
+
 
 # ============================================================================
 # filter_enabled_providers_for_keys
 # ============================================================================
+
 
 class TestFilterEnabledProvidersForKeysExtended:
     """Extended tests for API key filtering."""
@@ -175,10 +199,39 @@ class TestFilterEnabledProvidersForKeysExtended:
         result = filter_enabled_providers_for_keys([p])
         assert len(result) == 1
 
+    def test_gate_honors_remapped_name(self, temp_dir: str) -> None:
+        """The gate keeps a provider when its remapped env var is set."""
+        config_path = os.path.join(temp_dir, "config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        with open(os.path.join(temp_dir, "api_keys.json"), "w", encoding="utf-8") as f:
+            json.dump({"europeana": "EUROPEANA_API_KEY_2"}, f)
+        env = {"CHRONO_CONFIG_PATH": config_path, "EUROPEANA_API_KEY_2": "k"}
+        with patch.dict(os.environ, env, clear=True):
+            config_module._API_KEYS_CACHE = None
+            p = _make_provider_tuple("europeana", "Europeana")
+            result = filter_enabled_providers_for_keys([p])
+            assert len(result) == 1
+
+    def test_gate_checks_only_remapped_name(self, temp_dir: str) -> None:
+        """When remapped, setting only the old default name filters it out."""
+        config_path = os.path.join(temp_dir, "config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        with open(os.path.join(temp_dir, "api_keys.json"), "w", encoding="utf-8") as f:
+            json.dump({"europeana": "EUROPEANA_API_KEY_2"}, f)
+        env = {"CHRONO_CONFIG_PATH": config_path, "EUROPEANA_API_KEY": "k"}
+        with patch.dict(os.environ, env, clear=True):
+            config_module._API_KEYS_CACHE = None
+            p = _make_provider_tuple("europeana", "Europeana")
+            result = filter_enabled_providers_for_keys([p])
+            assert len(result) == 0
+
 
 # ============================================================================
 # _run_download_with_fallback
 # ============================================================================
+
 
 class TestRunDownloadWithFallback:
     """Tests for download-with-fallback logic."""
@@ -306,6 +359,7 @@ class TestRunDownloadWithFallback:
 # execute_download
 # ============================================================================
 
+
 class TestExecuteDownload:
     """Tests for download task execution."""
 
@@ -352,6 +406,7 @@ class TestExecuteDownload:
 # load_enabled_apis
 # ============================================================================
 
+
 class TestLoadEnabledApisExtended:
     """Extended tests for provider loading."""
 
@@ -369,6 +424,7 @@ class TestLoadEnabledApisExtended:
 
     def test_no_enabled_returns_empty(self, tmp_path: Path) -> None:
         import json
+
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps({"providers": {"internet_archive": False}}))
         result = load_enabled_apis(str(config_file))

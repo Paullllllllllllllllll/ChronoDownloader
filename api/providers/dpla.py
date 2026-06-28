@@ -1,26 +1,39 @@
 """Connector for the Digital Public Library of America (DPLA) API."""
+
 from __future__ import annotations
 
 import logging
 import os
 from typing import Any
 
-from ..core.config import get_max_pages, prefer_pdf_over_images
-from ..core.network import make_request
+from ..core.config import get_api_key_envvar, get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
-from ..iiif import download_iiif_renderings
-from ..iiif import extract_image_service_bases, download_one_from_service
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
+from ..core.network import make_request
+from ..iiif import (
+    download_iiif_renderings,
+    download_one_from_service,
+    extract_image_service_bases,
+)
+from ..model import (
+    SearchResult,
+    convert_to_searchresult,
+    resolve_item_field,
+    resolve_item_id,
+)
 
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://api.dp.la/v2/"
 
+
 def _api_key() -> str | None:
     """Get DPLA API key from environment."""
-    return os.getenv("DPLA_API_KEY")
+    return os.getenv(get_api_key_envvar("dpla", "DPLA_API_KEY"))
 
-def search_dpla(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_dpla(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search the DPLA API for a title and optional creator."""
 
     key = _api_key()
@@ -73,7 +86,12 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
                 return None
 
             iiif_manifest = _extract_manifest(doc) if isinstance(doc, dict) else None
-            src = doc.get("sourceResource", {}) if isinstance(doc, dict) and isinstance(doc.get("sourceResource", {}), dict) else {}
+            src = (
+                doc.get("sourceResource", {})
+                if isinstance(doc, dict)
+                and isinstance(doc.get("sourceResource", {}), dict)
+                else {}
+            )
             title_text = src.get("title")
             if isinstance(title_text, list):
                 title_text = title_text[0] if title_text else "N/A"
@@ -97,7 +115,10 @@ def search_dpla(title: str, creator: str | None = None, max_results: int = 3) ->
 
     return results
 
-def download_dpla_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_dpla_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download metadata, IIIF manifest, and page images for a DPLA item (when available)."""
 
     item_id = resolve_item_id(item_data)
@@ -123,6 +144,7 @@ def download_dpla_work(item_data: SearchResult | dict[str, Any], output_folder: 
             break
     if not manifest_url:
         hv = item_details.get("hasView")
+
         def _from_hv(hv: Any) -> str | None:
             if isinstance(hv, list):
                 for it in hv:
@@ -139,12 +161,17 @@ def download_dpla_work(item_data: SearchResult | dict[str, Any], output_folder: 
                     if isinstance(u, str) and "manifest" in u and "iiif" in u:
                         return u
             return None
+
         manifest_url = _from_hv(hv)
     # From search payload
     if not manifest_url:
-        manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")
+        manifest_url = resolve_item_field(
+            item_data, "iiif_manifest", attr="iiif_manifest"
+        )
 
-    if manifest_url and not (isinstance(manifest_url, str) and "manifest" in manifest_url):
+    if manifest_url and not (
+        isinstance(manifest_url, str) and "manifest" in manifest_url
+    ):
         manifest_url = None
 
     ok_any = False
@@ -155,12 +182,19 @@ def download_dpla_work(item_data: SearchResult | dict[str, Any], output_folder: 
 
             # Prefer manifest-level renderings (PDF/EPUB) when available
             try:
-                renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"dpla_{item_id}_")
+                renders = download_iiif_renderings(
+                    manifest, output_folder, filename_prefix=f"dpla_{item_id}_"
+                )
                 if renders > 0 and prefer_pdf_over_images():
-                    logger.info("DPLA: downloaded %d rendering(s); skipping image downloads per config.", renders)
+                    logger.info(
+                        "DPLA: downloaded %d rendering(s); skipping image downloads per config.",
+                        renders,
+                    )
                     return True
             except Exception:
-                logger.exception("DPLA: error while downloading manifest renderings for %s", item_id)
+                logger.exception(
+                    "DPLA: error while downloading manifest renderings for %s", item_id
+                )
 
             # Extract IIIF Image API service bases (v2/v3)
             service_bases = extract_image_service_bases(manifest)
@@ -169,8 +203,17 @@ def download_dpla_work(item_data: SearchResult | dict[str, Any], output_folder: 
                 # Use shared helper to try full-size image candidates per canvas
                 max_pages = get_max_pages("dpla")
                 total = len(service_bases)
-                to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
-                logger.info("DPLA: downloading %d/%d page images for %s", len(to_download), total, item_id)
+                to_download = (
+                    service_bases[:max_pages]
+                    if max_pages and max_pages > 0
+                    else service_bases
+                )
+                logger.info(
+                    "DPLA: downloading %d/%d page images for %s",
+                    len(to_download),
+                    total,
+                    item_id,
+                )
                 for idx, svc in enumerate(to_download, start=1):
                     try:
                         fname = f"dpla_{item_id}_p{idx:05d}.jpg"
@@ -179,9 +222,13 @@ def download_dpla_work(item_data: SearchResult | dict[str, Any], output_folder: 
                         else:
                             logger.warning("Failed to download DPLA image from %s", svc)
                     except Exception:
-                        logger.exception("Error downloading DPLA image for %s from %s", item_id, svc)
+                        logger.exception(
+                            "Error downloading DPLA image for %s from %s", item_id, svc
+                        )
             else:
-                logger.info("No IIIF image services found in DPLA manifest for %s", item_id)
+                logger.info(
+                    "No IIIF image services found in DPLA manifest for %s", item_id
+                )
 
     if ok_any:
         return True
