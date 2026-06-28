@@ -1,4 +1,4 @@
-# ChronoDownloader v1.5.0
+# ChronoDownloader v1.6.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -156,10 +156,11 @@ variables or shell profile.
 
 By default each provider reads its API key from the environment variable
 named above. To swap keys between runs without editing the environment,
-place an optional `api_keys.json` next to your `config.json` (the file
-resolved via `--config` or `CHRONO_CONFIG_PATH`). It maps each
-key-bearing provider to the name of the environment variable holding its
-key:
+place an `api_keys.json` next to your `config.json` (the file resolved
+via `--config` or `CHRONO_CONFIG_PATH`). It maps each key-bearing
+provider to the name of the environment variable holding its key. A
+tracked `api_keys.example.json` ships with the default mapping as a
+starting template; copy it to `api_keys.json` to customize.
 
 ```json
 {
@@ -367,9 +368,21 @@ optional in interactive).
 
 ## Configuration
 
-ChronoDownloader uses a JSON configuration file (`config.json` by
-default). Override with `--config` or the `CHRONO_CONFIG_PATH`
-environment variable.
+ChronoDownloader ships a tracked template `config.example.json` with
+conservative defaults. Your personal `config.json` is gitignored and
+machine-local. The loader resolves them in this order:
+
+1. `config.json` at the path set by `--config` or `CHRONO_CONFIG_PATH`
+   (or `config.json` in the current directory when neither is set).
+2. `config.example.json` in the same directory, if `config.json` is
+   absent (logs one INFO line with copy instructions).
+3. `FileNotFoundError` when neither file is present.
+
+To customize: copy `config.example.json` to `config.json` and edit it.
+A fresh clone runs on the example defaults without any setup.
+
+Override the config file at runtime with `--config` or the
+`CHRONO_CONFIG_PATH` environment variable.
 
 ### 1. General
 
@@ -1004,6 +1017,17 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.6.0** (28 June 2026) -- Move config.json to a user-local
+    example/real split: a tracked `config.example.json` template ships
+    with conservative default concurrency (3 parallel downloads, 2
+    default provider slots), `config.json` is now gitignored and
+    user-local, and the loader falls back to `config.example.json`
+    automatically when `config.json` is absent, printing a one-line
+    message. A fresh clone is immediately runnable on the example
+    defaults; copy `config.example.json` to `config.json` to customize.
+    `api_keys.example.json` ships alongside it with the default
+    provider-to-env-var mapping.
 
 - **v1.5.0** (28 June 2026) -- Add optional api_keys.json for per-provider
     API-key environment-variable remapping (backward-compatible). The file sits

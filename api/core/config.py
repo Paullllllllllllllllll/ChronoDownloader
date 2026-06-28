@@ -27,25 +27,46 @@ _API_KEYS_CACHE: dict[str, Any] | None = None
 def get_config(force_reload: bool = False) -> dict[str, Any]:
     """Load project configuration JSON.
 
-    Looks for the path in CHRONO_CONFIG_PATH env var; falls back to 'config.json' in CWD.
+    Looks for the path in CHRONO_CONFIG_PATH env var; falls back to
+    ``config.json`` in the current working directory.  When the resolved
+    path is absent, tries ``config.example.json`` in the same directory
+    and logs an INFO message directing the user to copy and customize it.
+    Raises ``FileNotFoundError`` when neither file is present.
     Caches the result unless force_reload is True.
 
     Returns:
-        Configuration dictionary (empty dict if file not found or invalid)
+        Configuration dictionary
     """
     global _CONFIG_CACHE
     if _CONFIG_CACHE is not None and not force_reload:
         return _CONFIG_CACHE
 
-    path = os.environ.get("CHRONO_CONFIG_PATH", "config.json")
+    config_path = os.environ.get("CHRONO_CONFIG_PATH", "config.json")
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    example_path = os.path.join(config_dir, "config.example.json")
+
     try:
-        if os.path.exists(path):
-            with open(path, encoding="utf-8") as f:
+        if os.path.exists(config_path):
+            with open(config_path, encoding="utf-8") as f:
+                _CONFIG_CACHE = json.load(f) or {}
+        elif os.path.exists(example_path):
+            logger.info(
+                "config.json not found; using bundled defaults from "
+                "config.example.json. Copy it to config.json and edit "
+                "it to set your own values."
+            )
+            with open(example_path, encoding="utf-8") as f:
                 _CONFIG_CACHE = json.load(f) or {}
         else:
-            _CONFIG_CACHE = {}
+            raise FileNotFoundError(
+                "No configuration file found. Expected config.json at "
+                f"{config_path!r}. Copy config.example.json to config.json "
+                "and edit it to set your paths and preferences."
+            )
+    except FileNotFoundError:
+        raise
     except Exception as e:
-        logger.error("Failed to load config from %s: %s", path, e)
+        logger.error("Failed to load config from %s: %s", config_path, e)
         _CONFIG_CACHE = {}
 
     return _CONFIG_CACHE
@@ -54,12 +75,12 @@ def get_config(force_reload: bool = False) -> dict[str, Any]:
 def get_api_keys_config(force_reload: bool = False) -> dict[str, Any]:
     """Load the optional API-key environment-variable mapping.
 
-    Looks for an ``api_keys.json`` file in the same directory as the resolved
-    configuration path (``CHRONO_CONFIG_PATH`` or ``config.json``). The file is
-    a flat object mapping provider keys to the names of the environment
-    variables that hold their API keys, letting the user swap keys between runs
-    without touching the environment. Caches the result unless force_reload is
-    True.
+    Looks for an ``api_keys.json`` file in the same directory as the
+    resolved configuration path (``CHRONO_CONFIG_PATH`` or ``config.json``).
+    When ``api_keys.json`` is absent, tries ``api_keys.example.json`` in the
+    same directory and logs an INFO message.  When neither file exists,
+    returns an empty dict (the file is fully optional).
+    Caches the result unless force_reload is True.
 
     Returns:
         Mapping of provider key to env var name (empty dict if absent/invalid)
@@ -69,10 +90,21 @@ def get_api_keys_config(force_reload: bool = False) -> dict[str, Any]:
         return _API_KEYS_CACHE
 
     config_path = os.environ.get("CHRONO_CONFIG_PATH", "config.json")
-    path = os.path.join(os.path.dirname(config_path), "api_keys.json")
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    path = os.path.join(config_dir, "api_keys.json")
+    example_path = os.path.join(config_dir, "api_keys.example.json")
+
     try:
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
+                _API_KEYS_CACHE = json.load(f) or {}
+        elif os.path.exists(example_path):
+            logger.info(
+                "api_keys.json not found; using bundled defaults from "
+                "api_keys.example.json. Copy it to api_keys.json and "
+                "edit it to remap provider API-key environment variables."
+            )
+            with open(example_path, encoding="utf-8") as f:
                 _API_KEYS_CACHE = json.load(f) or {}
         else:
             _API_KEYS_CACHE = {}

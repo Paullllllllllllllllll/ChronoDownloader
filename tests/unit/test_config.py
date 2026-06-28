@@ -7,6 +7,8 @@ import os
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 import api.core.config as config_module
 from api.core.config import (
     get_config,
@@ -39,13 +41,14 @@ class TestGetConfig:
             result = get_config(force_reload=True)
             assert "providers" in result
 
-    def test_returns_empty_dict_for_missing_file(self, temp_dir: str) -> None:
-        """Test that missing file returns empty dict."""
+    def test_raises_for_missing_file_and_no_example(self, temp_dir: str) -> None:
+        """FileNotFoundError is raised when neither config.json nor
+        config.example.json exists beside the resolved path."""
         missing_path = os.path.join(temp_dir, "nonexistent.json")
         with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": missing_path}):
             config_module._CONFIG_CACHE = None
-            result = get_config(force_reload=True)
-            assert result == {}
+            with pytest.raises(FileNotFoundError):
+                get_config(force_reload=True)
 
     def test_caches_result(self, config_file: str) -> None:
         """Test that config is cached."""

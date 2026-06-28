@@ -41,7 +41,8 @@ Thumbs.db
 index.csv
 sampled_books.csv
 
-# Local configs
+# Local configs (real user config; example/template is tracked as config.example.json)
+/config.json
 *.local.json
 /scripts/sync_sampled_to_index.py
 /essential_monographies_1.csv

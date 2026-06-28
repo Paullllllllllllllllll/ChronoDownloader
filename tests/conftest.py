@@ -349,16 +349,26 @@ def reset_context() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def reset_config_cache() -> Generator[None, None, None]:
-    """Reset config and api-keys caches before each test."""
+    """Reset config and api-keys caches and CHRONO_CONFIG_PATH before each test.
+
+    Also saves and restores the CHRONO_CONFIG_PATH environment variable so that
+    tests which set it directly (without patch.dict) cannot leak it to
+    subsequent tests.
+    """
     import api.core.config as config_module
 
     original_cache = config_module._CONFIG_CACHE
     original_api_keys = config_module._API_KEYS_CACHE
+    original_env_path = os.environ.get("CHRONO_CONFIG_PATH")
     config_module._CONFIG_CACHE = None
     config_module._API_KEYS_CACHE = None
     yield
     config_module._CONFIG_CACHE = original_cache
     config_module._API_KEYS_CACHE = original_api_keys
+    if original_env_path is None:
+        os.environ.pop("CHRONO_CONFIG_PATH", None)
+    else:
+        os.environ["CHRONO_CONFIG_PATH"] = original_env_path
 
 
 @pytest.fixture(autouse=True)

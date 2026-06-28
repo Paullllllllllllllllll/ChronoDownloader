@@ -1,8 +1,8 @@
 {
   "general": {
     "interactive_mode": true,
-    "default_output_dir": "downloaded_works",
-    "default_csv_path": "sample_works.csv"
+    "default_output_dir": "",
+    "default_csv_path": ""
   },
   "providers": {
     "internet_archive": true,
@@ -229,25 +229,25 @@
     "save_disallowed_to_metadata": true,
     "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects", "resume_from_csv"],
     "_resume_mode_note": "resume_from_csv uses the retrievable column in the source CSV for resume logic",
-    "max_parallel_downloads": 10,
+    "max_parallel_downloads": 3,
     "provider_concurrency": {
-      "default": 5,
-      "annas_archive": 3,
+      "default": 2,
+      "annas_archive": 1,
       "bnf_gallica": 1,
       "google_books": 1,
-      "internet_archive": 3,
-      "mdz": 2,
-      "wellcome": 2,
+      "internet_archive": 2,
+      "mdz": 1,
+      "wellcome": 1,
       "slub": 1,
       "e_rara": 1,
-      "sbb_digital": 2
+      "sbb_digital": 1
     },
     "queue_size": 100,
     "worker_timeout_s": 600
   },
   "selection": {
     "strategy": "collect_and_select",
-    "max_parallel_searches": 10,
+    "max_parallel_searches": 3,
     "provider_hierarchy": [
       "mdz",
       "slub",
