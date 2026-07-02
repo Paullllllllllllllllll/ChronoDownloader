@@ -1,14 +1,13 @@
 """Tests for api.download_helpers module — shared download patterns."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-
 # ============================================================================
 # download_page_images
 # ============================================================================
+
 
 class TestDownloadPageImages:
     """Tests for page image download loop."""
@@ -132,6 +131,7 @@ class TestDownloadPageImages:
 # ============================================================================
 # download_iiif_manifest_and_images
 # ============================================================================
+
 
 class TestDownloadIIIFManifestAndImages:
     """Tests for manifest-level download orchestration."""
@@ -264,6 +264,7 @@ class TestDownloadIIIFManifestAndImages:
 # ============================================================================
 # try_pdf_first_then_images
 # ============================================================================
+
 
 class TestTryPdfFirstThenImages:
     """Tests for PDF-first download with IIIF fallback."""

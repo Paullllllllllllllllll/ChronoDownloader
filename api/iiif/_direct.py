@@ -16,6 +16,7 @@ Supported IIIF manifest URL patterns (major digital libraries):
 - e-rara: https://www.e-rara.ch/i3f/v20/{id}/manifest
 - SLUB Dresden: https://digital.slub-dresden.de/data/kitodo/{id}/manifest.json
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -77,11 +78,7 @@ def is_iiif_manifest_url(url: str) -> bool:
     if not url.startswith(("http://", "https://")):
         return False
 
-    for pattern in _IIIF_PATTERNS_COMPILED:
-        if pattern.search(url):
-            return True
-
-    return False
+    return any(pattern.search(url) for pattern in _IIIF_PATTERNS_COMPILED)
 
 
 def detect_provider_from_url(url: str) -> tuple[str, str]:
@@ -280,6 +277,9 @@ def download_from_iiif_manifest(
         "item_url": manifest_url,
         "item_id": item_id,
         "error": None,
+        "status": "failed",
+        "pages_expected": None,
+        "pages_downloaded": None,
     }
 
     config = get_config()
@@ -316,7 +316,9 @@ def download_from_iiif_manifest(
                 logger.info(
                     "Skipping image downloads per config (prefer PDF over images)."
                 )
+                # A PDF rendering represents the whole work; not page-based.
                 result["success"] = True
+                result["status"] = "completed"
                 return result
     except Exception as e:
         logger.exception("Error downloading manifest renderings: %s", e)
@@ -327,6 +329,7 @@ def download_from_iiif_manifest(
         logger.info("No IIIF image services found in manifest")
         if any_downloaded:
             result["success"] = True
+            result["status"] = "completed"
         else:
             result["error"] = "No downloadable content found in manifest"
         return result
@@ -336,6 +339,8 @@ def download_from_iiif_manifest(
     to_download = (
         service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
     )
+    pages_expected = len(to_download)
+    pages_downloaded = 0
 
     logger.info(
         "Downloading %d/%d page images for %s",
@@ -357,14 +362,34 @@ def download_from_iiif_manifest(
             fname = f"{prefix}_p{idx:05d}.jpg"
             if download_one_from_service(svc, output_folder, fname):
                 any_downloaded = True
+                pages_downloaded += 1
             else:
                 logger.warning("Failed to download page %d from %s", idx, svc)
         except Exception as e:
             logger.exception("Error downloading page %d: %s", idx, e)
 
+    # Record expected-vs-downloaded page counts. The work is only "completed"
+    # when every expected page arrived; any gap is recorded as "partial" so the
+    # completeness contract holds and the work can be re-downloaded later.
+    result["pages_expected"] = pages_expected
+    result["pages_downloaded"] = pages_downloaded
     result["success"] = any_downloaded
     if not any_downloaded:
         result["error"] = "No images could be downloaded"
+        result["status"] = "failed"
+    elif pages_downloaded < pages_expected:
+        result["status"] = "partial"
+        result["error"] = (
+            f"Incomplete: downloaded {pages_downloaded} of {pages_expected} pages"
+        )
+        logger.warning(
+            "Direct IIIF partial for %s: %d/%d pages downloaded",
+            item_id,
+            pages_downloaded,
+            pages_expected,
+        )
+    else:
+        result["status"] = "completed"
 
     return result
 

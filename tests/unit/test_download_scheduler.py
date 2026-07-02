@@ -1,9 +1,9 @@
 """Unit tests for main.download_scheduler module."""
+
 from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import Future
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +12,7 @@ import pytest
 
 class TestProviderSemaphoreManager:
     """Tests for ProviderSemaphoreManager class."""
-    
+
     def test_default_concurrency(self) -> None:
         """Test default concurrency limit."""
         from main.orchestration.scheduler import ProviderSemaphoreManager
@@ -61,7 +61,7 @@ class TestProviderSemaphoreManager:
 
 class TestDownloadTask:
     """Tests for DownloadTask dataclass."""
-    
+
     def test_basic_creation(self) -> None:
         """Test basic DownloadTask creation."""
         from main.orchestration.scheduler import DownloadTask
@@ -114,7 +114,7 @@ class TestDownloadTask:
 
 class TestDownloadScheduler:
     """Tests for DownloadScheduler class."""
-    
+
     def test_initialization(self) -> None:
         """Test scheduler initialization."""
         from main.orchestration.scheduler import DownloadScheduler
@@ -163,7 +163,7 @@ class TestDownloadScheduler:
             time.sleep(0.5)
             return True
 
-        future = scheduler.submit(task, slow_download)
+        scheduler.submit(task, slow_download)
 
         assert scheduler.pending_count >= 1 or scheduler.completed_count >= 1
 
@@ -227,7 +227,7 @@ class TestDownloadScheduler:
 
 class TestGetParallelDownloadConfig:
     """Tests for get_parallel_download_config function."""
-    
+
     def test_returns_dict(self) -> None:
         """Test that function returns a dictionary."""
         from main.orchestration.scheduler import get_parallel_download_config

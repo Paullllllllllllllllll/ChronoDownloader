@@ -8,6 +8,7 @@ Improved to offer feature parity with CLI mode, including:
 - Detailed provider and settings information
 - Comprehensive session summaries
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,21 +25,20 @@ if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from api.core.config import get_config, get_download_config
-from api.providers import PROVIDERS
 from api.iiif import is_iiif_manifest_url
+from api.providers import PROVIDERS
+from main.data.works_csv import (
+    TITLE_COL,
+    get_pending_works,
+    get_stats,
+    load_works_csv,
+)
 from main.orchestration import pipeline
 from main.orchestration.execution import process_direct_iiif
-from main.state.background import get_background_scheduler
 from main.state.deferred import get_deferred_queue
 
 from .console import ConsoleUI, DownloadConfiguration
 from .mode import get_general_config
-from main.data.works_csv import (
-    load_works_csv,
-    get_pending_works,
-    get_stats,
-    TITLE_COL,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -46,113 +46,116 @@ logger = logging.getLogger(__name__)
 # Interactive Workflow
 # =============================================================================
 
+
 class InteractiveWorkflow:
     """Interactive workflow for configuring and running downloads."""
-    
+
     def __init__(self) -> None:
         """Initialize the workflow."""
         ConsoleUI.enable_ansi()
         self.config = DownloadConfiguration()
         self.app_config: dict[str, Any] = {}
         self.start_time: float = 0.0
-    
+
     def display_welcome(self) -> None:
         """Display welcome banner."""
-        ConsoleUI.print_header(
-            "CHRONO DOWNLOADER",
-            "Historical Document Download Tool"
-        )
+        ConsoleUI.print_header("CHRONO DOWNLOADER", "Historical Document Download Tool")
         print("  Download historical sources from digital libraries including:")
         print("  Internet Archive, BnF Gallica, MDZ, Google Books, and more.\n")
-    
+
     def configure_config_file(self) -> bool:
         """Configure which config file to use.
-        
+
         Returns:
             True if configured, False to quit
         """
         # Find available config files
         config_files = list(Path(".").glob("*.json"))
-        config_files = [f for f in config_files if "config" in f.name.lower() 
-                        and not f.name.startswith(".")]
-        
+        config_files = [
+            f
+            for f in config_files
+            if "config" in f.name.lower() and not f.name.startswith(".")
+        ]
+
         # Sort with config.json first
         config_files.sort(key=lambda x: (x.name != "config.json", x.name))
-        
+
         if not config_files:
             ConsoleUI.print_warning("No config files found. Using default config.json")
             self.config.config_path = "config.json"
             return True
-        
+
         # Build options list
         options: list[tuple[str, str]] = []
         for f in config_files:
             try:
                 import json
-                with open(f, 'r', encoding='utf-8') as fp:
+
+                with open(f, encoding="utf-8") as fp:
                     cfg_data = json.load(fp)
-                
+
                 # Extract useful info for display
                 providers = cfg_data.get("providers", {})
                 enabled_count = sum(1 for v in providers.values() if v)
-                
+
                 # Check for notable settings
                 notes = []
                 if enabled_count > 0:
                     notes.append(f"{enabled_count} providers")
-                
+
                 download_cfg = cfg_data.get("download", {})
                 if download_cfg.get("prefer_pdf_over_images"):
                     notes.append("PDF preferred")
-                
+
                 budget_cfg = cfg_data.get("budget", {})
                 if budget_cfg.get("enabled"):
                     max_dl = budget_cfg.get("max_total_downloads", 0)
                     if max_dl:
                         notes.append(f"limit: {max_dl}")
-                
+
                 note_str = f" ({', '.join(notes)})" if notes else ""
                 display = f"{f.name}{note_str}"
-                
+
             except Exception:
                 display = f.name
-            
+
             options.append((str(f), display))
-        
+
         ConsoleUI.print_info("CONFIG FILE SELECTION")
         print("  Choose which configuration file to use for this session.")
-        print(f"  {ConsoleUI.DIM}(Config files control providers, download settings, and limits){ConsoleUI.RESET}\n")
-        
-        result = ConsoleUI.prompt_select(
-            "Select a configuration file:",
-            options,
-            allow_back=False
+        print(
+            f"  {ConsoleUI.DIM}(Config files control providers, download settings, "
+            f"and limits){ConsoleUI.RESET}\n"
         )
-        
+
+        result = ConsoleUI.prompt_select(
+            "Select a configuration file:", options, allow_back=False
+        )
+
         if result:
             self.config.config_path = result
-            
+
             # Reload config with new path
             os.environ["CHRONO_CONFIG_PATH"] = result
             self.app_config = get_config(force_reload=True)
-            
+
             ConsoleUI.print_success(f"Using config: {result}")
             return True
         return False
-    
+
     def display_provider_status(self) -> None:
         """Display status of available providers with details."""
         ConsoleUI.print_separator()
         ConsoleUI.print_info("ENABLED PROVIDERS")
         ConsoleUI.print_separator()
-        
+
         cfg = get_config()
         providers_cfg = cfg.get("providers", {})
         provider_settings = cfg.get("provider_settings", {})
-        
+
         enabled = []
         disabled = []
-        
+
         for key, (_, _, name) in PROVIDERS.items():
             if providers_cfg.get(key, False):
                 # Check for quota info
@@ -165,7 +168,7 @@ class InteractiveWorkflow:
                     enabled.append(name)
             else:
                 disabled.append(name)
-        
+
         if enabled:
             print(f"  {ConsoleUI.GREEN}Enabled:{ConsoleUI.RESET}")
             for p in enabled:
@@ -173,7 +176,7 @@ class InteractiveWorkflow:
         if disabled:
             print(f"  {ConsoleUI.DIM}Disabled: {', '.join(disabled)}{ConsoleUI.RESET}")
         print()
-        
+
         # Show key download settings
         dl_config = cfg.get("download", {})
         if dl_config:
@@ -184,10 +187,10 @@ class InteractiveWorkflow:
                 key_settings["Max total size"] = f"{dl_config['max_total_size_gb']} GB"
             if dl_config.get("max_parallel_downloads", 1) > 1:
                 key_settings["Parallel downloads"] = dl_config["max_parallel_downloads"]
-            
+
             if key_settings:
                 ConsoleUI.print_config_summary(key_settings, "Download Settings")
-    
+
     def get_mode_options(self) -> list[tuple[str, str]]:
         """Get download mode options."""
         return [
@@ -196,79 +199,82 @@ class InteractiveWorkflow:
             ("collection", "Predefined Collection — Choose from sample datasets"),
             ("direct_iiif", "Direct IIIF — Download from IIIF manifest URL(s)"),
         ]
-    
+
     def configure_mode(self) -> bool:
         """Configure download mode.
-        
+
         Returns:
             True if configured, False to go back
         """
         ConsoleUI.print_info("DOWNLOAD MODE")
         print("  Choose how you want to specify which works to download.\n")
-        
+
         result = ConsoleUI.prompt_select(
             "How would you like to specify works to download?",
             self.get_mode_options(),
-            allow_back=True
+            allow_back=True,
         )
-        
+
         if result:
             self.config.mode = result
             return True
         return False
-    
+
     def configure_csv_mode(self) -> bool:
         """Configure CSV batch mode.
-        
+
         Returns:
             True if configured, False to go back
         """
         general = get_general_config()
         default_csv = general.get("default_csv_path", "sample_works.csv")
-        
+
         # List available CSV files
         csv_files = list(Path(".").glob("*.csv"))
-        
+
         if csv_files:
             ConsoleUI.print_info("Available CSV files:")
             for f in csv_files:
                 print(f"    • {f.name}")
             print()
-        
+
         csv_path = ConsoleUI.prompt_input(
-            "Enter path to CSV file",
-            default=default_csv,
-            required=True
+            "Enter path to CSV file", default=default_csv, required=True
         )
-        
+
         if not csv_path:
             return False
-        
+
         # Validate CSV exists
         if not os.path.exists(csv_path):
             ConsoleUI.print_error(f"CSV file not found: {csv_path}")
             return False
-        
+
         # Validate CSV has required columns (unified CSV format)
         try:
             df = load_works_csv(csv_path)
-            
+
             # Check for required notebook columns
             if TITLE_COL not in df.columns:
-                ConsoleUI.print_error(f"CSV must have '{TITLE_COL}' column (sampling notebook format)")
+                ConsoleUI.print_error(
+                    f"CSV must have '{TITLE_COL}' column (sampling notebook format)"
+                )
                 return False
-            
+
             # Show statistics
             stats = get_stats(csv_path)
             total = stats["total"]
             pending = stats["pending"]
             completed = stats["completed"]
             failed = stats["failed"]
-            
-            ConsoleUI.print_success(f"Found {total} works in CSV ({pending} pending, {completed} completed, {failed} failed)")
+
+            ConsoleUI.print_success(
+                f"Found {total} works in CSV "
+                f"({pending} pending, {completed} completed, {failed} failed)"
+            )
             self.config.csv_path = csv_path
             return True
-            
+
         except FileNotFoundError:
             ConsoleUI.print_error(f"CSV file not found: {csv_path}")
             return False
@@ -278,49 +284,53 @@ class InteractiveWorkflow:
         except Exception as e:
             ConsoleUI.print_error(f"Error reading CSV: {e}")
             return False
-    
+
     def configure_single_mode(self) -> bool:
         """Configure single work mode.
-        
+
         Returns:
             True if configured, False to go back
         """
         ConsoleUI.print_info("SINGLE WORK DOWNLOAD")
         print("  Enter details for the work you want to download.\n")
-        
+
         title = ConsoleUI.prompt_input("Work title", required=True)
         if not title:
             return False
-        
+
         creator = ConsoleUI.prompt_input("Creator/Author (optional)")
         entry_id = ConsoleUI.prompt_input("Entry ID (optional)", default="W0001")
-        
+
         self.config.single_title = title
         self.config.single_creator = creator if creator else None
         self.config.single_entry_id = entry_id if entry_id else "W0001"
-        
+
         return True
-    
+
     def configure_direct_iiif_mode(self) -> bool:
         """Configure direct IIIF download mode.
-        
+
         Returns:
             True if configured, False to go back
         """
         ConsoleUI.print_info("DIRECT IIIF DOWNLOAD")
         print("  Enter one or more IIIF manifest URLs.")
         print(f"  {ConsoleUI.DIM}(Enter an empty line when done){ConsoleUI.RESET}\n")
-        
+
         urls: list[str] = []
         while True:
-            prompt_label = f"Manifest URL [{len(urls) + 1}]" if not urls else f"Manifest URL [{len(urls) + 1}] (empty to finish)"
+            prompt_label = (
+                f"Manifest URL [{len(urls) + 1}]"
+                if not urls
+                else f"Manifest URL [{len(urls) + 1}] (empty to finish)"
+            )
             url = ConsoleUI.prompt_input(prompt_label, required=(len(urls) == 0))
-            
+
             if not url:
                 if urls:
                     break
                 continue
-            
+
             url = url.strip()
             if not is_iiif_manifest_url(url):
                 ConsoleUI.print_warning(
@@ -330,30 +340,31 @@ class InteractiveWorkflow:
                 )
                 if not ConsoleUI.prompt_yes_no("Add it anyway?", default=False):
                     continue
-            
+
             urls.append(url)
             ConsoleUI.print_success(f"Added manifest URL ({len(urls)} total)")
-        
+
         # Name stem
         name = ConsoleUI.prompt_input(
             "Output name stem (leave empty for auto-detection from manifest)"
         )
-        
+
         self.config.iiif_urls = urls
         self.config.iiif_name = name if name else None
-        
+
         ConsoleUI.print_success(f"Configured {len(urls)} IIIF manifest(s) for download")
         return True
-    
+
     def configure_collection_mode(self) -> bool:
         """Configure predefined collection mode.
-        
+
         Returns:
             True if configured, False to go back
         """
-        # Look for predefined collections (CSV files with special names or in a collections folder)
+        # Look for predefined collections (CSV files with special names or in a
+        # collections folder)
         collections = []
-        
+
         # Check root directory for sample files
         for csv_file in Path(".").glob("*.csv"):
             name = csv_file.stem
@@ -363,7 +374,7 @@ class InteractiveWorkflow:
                 collections.append((str(csv_file), f"{name} ({count} works)"))
             except Exception:
                 continue
-        
+
         # Check for collections directory
         collections_dir = Path("collections")
         if collections_dir.exists():
@@ -375,68 +386,65 @@ class InteractiveWorkflow:
                     collections.append((str(csv_file), f"{name} ({count} works)"))
                 except Exception:
                     continue
-        
+
         if not collections:
             ConsoleUI.print_warning("No predefined collections found.")
-            ConsoleUI.print_info("Place CSV files in the current directory or 'collections/' folder.")
+            ConsoleUI.print_info(
+                "Place CSV files in the current directory or 'collections/' folder."
+            )
             return False
-        
+
         result = ConsoleUI.prompt_select(
-            "Select a collection to download:",
-            collections,
-            allow_back=True
+            "Select a collection to download:", collections, allow_back=True
         )
-        
+
         if result:
             self.config.collection_name = result
             self.config.csv_path = result
             return True
         return False
-    
+
     def configure_output(self) -> bool:
         """Configure output directory.
-        
+
         Returns:
             True if configured, False to go back
         """
         general = get_general_config()
         default_output = general.get("default_output_dir", "downloaded_works")
-        
-        output_dir = ConsoleUI.prompt_input(
-            "Output directory",
-            default=default_output
-        )
-        
+
+        output_dir = ConsoleUI.prompt_input("Output directory", default=default_output)
+
         if not output_dir:
             output_dir = default_output
-        
+
         self.config.output_dir = output_dir
         return True
-    
+
     def configure_options(self) -> bool:
         """Configure additional options.
-        
+
         Returns:
             True if configured, False to go back
         """
         ConsoleUI.print_info("ADDITIONAL OPTIONS")
         print()
-        
+
         # Dry run option
         self.config.dry_run = ConsoleUI.prompt_yes_no(
-            "Dry run (search only, no downloads)?",
-            default=False
+            "Dry run (search only, no downloads)?", default=False
         )
-        
+
         # Parallel download options (only for batch modes)
         if self.config.mode in ("csv", "collection"):
             dl_config = get_download_config()
             config_max_parallel = int(dl_config.get("max_parallel_downloads", 1) or 1)
-            
+
             if config_max_parallel > 1:
                 # Config already enables parallelism
                 ConsoleUI.print_info(
-                    f"Parallel downloads enabled via config ({config_max_parallel} workers)"
+                    f"Parallel downloads enabled via config "
+                    f"({config_max_parallel} workers)"
                 )
                 self.config.use_parallel = True
                 self.config.max_workers_override = None
@@ -445,8 +453,7 @@ class InteractiveWorkflow:
                 if ConsoleUI.prompt_yes_no("Enable parallel downloads?", default=True):
                     self.config.use_parallel = True
                     workers_input = ConsoleUI.prompt_input(
-                        "Number of parallel workers",
-                        default="4"
+                        "Number of parallel workers", default="4"
                     )
                     try:
                         workers = max(1, int(workers_input))
@@ -456,118 +463,168 @@ class InteractiveWorkflow:
                 else:
                     self.config.use_parallel = False
                     self.config.max_workers_override = None
-        
+
         # Log level
         log_options = [
             ("INFO", "INFO — Standard logging (recommended)"),
             ("DEBUG", "DEBUG — Verbose logging for troubleshooting"),
             ("WARNING", "WARNING — Only show warnings and errors"),
         ]
-        
+
         result = ConsoleUI.prompt_select(
-            "Select logging level:",
-            log_options,
-            allow_back=True
+            "Select logging level:", log_options, allow_back=True
         )
-        
+
         if result:
             self.config.log_level = result
             return True
         return False
-    
+
     def display_summary(self) -> bool:
         """Display configuration summary and confirm.
-        
+
         Returns:
             True to proceed, False to go back
         """
-        ConsoleUI.print_header("CONFIGURATION SUMMARY", "Review your settings before proceeding")
-        
+        ConsoleUI.print_header(
+            "CONFIGURATION SUMMARY", "Review your settings before proceeding"
+        )
+
         # Config file section
         print(f"  {ConsoleUI.BOLD}Configuration:{ConsoleUI.RESET}")
         ConsoleUI.print_separator(".", 70)
-        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Config file: {self.config.config_path}")
+        print(
+            f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+            f"Config file: {self.config.config_path}"
+        )
         ConsoleUI.print_separator(".", 70)
-        
+
         # Source section
         print(f"\n  {ConsoleUI.BOLD}Source:{ConsoleUI.RESET}")
         ConsoleUI.print_separator(".", 70)
-        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Mode: {self.config.mode.upper()}")
-        
+        print(
+            f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Mode: {self.config.mode.upper()}"
+        )
+
         if self.config.mode == "csv":
-            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} CSV File: {self.config.csv_path}")
+            print(
+                f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                f"CSV File: {self.config.csv_path}"
+            )
             # Show CSV stats if available
             if self.config.csv_path:
                 try:
                     stats = get_stats(self.config.csv_path)
-                    print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Works: {stats['total']} total ({stats['pending']} pending)")
+                    print(
+                        f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                        f"Works: {stats['total']} total ({stats['pending']} pending)"
+                    )
                 except Exception:
                     pass
         elif self.config.mode == "single":
-            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Title: {self.config.single_title}")
+            print(
+                f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                f"Title: {self.config.single_title}"
+            )
             if self.config.single_creator:
-                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Creator: {self.config.single_creator}")
+                print(
+                    f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                    f"Creator: {self.config.single_creator}"
+                )
         elif self.config.mode == "collection":
-            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Collection: {self.config.collection_name}")
+            print(
+                f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                f"Collection: {self.config.collection_name}"
+            )
         elif self.config.mode == "direct_iiif":
-            print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} IIIF Manifests: {len(self.config.iiif_urls)} URL(s)")
+            print(
+                f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                f"IIIF Manifests: {len(self.config.iiif_urls)} URL(s)"
+            )
             if self.config.iiif_name:
-                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Name stem: {self.config.iiif_name}")
+                print(
+                    f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                    f"Name stem: {self.config.iiif_name}"
+                )
         ConsoleUI.print_separator(".", 70)
-        
+
         # Output section
         print(f"\n  {ConsoleUI.BOLD}Output:{ConsoleUI.RESET}")
         ConsoleUI.print_separator(".", 70)
-        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Directory: {self.config.output_dir}")
+        print(
+            f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+            f"Directory: {self.config.output_dir}"
+        )
         if self.config.dry_run:
-            print(f"    {ConsoleUI.YELLOW}*{ConsoleUI.RESET} {ConsoleUI.YELLOW}DRY RUN - No files will be downloaded{ConsoleUI.RESET}")
+            print(
+                f"    {ConsoleUI.YELLOW}*{ConsoleUI.RESET} {ConsoleUI.YELLOW}"
+                f"DRY RUN - No files will be downloaded{ConsoleUI.RESET}"
+            )
         ConsoleUI.print_separator(".", 70)
-        
+
         # Processing section
         print(f"\n  {ConsoleUI.BOLD}Processing:{ConsoleUI.RESET}")
         ConsoleUI.print_separator(".", 70)
-        
+
         if self.config.mode in ("csv", "collection"):
             if self.config.use_parallel and not self.config.dry_run:
                 workers = self.config.max_workers_override
                 if workers:
-                    print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Parallel downloads: {workers} workers")
+                    print(
+                        f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                        f"Parallel downloads: {workers} workers"
+                    )
                 else:
                     dl_config = get_download_config()
                     workers = int(dl_config.get("max_parallel_downloads", 1) or 1)
-                    print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Parallel downloads: {workers} workers (from config)")
+                    print(
+                        f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                        f"Parallel downloads: {workers} workers (from config)"
+                    )
             else:
-                print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Parallel downloads: Sequential")
-        
-        print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Log level: {self.config.log_level}")
+                print(
+                    f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
+                    f"Parallel downloads: Sequential"
+                )
+
+        print(
+            f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} Log level: {self.config.log_level}"
+        )
         ConsoleUI.print_separator(".", 70)
-        
+
         # Enabled providers (quick list)
         cfg = get_config()
         providers_cfg = cfg.get("providers", {})
-        enabled = [name for key, (_, _, name) in PROVIDERS.items() if providers_cfg.get(key, False)]
+        enabled = [
+            name
+            for key, (_, _, name) in PROVIDERS.items()
+            if providers_cfg.get(key, False)
+        ]
         if enabled:
             print(f"\n  {ConsoleUI.BOLD}Providers:{ConsoleUI.RESET}")
             ConsoleUI.print_separator(".", 70)
             print(f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} {', '.join(enabled[:5])}")
             if len(enabled) > 5:
-                print(f"    {ConsoleUI.DIM}    ... and {len(enabled) - 5} more{ConsoleUI.RESET}")
+                print(
+                    f"    {ConsoleUI.DIM}    ... and {len(enabled) - 5} more"
+                    f"{ConsoleUI.RESET}"
+                )
             ConsoleUI.print_separator(".", 70)
-        
+
         print()
         return ConsoleUI.prompt_yes_no("Proceed with these settings?", default=True)
-    
+
     def run_workflow(self) -> DownloadConfiguration | None:
         """Run the interactive configuration workflow.
-        
+
         Returns:
             DownloadConfiguration if completed, None if cancelled
         """
         self.display_welcome()
-        
+
         # State machine for navigation - now starts with config selection
         current_step = "config_file"
-        
+
         while True:
             try:
                 if current_step == "config_file":
@@ -576,63 +633,56 @@ class InteractiveWorkflow:
                         current_step = "mode"
                     else:
                         return None
-                
+
                 elif current_step == "mode":
                     if self.configure_mode():
                         current_step = f"configure_{self.config.mode}"
                     else:
                         current_step = "config_file"
-                
+
                 elif current_step == "configure_csv":
-                    if self.configure_csv_mode():
-                        current_step = "output"
-                    else:
-                        current_step = "mode"
-                
+                    current_step = "output" if self.configure_csv_mode() else "mode"
+
                 elif current_step == "configure_single":
-                    if self.configure_single_mode():
-                        current_step = "output"
-                    else:
-                        current_step = "mode"
-                
+                    current_step = "output" if self.configure_single_mode() else "mode"
+
                 elif current_step == "configure_direct_iiif":
                     if self.configure_direct_iiif_mode():
                         current_step = "output"
                     else:
                         current_step = "mode"
-                
+
                 elif current_step == "configure_collection":
                     if self.configure_collection_mode():
                         current_step = "output"
                     else:
                         current_step = "mode"
-                
+
                 elif current_step == "output":
                     if self.configure_output():
                         current_step = "options"
                     else:
                         current_step = f"configure_{self.config.mode}"
-                
+
                 elif current_step == "options":
-                    if self.configure_options():
-                        current_step = "summary"
-                    else:
-                        current_step = "output"
-                
+                    current_step = "summary" if self.configure_options() else "output"
+
                 elif current_step == "summary":
                     if self.display_summary():
                         self.start_time = time.time()
                         return self.config
                     else:
                         current_step = "options"
-                
+
             except KeyboardInterrupt:
                 print(f"\n{ConsoleUI.YELLOW}Operation cancelled.{ConsoleUI.RESET}")
                 return None
 
+
 # =============================================================================
 # Processing Functions
 # =============================================================================
+
 
 def process_single_work(
     title: str,
@@ -640,10 +690,10 @@ def process_single_work(
     entry_id: str,
     output_dir: str,
     dry_run: bool,
-    log: logging.Logger
+    log: logging.Logger,
 ) -> bool:
     """Process a single work.
-    
+
     Args:
         title: Work title
         creator: Optional creator name
@@ -651,12 +701,14 @@ def process_single_work(
         output_dir: Output directory
         dry_run: Whether to skip downloads
         log: Logger instance
-        
+
     Returns:
         True if processed successfully
     """
-    log.info("Processing single work: '%s'%s", title, f" by '{creator}'" if creator else "")
-    
+    log.info(
+        "Processing single work: '%s'%s", title, f" by '{creator}'" if creator else ""
+    )
+
     pipeline.process_work(
         title,
         creator,
@@ -664,12 +716,15 @@ def process_single_work(
         output_dir,
         dry_run=dry_run,
     )
-    
+
     return True
 
-def run_interactive_session(config: DownloadConfiguration, start_time: float = 0.0) -> None:
+
+def run_interactive_session(
+    config: DownloadConfiguration, start_time: float = 0.0
+) -> None:
     """Execute download session based on interactive configuration.
-    
+
     Args:
         config: DownloadConfiguration from interactive workflow
         start_time: Session start timestamp for duration calculation
@@ -677,44 +732,51 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
     # Configure logging with UTF-8 encoding for Windows
     if sys.platform == "win32":
         try:
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[union-attr]
-            sys.stderr.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[union-attr]
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except (AttributeError, OSError):
             pass
-    
+
     logging.basicConfig(
         level=getattr(logging, config.log_level),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
     )
-    
+
     # Reduce noisy retry logs
     try:
         logging.getLogger("urllib3").setLevel(logging.ERROR)
         logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
     except Exception:
         pass
-    
+
     log = logging.getLogger(__name__)
-    
+
     # Set config path
     os.environ["CHRONO_CONFIG_PATH"] = config.config_path
-    
+
     # Load and validate providers
     providers = pipeline.load_enabled_apis(config.config_path)
     providers = pipeline.filter_enabled_providers_for_keys(providers)
     pipeline.ENABLED_APIS = providers
-    
+
     if not providers:
-        log.warning("No providers are enabled. Update %s to enable providers.", config.config_path)
+        log.warning(
+            "No providers are enabled. Update %s to enable providers.",
+            config.config_path,
+        )
         ConsoleUI.print_error("No providers are enabled. Check your configuration.")
         return
-    
-    # Get provider names for summary (providers is a list of tuples: key, search, download, name)
+
+    # Get provider names for summary (providers is a list of tuples: key, search,
+    # download, name)
     provider_names = [name for _, _, _, name in providers]
-    
+
     ConsoleUI.print_header("DOWNLOAD IN PROGRESS", "Please wait...")
-    print(f"  {ConsoleUI.DIM}Processing with {len(providers)} provider(s)...{ConsoleUI.RESET}\n")
-    
+    print(
+        f"  {ConsoleUI.DIM}Processing with {len(providers)} provider(s)..."
+        f"{ConsoleUI.RESET}\n"
+    )
+
     # Track statistics
     stats = {
         "processed": 0,
@@ -722,7 +784,7 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
         "failed": 0,
         "deferred": 0,
     }
-    
+
     if config.mode == "csv" or config.mode == "collection":
         result_stats = process_csv_batch_with_stats(
             config.csv_path or "",
@@ -741,7 +803,7 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
             config.single_entry_id or "W0001",
             config.output_dir,
             config.dry_run,
-            log
+            log,
         ):
             stats["processed"] = 1
             stats["succeeded"] = 1
@@ -761,7 +823,9 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
                 title = config.iiif_name if config.iiif_name else None
                 file_stem = f"{config.iiif_name}_{i:04d}" if config.iiif_name else None
 
-            log.info("Processing IIIF manifest %d/%d: %s", i, len(config.iiif_urls), url)
+            log.info(
+                "Processing IIIF manifest %d/%d: %s", i, len(config.iiif_urls), url
+            )
             result = process_direct_iiif(
                 manifest_url=url,
                 output_dir=config.output_dir,
@@ -776,30 +840,25 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
                 stats["succeeded"] += 1
             elif status != "dry_run":
                 stats["failed"] += 1
-    
+
     # Handle deferred downloads
     deferred_queue = get_deferred_queue()
     pending = deferred_queue.get_pending()
     deferred_count = len(pending)
     stats["deferred"] = deferred_count
-    
+
     if pending:
         log.info(
-            "%d download(s) were deferred due to quota limits.",
-            deferred_count
+            "%d download(s) were deferred due to quota limits. Ready items are "
+            "retried automatically at the start of the next run.",
+            deferred_count,
         )
-        if ConsoleUI.prompt_yes_no("Start background scheduler to retry when quotas reset?", default=False):
-            scheduler = get_background_scheduler()
-            if scheduler.start():
-                log.info("Background scheduler started. Deferred downloads will be retried automatically.")
-            else:
-                log.info("Background scheduler is already running or disabled.")
-    
+
     # Calculate duration
     duration = None
     if start_time > 0:
         duration = time.time() - start_time
-    
+
     # Display detailed completion summary
     ConsoleUI.print_session_summary(
         processed=stats.get("processed", 0),
@@ -812,6 +871,7 @@ def run_interactive_session(config: DownloadConfiguration, start_time: float = 0
         providers_used=provider_names if provider_names else None,
     )
 
+
 def process_csv_batch_with_stats(
     csv_path: str,
     output_dir: str,
@@ -819,10 +879,10 @@ def process_csv_batch_with_stats(
     dry_run: bool,
     log: logging.Logger,
     use_parallel: bool = True,
-    max_workers_override: int | None = None
+    max_workers_override: int | None = None,
 ) -> dict[str, int]:
     """Process works from a CSV file and return statistics.
-    
+
     Args:
         csv_path: Path to CSV file
         output_dir: Output directory
@@ -831,14 +891,17 @@ def process_csv_batch_with_stats(
         log: Logger instance
         use_parallel: Whether to use parallel downloads
         max_workers_override: Override for max_parallel_downloads config
-        
+
     Returns:
         Dictionary with processing statistics
     """
-    from main.orchestration.execution import run_batch_downloads, create_interactive_callbacks
-    
+    from main.orchestration.execution import (
+        create_interactive_callbacks,
+        run_batch_downloads,
+    )
+
     stats = {"processed": 0, "succeeded": 0, "failed": 0, "deferred": 0}
-    
+
     # Load CSV using unified CSV system
     abs_csv_path = os.path.abspath(csv_path)
     try:
@@ -852,33 +915,39 @@ def process_csv_batch_with_stats(
     except Exception as e:
         log.error("Error reading CSV file: %s", e)
         return stats
-    
+
     # Validate required column
     if TITLE_COL not in works_df.columns:
-        log.error("CSV file must contain a '%s' column (sampling notebook format).", TITLE_COL)
+        log.error(
+            "CSV file must contain a '%s' column (sampling notebook format).", TITLE_COL
+        )
         return stats
-    
+
     # Filter to pending works only (resume support)
     initial_stats = get_stats(abs_csv_path)
     pending_df = get_pending_works(works_df)
-    
-    log.info("CSV status: %d total, %d completed, %d failed, %d pending",
-             initial_stats["total"], initial_stats["completed"],
-             initial_stats["failed"], initial_stats["pending"])
-    
+
+    log.info(
+        "CSV status: %d total, %d completed, %d failed, %d pending",
+        initial_stats["total"],
+        initial_stats["completed"],
+        initial_stats["failed"],
+        initial_stats["pending"],
+    )
+
     if len(pending_df) == 0:
         log.info("No pending works to process. All items already have a status.")
         return stats
-    
+
     log.info("Starting downloader. Output directory: %s", output_dir)
     log.info("Works to process: %d (pending)", len(pending_df))
-    
+
     # Get config for execution
     config = get_config()
-    
+
     # Create interactive-friendly callbacks for parallel mode
     on_submit, on_complete = create_interactive_callbacks(log)
-    
+
     # Use shared execution module
     result_stats = run_batch_downloads(
         works_df=pending_df,
@@ -892,14 +961,15 @@ def process_csv_batch_with_stats(
         on_complete=on_complete,
         csv_path=abs_csv_path,
     )
-    
+
     return result_stats
+
 
 def run_interactive() -> None:
     """Main entry point for interactive mode."""
     workflow = InteractiveWorkflow()
     config = workflow.run_workflow()
-    
+
     if config:
         run_interactive_session(config, start_time=workflow.start_time)
     else:

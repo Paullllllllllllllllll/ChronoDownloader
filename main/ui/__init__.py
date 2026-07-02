@@ -14,6 +14,7 @@ Public surface (stable imports for CLI and orchestration):
 - :class:`ConsoleUI`, :class:`DownloadConfiguration`
 - :func:`run_with_mode_detection`, :func:`get_general_config`
 """
+
 from __future__ import annotations
 
 from .console import ConsoleUI, DownloadConfiguration

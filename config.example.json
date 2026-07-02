@@ -243,7 +243,8 @@
       "sbb_digital": 1
     },
     "queue_size": 100,
-    "worker_timeout_s": 600
+    "worker_timeout_s": 0,
+    "_worker_timeout_note": "TOTAL ceiling in seconds for waiting on a parallel batch; 0 = wait indefinitely (recommended)."
   },
   "selection": {
     "strategy": "collect_and_select",
@@ -292,10 +293,10 @@
   },
   "deferred": {
     "background_enabled": true,
-    "state_file": ".downloader_state.json",
     "check_interval_minutes": 15,
     "max_retries": 5,
-    "_note": "Background scheduler monitors quota-limited downloads and retries when quotas reset. State is stored in unified .downloader_state.json"
+    "_note": "Quota-deferred downloads are retried synchronously at the start of the next run. State lives in ~/.chronodownloader/.downloader_state.json by default; a legacy CWD state file is adopted once automatically.",
+    "_state_dir_note": "Optional overrides: set 'state_dir' to change the state directory, or 'state_file' for a full path override (legacy behavior)."
   },
   "direct_iiif": {
     "enabled": true,

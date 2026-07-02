@@ -117,9 +117,11 @@ def config_file(temp_dir: str, sample_config: dict[str, Any]) -> str:
 @pytest.fixture
 def mock_config(sample_config: dict[str, Any]) -> Generator[dict[str, Any], None, None]:
     """Mock the config module to return sample config."""
-    with patch("api.core.config._CONFIG_CACHE", sample_config):
-        with patch("api.core.config.get_config", return_value=sample_config):
-            yield sample_config
+    with (
+        patch("api.core.config._CONFIG_CACHE", sample_config),
+        patch("api.core.config.get_config", return_value=sample_config),
+    ):
+        yield sample_config
 
 
 # ============================================================================

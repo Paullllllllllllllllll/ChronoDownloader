@@ -1,4 +1,5 @@
 """``--list-providers`` CLI command."""
+
 from __future__ import annotations
 
 from api.providers import PROVIDERS

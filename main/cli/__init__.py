@@ -14,6 +14,7 @@ Internal layout:
 - :mod:`main.cli.entry` -- main() with quota/cleanup short-circuits
 - :mod:`main.cli.commands` -- per-subcommand handlers
 """
+
 from __future__ import annotations
 
 from .dispatch import run_cli

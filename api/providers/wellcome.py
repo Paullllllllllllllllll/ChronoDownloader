@@ -8,6 +8,7 @@ We search /catalogue/v2/works with include=items and pick locations of type
 "iiif-image" which point to info.json. From that we derive the IIIF Image API
 service base and download full-size images.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,18 +17,24 @@ from typing import Any
 
 from ..core.budget import budget_exhausted
 from ..core.config import get_provider_setting
-from ..core.network import make_request
 from ..core.download import download_file
+from ..core.network import make_request
 from ..iiif import download_one_from_service
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
+from ..model import (
+    SearchResult,
+    convert_to_searchresult,
+    resolve_item_field,
+    resolve_item_id,
+)
 
 logger = logging.getLogger(__name__)
 
 CATALOGUE_WORKS_URL = "https://api.wellcomecollection.org/catalogue/v2/works"
 
+
 def _max_images() -> int | None:
     """Read max images per work from config (provider_settings.wellcome.max_images).
-    
+
     Returns:
         Max images limit (0 or None means all images)
     """
@@ -40,15 +47,17 @@ def _max_images() -> int | None:
     except ValueError:
         return 0
 
-def _extract_image_services(work: dict[str, Any]) -> list[str]:
-    """Return a list of IIIF Image API service base URLs from a Work doc (with include=items).
 
-    Looks for items[].locations[] entries with locationType.id == "iiif-image".
-    Each such location has a URL ending with /info.json; we return the base before info.json.
-    
+def _extract_image_services(work: dict[str, Any]) -> list[str]:
+    """Return a list of IIIF Image API service base URLs from a Work doc.
+
+    Requires ``include=items``. Looks for items[].locations[] entries with
+    locationType.id == "iiif-image". Each such location has a URL ending with
+    /info.json; we return the base before info.json.
+
     Args:
         work: Wellcome work dictionary
-        
+
     Returns:
         List of IIIF Image API service base URLs
     """
@@ -63,17 +72,21 @@ def _extract_image_services(work: dict[str, Any]) -> list[str]:
                     services.append(base)
     return services
 
-def search_wellcome(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_wellcome(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search Wellcome works and return entries that have IIIF Image services.
 
-    We combine title and optional creator into a simple query string, request include=items,
-    then collect works that provide at least one iiif-image location.
-    
+    We combine title and optional creator into a simple query string, request
+    include=items, then collect works that provide at least one iiif-image
+    location.
+
     Args:
         title: Work title to search for
         creator: Optional creator/author name
         max_results: Maximum number of results to return
-        
+
     Returns:
         List of SearchResult objects
     """
@@ -99,7 +112,9 @@ def search_wellcome(title: str, creator: str | None = None, max_results: int = 3
             "title": work.get("title") or title,
             "creator": None,
             "id": work_id,
-            "item_url": f"https://wellcomecollection.org/works/{work_id}" if work_id else None,
+            "item_url": f"https://wellcomecollection.org/works/{work_id}"
+            if work_id
+            else None,
             "image_services": services,
             "thumbnail": (work.get("thumbnail") or {}).get("url"),
         }
@@ -108,16 +123,19 @@ def search_wellcome(title: str, creator: str | None = None, max_results: int = 3
             break
     return results
 
-def download_wellcome_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_wellcome_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download full-size images from Wellcome IIIF Image services.
 
     If the SearchResult contains raw.image_services, we use them directly.
     Otherwise, we refetch the Work with include=items to discover iiif-image locations.
-    
+
     Args:
         item_data: SearchResult or dict containing item data
         output_folder: Folder to download files to
-        
+
     Returns:
         True if download was successful, False otherwise
     """
@@ -133,23 +151,29 @@ def download_wellcome_work(item_data: SearchResult | dict[str, Any], output_fold
             services = _extract_image_services(work)
 
     if not services:
-        logger.info("No IIIF image services found for Wellcome work %s", work_id or title)
+        logger.info(
+            "No IIIF image services found for Wellcome work %s", work_id or title
+        )
         return False
 
-    # Download images. Use IIIF Image v2-style URL; Wellcome Image API accepts 'full/full/0/default.jpg'.
+    # Download images. Use IIIF Image v2-style URL; Wellcome Image API accepts
+    # 'full/full/0/default.jpg'.
     # Use shared helper for per-service download attempts
 
     max_images = _max_images()
     to_download = services[:max_images] if max_images and max_images > 0 else services
     logger.info(
         "Wellcome: downloading %d/%d image(s) for work %s",
-        len(to_download), len(services), work_id or title,
+        len(to_download),
+        len(services),
+        work_id or title,
     )
     ok_any = False
     for idx, svc in enumerate(to_download, start=1):
         if budget_exhausted():
             logger.warning(
-                "Download budget exhausted; stopping Wellcome downloads at %d/%d images for %s",
+                "Download budget exhausted; stopping Wellcome downloads at "
+                "%d/%d images for %s",
                 idx - 1,
                 len(to_download),
                 work_id or title,
@@ -171,10 +195,13 @@ def download_wellcome_work(item_data: SearchResult | dict[str, Any], output_fold
             work = make_request(f"{CATALOGUE_WORKS_URL}/{work_id}")
             if isinstance(work, dict):
                 thumb_url = (work.get("thumbnail") or {}).get("url")
-        if thumb_url:
-            if download_file(thumb_url, output_folder, f"wellcome_{work_id or 'work'}_thumbnail.jpg"):
-                ok_any = True
+        if thumb_url and download_file(
+            thumb_url, output_folder, f"wellcome_{work_id or 'work'}_thumbnail.jpg"
+        ):
+            ok_any = True
     except Exception:
-        logger.exception("Wellcome: error downloading thumbnail for %s", work_id or title)
+        logger.exception(
+            "Wellcome: error downloading thumbnail for %s", work_id or title
+        )
 
     return ok_any

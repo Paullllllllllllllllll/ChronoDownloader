@@ -1,14 +1,13 @@
 """Tests for api.query_helpers module — SRU/SPARQL escaping utilities."""
+
 from __future__ import annotations
 
-import pytest
-
 from api.query_helpers import escape_sparql_string, escape_sru_literal
-
 
 # ============================================================================
 # escape_sru_literal
 # ============================================================================
+
 
 class TestEscapeSruLiteral:
     """Tests for SRU/CQL literal escaping."""
@@ -49,6 +48,7 @@ class TestEscapeSruLiteral:
 # ============================================================================
 # escape_sparql_string
 # ============================================================================
+
 
 class TestEscapeSparqlString:
     """Tests for SPARQL string escaping."""

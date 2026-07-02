@@ -1,13 +1,12 @@
 """Tests for main/deferred_queue.py - Persistent deferred download queue."""
+
 from __future__ import annotations
 
-import json
 import os
 import threading
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,7 +27,7 @@ class TestDeferredItem:
             provider_name="Test Provider",
             source_id="src123",
             work_dir="/path/to/work",
-            base_output_dir="/output"
+            base_output_dir="/output",
         )
 
         result = item.to_dict()
@@ -51,7 +50,7 @@ class TestDeferredItem:
             "source_id": "ia12345",
             "work_dir": "/work",
             "base_output_dir": "/out",
-            "retry_count": 2
+            "retry_count": 2,
         }
 
         item = DeferredItem.from_dict(data)
@@ -86,7 +85,7 @@ class TestDeferredItem:
             source_id=None,
             work_dir="",
             base_output_dir="",
-            reset_time=reset_time
+            reset_time=reset_time,
         )
 
         dt = item.get_reset_datetime()
@@ -101,9 +100,15 @@ class TestDeferredItem:
         from main.state.deferred import DeferredItem
 
         item = DeferredItem(
-            id="test", title="Test", creator=None, entry_id=None,
-            provider_key="test", provider_name="Test", source_id=None,
-            work_dir="", base_output_dir=""
+            id="test",
+            title="Test",
+            creator=None,
+            entry_id=None,
+            provider_key="test",
+            provider_name="Test",
+            source_id=None,
+            work_dir="",
+            base_output_dir="",
         )
 
         assert item.get_reset_datetime() is None
@@ -112,13 +117,19 @@ class TestDeferredItem:
         """is_ready_for_retry returns True when reset time passed."""
         from main.state.deferred import DeferredItem
 
-        past_reset = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        past_reset = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         item = DeferredItem(
-            id="test", title="Test", creator=None, entry_id=None,
-            provider_key="test", provider_name="Test", source_id=None,
-            work_dir="", base_output_dir="",
+            id="test",
+            title="Test",
+            creator=None,
+            entry_id=None,
+            provider_key="test",
+            provider_name="Test",
+            source_id=None,
+            work_dir="",
+            base_output_dir="",
             reset_time=past_reset,
-            status="pending"
+            status="pending",
         )
 
         assert item.is_ready_for_retry() is True
@@ -127,13 +138,19 @@ class TestDeferredItem:
         """is_ready_for_retry returns False when reset time in future."""
         from main.state.deferred import DeferredItem
 
-        future_reset = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_reset = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
         item = DeferredItem(
-            id="test", title="Test", creator=None, entry_id=None,
-            provider_key="test", provider_name="Test", source_id=None,
-            work_dir="", base_output_dir="",
+            id="test",
+            title="Test",
+            creator=None,
+            entry_id=None,
+            provider_key="test",
+            provider_name="Test",
+            source_id=None,
+            work_dir="",
+            base_output_dir="",
             reset_time=future_reset,
-            status="pending"
+            status="pending",
         )
 
         assert item.is_ready_for_retry() is False
@@ -143,10 +160,16 @@ class TestDeferredItem:
         from main.state.deferred import DeferredItem
 
         item = DeferredItem(
-            id="test", title="Test", creator=None, entry_id=None,
-            provider_key="test", provider_name="Test", source_id=None,
-            work_dir="", base_output_dir="",
-            status="completed"
+            id="test",
+            title="Test",
+            creator=None,
+            entry_id=None,
+            provider_key="test",
+            provider_name="Test",
+            source_id=None,
+            work_dir="",
+            base_output_dir="",
+            status="completed",
         )
 
         assert item.is_ready_for_retry() is False
@@ -155,12 +178,18 @@ class TestDeferredItem:
         """seconds_until_ready returns positive value for future reset."""
         from main.state.deferred import DeferredItem
 
-        future_reset = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        future_reset = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         item = DeferredItem(
-            id="test", title="Test", creator=None, entry_id=None,
-            provider_key="test", provider_name="Test", source_id=None,
-            work_dir="", base_output_dir="",
-            reset_time=future_reset
+            id="test",
+            title="Test",
+            creator=None,
+            entry_id=None,
+            provider_key="test",
+            provider_name="Test",
+            source_id=None,
+            work_dir="",
+            base_output_dir="",
+            reset_time=future_reset,
         )
 
         seconds = item.seconds_until_ready()
@@ -171,12 +200,18 @@ class TestDeferredItem:
         """seconds_until_ready returns 0 for past reset time."""
         from main.state.deferred import DeferredItem
 
-        past_reset = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        past_reset = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         item = DeferredItem(
-            id="test", title="Test", creator=None, entry_id=None,
-            provider_key="test", provider_name="Test", source_id=None,
-            work_dir="", base_output_dir="",
-            reset_time=past_reset
+            id="test",
+            title="Test",
+            creator=None,
+            entry_id=None,
+            provider_key="test",
+            provider_name="Test",
+            source_id=None,
+            work_dir="",
+            base_output_dir="",
+            reset_time=past_reset,
         )
 
         assert item.seconds_until_ready() == 0
@@ -186,7 +221,9 @@ class TestDeferredQueueSingleton:
     """Tests for DeferredQueue singleton pattern."""
 
     @pytest.fixture(autouse=True)
-    def reset_singletons(self, mock_config: dict[str, Any]) -> Generator[None, None, None]:
+    def reset_singletons(
+        self, mock_config: dict[str, Any]
+    ) -> Generator[None, None, None]:
         """Reset singletons before and after each test."""
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
@@ -246,7 +283,6 @@ class TestDeferredQueueOperations:
         """Create fresh DeferredQueue with isolated state."""
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
-        import os
 
         state_file = os.path.join(temp_dir, "ops_state.json")
         StateManager._instance = None
@@ -267,9 +303,9 @@ class TestDeferredQueueOperations:
             provider_name="Test Provider",
             source_id="src123",
             work_dir="/work",
-            base_output_dir="/out"
+            base_output_dir="/out",
         )
-        
+
         assert item.title == "Test Work"
         assert item.status == "pending"
         assert len(queue) == 1
@@ -277,31 +313,46 @@ class TestDeferredQueueOperations:
     def test_add_prevents_duplicates(self, queue: Any) -> None:
         """add returns existing item for duplicate entry_id + provider."""
         item1 = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         item2 = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         assert item1.id == item2.id
         assert len(queue) == 1
 
     def test_add_with_reset_time(self, queue: Any) -> None:
         """add stores reset_time correctly."""
-        reset = datetime.now(timezone.utc) + timedelta(hours=6)
-        
+        reset = datetime.now(UTC) + timedelta(hours=6)
+
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o",
-            reset_time=reset
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+            reset_time=reset,
         )
-        
+
         assert item.reset_time is not None
         reset_dt = item.get_reset_datetime()
         assert reset_dt is not None
@@ -309,13 +360,18 @@ class TestDeferredQueueOperations:
     def test_remove_deletes_item(self, queue: Any) -> None:
         """remove deletes item by ID."""
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         result = queue.remove(item.id)
-        
+
         assert result is True
         assert len(queue) == 0
 
@@ -327,13 +383,18 @@ class TestDeferredQueueOperations:
     def test_get_returns_item(self, queue: Any) -> None:
         """get returns item by ID."""
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         retrieved = queue.get(item.id)
-        
+
         assert retrieved is not None
         assert retrieved.id == item.id
 
@@ -346,7 +407,9 @@ class TestDeferredQueueStatusOperations:
     """Tests for status-related operations."""
 
     @pytest.fixture(autouse=True)
-    def reset_singletons(self, mock_config: dict[str, Any]) -> Generator[None, None, None]:
+    def reset_singletons(
+        self, mock_config: dict[str, Any]
+    ) -> Generator[None, None, None]:
         """Reset singletons."""
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
@@ -361,18 +424,24 @@ class TestDeferredQueueStatusOperations:
     def queue(self) -> Any:
         """Create fresh DeferredQueue."""
         from main.state.deferred import DeferredQueue
+
         return DeferredQueue()
 
     def test_mark_completed(self, queue: Any) -> None:
         """mark_completed sets status to completed."""
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         result = queue.mark_completed(item.id)
-        
+
         assert result is True
         assert queue.get(item.id).status == "completed"
 
@@ -383,13 +452,18 @@ class TestDeferredQueueStatusOperations:
     def test_mark_failed(self, queue: Any) -> None:
         """mark_failed sets status and error message."""
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         result = queue.mark_failed(item.id, "Download error")
-        
+
         assert result is True
         updated = queue.get(item.id)
         assert updated.status == "failed"
@@ -398,13 +472,18 @@ class TestDeferredQueueStatusOperations:
     def test_mark_retrying_increments_count(self, queue: Any) -> None:
         """mark_retrying increments retry_count."""
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         result = queue.mark_retrying(item.id)
-        
+
         assert result is True
         assert queue.get(item.id).retry_count == 1
         assert queue.get(item.id).status == "retrying"
@@ -412,15 +491,20 @@ class TestDeferredQueueStatusOperations:
     def test_mark_retrying_fails_when_max_exceeded(self, queue: Any) -> None:
         """mark_retrying marks as failed when max retries exceeded."""
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         # Retry until max exceeded
-        for i in range(queue._max_retries):
+        for _i in range(queue._max_retries):
             queue.mark_retrying(item.id)
-        
+
         updated = queue.get(item.id)
         assert updated.status == "failed"
         assert "Max retries" in updated.error_message
@@ -428,14 +512,19 @@ class TestDeferredQueueStatusOperations:
     def test_mark_retrying_updates_reset_time(self, queue: Any) -> None:
         """mark_retrying updates reset_time if provided."""
         item = queue.add(
-            title="Test", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
-        new_reset = datetime.now(timezone.utc) + timedelta(hours=12)
+
+        new_reset = datetime.now(UTC) + timedelta(hours=12)
         queue.mark_retrying(item.id, new_reset_time=new_reset)
-        
+
         updated = queue.get(item.id)
         assert updated.reset_time is not None
 
@@ -448,7 +537,6 @@ class TestDeferredQueueQueries:
         self, mock_config: dict[str, Any], temp_dir: str
     ) -> Generator[None, None, None]:
         """Reset singletons."""
-        import os
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
 
@@ -465,7 +553,6 @@ class TestDeferredQueueQueries:
         """Create fresh DeferredQueue with isolated state."""
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
-        import os
 
         # Create isolated state manager
         state_file = os.path.join(temp_dir, "queue_state.json")
@@ -480,83 +567,123 @@ class TestDeferredQueueQueries:
     def test_get_pending_returns_pending_items(self, queue: Any) -> None:
         """get_pending returns only pending and retrying items."""
         queue.add(
-            title="Pending", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Pending",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
         item2 = queue.add(
-            title="Completed", creator=None, entry_id="E002",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Completed",
+            creator=None,
+            entry_id="E002",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
         queue.mark_completed(item2.id)
-        
+
         pending = queue.get_pending()
-        
+
         assert len(pending) == 1
         assert pending[0].title == "Pending"
 
     def test_get_ready_returns_ready_items(self, queue: Any) -> None:
         """get_ready returns items past their reset time."""
-        past = datetime.now(timezone.utc) - timedelta(hours=1)
-        future = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+        past = datetime.now(UTC) - timedelta(hours=1)
+        future = datetime.now(UTC) + timedelta(hours=1)
+
         queue.add(
-            title="Ready", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o",
-            reset_time=past
+            title="Ready",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+            reset_time=past,
         )
         queue.add(
-            title="NotReady", creator=None, entry_id="E002",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o",
-            reset_time=future
+            title="NotReady",
+            creator=None,
+            entry_id="E002",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+            reset_time=future,
         )
-        
+
         ready = queue.get_ready()
-        
+
         assert len(ready) == 1
         assert ready[0].title == "Ready"
 
     def test_get_by_provider_filters_correctly(self, queue: Any) -> None:
         """get_by_provider returns items for specific provider."""
         queue.add(
-            title="Provider1", creator=None, entry_id="E001",
-            provider_key="provider1", provider_name="P1",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Provider1",
+            creator=None,
+            entry_id="E001",
+            provider_key="provider1",
+            provider_name="P1",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
         queue.add(
-            title="Provider2", creator=None, entry_id="E002",
-            provider_key="provider2", provider_name="P2",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Provider2",
+            creator=None,
+            entry_id="E002",
+            provider_key="provider2",
+            provider_name="P2",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         p1_items = queue.get_by_provider("provider1")
-        
+
         assert len(p1_items) == 1
         assert p1_items[0].title == "Provider1"
 
     def test_get_next_ready_time_returns_earliest(self, queue: Any) -> None:
         """get_next_ready_time returns earliest reset time."""
-        later = datetime.now(timezone.utc) + timedelta(hours=6)
-        earlier = datetime.now(timezone.utc) + timedelta(hours=2)
-        
+        later = datetime.now(UTC) + timedelta(hours=6)
+        earlier = datetime.now(UTC) + timedelta(hours=2)
+
         queue.add(
-            title="Later", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o",
-            reset_time=later
+            title="Later",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+            reset_time=later,
         )
         queue.add(
-            title="Earlier", creator=None, entry_id="E002",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o",
-            reset_time=earlier
+            title="Earlier",
+            creator=None,
+            entry_id="E002",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+            reset_time=earlier,
         )
-        
+
         next_ready = queue.get_next_ready_time()
-        
+
         assert next_ready is not None
         # Should be within a few seconds of 'earlier'
         delta = abs((next_ready - earlier).total_seconds())
@@ -564,20 +691,30 @@ class TestDeferredQueueQueries:
 
     def test_count_by_status(self, queue: Any) -> None:
         """count_by_status returns correct counts."""
-        item1 = queue.add(
-            title="Pending", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+        queue.add(
+            title="Pending",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
         item2 = queue.add(
-            title="Completed", creator=None, entry_id="E002",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Completed",
+            creator=None,
+            entry_id="E002",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
         queue.mark_completed(item2.id)
-        
+
         counts = queue.count_by_status()
-        
+
         assert counts.get("pending", 0) == 1
         assert counts.get("completed", 0) == 1
 
@@ -590,7 +727,6 @@ class TestDeferredQueueCleanup:
         self, mock_config: dict[str, Any], temp_dir: str
     ) -> Generator[None, None, None]:
         """Reset singletons."""
-        import os
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
 
@@ -606,7 +742,6 @@ class TestDeferredQueueCleanup:
         """Create fresh DeferredQueue with isolated state."""
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
-        import os
 
         state_file = os.path.join(temp_dir, "cleanup_state.json")
         StateManager._instance = None
@@ -620,28 +755,38 @@ class TestDeferredQueueCleanup:
     def test_clear_completed_removes_completed(self, queue: Any) -> None:
         """clear_completed removes all completed items."""
         item1 = queue.add(
-            title="Completed", creator=None, entry_id="E001",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Completed",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
         queue.mark_completed(item1.id)
         queue.add(
-            title="Pending", creator=None, entry_id="E002",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Pending",
+            creator=None,
+            entry_id="E002",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
-        
+
         removed = queue.clear_completed()
-        
+
         assert removed == 1
         assert len(queue) == 1
 
     def test_cleanup_old_items_removes_old(self, queue: Any) -> None:
         """cleanup_old_items removes old completed/failed items."""
         from main.state.deferred import DeferredItem
-        
+
         # Directly add an old item
-        old_time = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(days=10)).isoformat()
         old_item = DeferredItem(
             id="old-item",
             title="Old",
@@ -653,20 +798,25 @@ class TestDeferredQueueCleanup:
             work_dir="/w",
             base_output_dir="/o",
             status="completed",
-            deferred_at=old_time
+            deferred_at=old_time,
         )
         queue._items[old_item.id] = old_item
-        
+
         # Add a recent completed item
         recent = queue.add(
-            title="Recent", creator=None, entry_id="E002",
-            provider_key="test", provider_name="Test",
-            source_id="src", work_dir="/w", base_output_dir="/o"
+            title="Recent",
+            creator=None,
+            entry_id="E002",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
         )
         queue.mark_completed(recent.id)
-        
+
         removed = queue.cleanup_old_items(max_age_days=7)
-        
+
         assert removed == 1
         assert queue.get("old-item") is None
         assert queue.get(recent.id) is not None
@@ -675,13 +825,18 @@ class TestDeferredQueueCleanup:
         """clear_all removes all items."""
         for i in range(5):
             queue.add(
-                title=f"Item{i}", creator=None, entry_id=f"E{i}",
-                provider_key="test", provider_name="Test",
-                source_id="src", work_dir="/w", base_output_dir="/o"
+                title=f"Item{i}",
+                creator=None,
+                entry_id=f"E{i}",
+                provider_key="test",
+                provider_name="Test",
+                source_id="src",
+                work_dir="/w",
+                base_output_dir="/o",
             )
-        
+
         removed = queue.clear_all()
-        
+
         assert removed == 5
         assert len(queue) == 0
 
@@ -708,7 +863,6 @@ class TestDeferredQueueIteration:
         """Create fresh DeferredQueue with isolated state."""
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
-        import os
 
         state_file = os.path.join(temp_dir, "iter_state.json")
         StateManager._instance = None
@@ -723,24 +877,34 @@ class TestDeferredQueueIteration:
         """__len__ returns number of items."""
         for i in range(3):
             queue.add(
-                title=f"Item{i}", creator=None, entry_id=f"E{i}",
-                provider_key="test", provider_name="Test",
-                source_id="src", work_dir="/w", base_output_dir="/o"
+                title=f"Item{i}",
+                creator=None,
+                entry_id=f"E{i}",
+                provider_key="test",
+                provider_name="Test",
+                source_id="src",
+                work_dir="/w",
+                base_output_dir="/o",
             )
-        
+
         assert len(queue) == 3
 
     def test_iter_yields_items(self, queue: Any) -> None:
         """__iter__ yields all items."""
         for i in range(3):
             queue.add(
-                title=f"Item{i}", creator=None, entry_id=f"E{i}",
-                provider_key="test", provider_name="Test",
-                source_id="src", work_dir="/w", base_output_dir="/o"
+                title=f"Item{i}",
+                creator=None,
+                entry_id=f"E{i}",
+                provider_key="test",
+                provider_name="Test",
+                source_id="src",
+                work_dir="/w",
+                base_output_dir="/o",
             )
-        
+
         items = list(queue)
-        
+
         assert len(items) == 3
 
 
@@ -748,7 +912,9 @@ class TestGetDeferredQueue:
     """Tests for get_deferred_queue helper."""
 
     @pytest.fixture(autouse=True)
-    def reset_singletons(self, mock_config: dict[str, Any]) -> Generator[None, None, None]:
+    def reset_singletons(
+        self, mock_config: dict[str, Any]
+    ) -> Generator[None, None, None]:
         """Reset singletons."""
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
@@ -765,5 +931,5 @@ class TestGetDeferredQueue:
 
         queue1 = get_deferred_queue()
         queue2 = get_deferred_queue()
-        
+
         assert queue1 is queue2

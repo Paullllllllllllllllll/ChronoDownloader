@@ -8,9 +8,10 @@ detection, and standardized naming.
 Also provides `save_json` for metadata persistence under each work's
 `metadata/` subdirectory.
 """
+
 from __future__ import annotations
 
-import json
+import contextlib
 import logging
 import os
 import time
@@ -22,6 +23,7 @@ from urllib.parse import unquote, urlparse
 
 import requests
 
+from .atomic import atomic_write_json
 from .budget import get_budget
 from .config import (
     get_download_config,
@@ -37,7 +39,12 @@ from .context import (
     peek_counter,
 )
 from .naming import get_provider_slug, sanitize_filename, to_snake_case
-from .network import get_provider_for_url, get_rate_limiter, get_session
+from .network import (
+    get_circuit_breaker,
+    get_provider_for_url,
+    get_rate_limiter,
+    get_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +83,12 @@ _ANNAS_LOGIN_MARKERS = (
 )
 
 
+def _safe_remove(path: str) -> None:
+    """Remove a file, ignoring any error (best-effort cleanup)."""
+    with contextlib.suppress(OSError):
+        os.remove(path)
+
+
 def _infer_extension_from_content_type(content_type: str) -> str:
     ct_lower = content_type.lower()
     for mime, ext in _CONTENT_TYPE_EXT_MAP.items():
@@ -102,11 +115,17 @@ def _should_reject_html_response(
     suggests_epub = ".epub" in path_lower or "output=epub" in url_lower
 
     if suggests_pdf or suggests_epub:
-        return True, "URL suggests PDF/EPUB but server returned HTML (likely error page)"
+        return (
+            True,
+            "URL suggests PDF/EPUB but server returned HTML (likely error page)",
+        )
 
-    if "annas-archive" in url_lower:
-        if content_length and 170000 < content_length < 185000:
-            return True, "Anna's Archive HTML page likely login/error page (~180KB)"
+    if (
+        "annas-archive" in url_lower
+        and content_length
+        and 170000 < content_length < 185000
+    ):
+        return True, "Anna's Archive HTML page likely login/error page (~180KB)"
 
     return False, ""
 
@@ -125,10 +144,11 @@ def _validate_file_magic_bytes(filepath: str, ext: str) -> tuple[bool, str]:
             if not first_bytes.startswith(b"%PDF-"):
                 if is_html:
                     return False, "File claims to be PDF but contains HTML"
-        elif ext == ".epub":
-            if not first_bytes.startswith(b"PK\x03\x04"):
-                if is_html:
-                    return False, "File claims to be EPUB but contains HTML"
+                return False, "File claims to be PDF but has invalid magic bytes"
+        elif ext == ".epub" and not first_bytes.startswith(b"PK\x03\x04"):
+            if is_html:
+                return False, "File claims to be EPUB but contains HTML"
+            return False, "File claims to be EPUB but has invalid magic bytes"
 
         return True, ""
     except Exception as e:
@@ -146,7 +166,7 @@ def _validate_html_not_login_page(
         return True, ""
 
     try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+        with open(filepath, encoding="utf-8", errors="ignore") as f:
             html_content = f.read(2048).lower()
 
         if any(marker in html_content for marker in _ANNAS_LOGIN_MARKERS):
@@ -254,7 +274,9 @@ def _try_skip_existing(
         stem = stem[:50].rstrip("_")
 
     type_key = (
-        "image" if predicted_ext in _IMAGE_EXTENSIONS else (predicted_ext.lstrip(".") or "bin")
+        "image"
+        if predicted_ext in _IMAGE_EXTENSIONS
+        else (predicted_ext.lstrip(".") or "bin")
     )
     key = (stem, prov_slug, type_key)
     seq = peek_counter(key)
@@ -294,6 +316,19 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     existing = _try_skip_existing(url, folder_path, filename, provider)
     if existing is not None:
         return existing
+
+    # Consult the per-provider circuit breaker before downloading, mirroring
+    # make_request: a provider tripped by 429/5xx storms is skipped until its
+    # cooldown elapses.
+    cb = get_circuit_breaker(provider)
+    if cb and not cb.allow_request():
+        logger.warning(
+            "Circuit breaker OPEN for %s; skipping download (retry in %.0fs): %s",
+            provider or "unknown",
+            cb.time_until_retry(),
+            url,
+        )
+        return None
 
     net = get_network_config(provider)
 
@@ -336,16 +371,21 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         )
         if should_reject:
             log_suffix = " (insecure retry)" if is_insecure_retry else ""
-            logger.warning("Rejecting download%s: %s: %s", log_suffix, reject_reason, url)
+            logger.warning(
+                "Rejecting download%s: %s: %s", log_suffix, reject_reason, url
+            )
             return None
 
         cd_name = _filename_from_content_disposition(
             response.headers.get("Content-Disposition")
         )
         parsed = urlparse(url)
+        # Prefer the server's declared Content-Type over the URL suffix: a URL
+        # ending in ``.pdf`` may actually serve an HTML error page, whereas the
+        # Content-Type reflects the real payload.
         inferred_ext = (
-            Path(parsed.path).suffix
-            or _infer_extension_from_content_type(content_type)
+            _infer_extension_from_content_type(content_type)
+            or Path(parsed.path).suffix
             or Path(cd_name or "").suffix
             or Path(filename or "").suffix
             or ".bin"
@@ -380,9 +420,19 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             logger.warning("Download budget (files) exceeded; skipping %s", url)
             return None
 
+        # Classify the payload into its budget bucket by extension so PDF and
+        # metadata limits are actually enforced (previously everything was
+        # booked as "images").
+        if inferred_ext in (".pdf", ".epub"):
+            budget_type = "pdfs"
+        elif inferred_ext in (".json", ".xml", ".html", ".txt"):
+            budget_type = "metadata"
+        else:
+            budget_type = "images"
+
         content_len_int = int(cl_header) if cl_header else 0
         if content_len_int and not _BUDGET.allow_bytes(
-            provider, work_id, content_len_int
+            provider, work_id, content_len_int, content_type=budget_type
         ):
             logger.warning(
                 "Download budget (bytes) would be exceeded by %s (%d bytes); skipping.",
@@ -391,45 +441,85 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             )
             return None
 
+        # Stream into a temporary <name>.part file and only promote it to the
+        # final path via os.replace() once the write is complete and validated.
+        # A connection drop, disk-full error, or budget cutoff therefore never
+        # leaves a partial file at the final path that a later resume run would
+        # treat as a complete download.
+        part_path = filepath + ".part"
         truncated = False
-        with open(filepath, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if not chunk:
-                    continue
-                if not _BUDGET.add_bytes(provider, work_id, len(chunk)):
-                    logger.error(
-                        "Download budget exceeded while writing %s; truncating and removing file.",
-                        filepath,
-                    )
-                    truncated = True
-                    break
-                f.write(chunk)
-
-        if truncated:
-            try:
-                os.remove(filepath)
-            except Exception:
-                pass
+        bytes_written = 0
+        try:
+            with open(part_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    if not _BUDGET.add_bytes(
+                        provider, work_id, len(chunk), content_type=budget_type
+                    ):
+                        logger.error(
+                            "Download budget exceeded while writing %s; "
+                            "discarding partial file.",
+                            filepath,
+                        )
+                        truncated = True
+                        break
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+        except (requests.exceptions.RequestException, OSError) as e:
+            logger.error(
+                "Error while streaming %s to %s: %s; discarding partial file.",
+                url,
+                part_path,
+                e,
+            )
+            _safe_remove(part_path)
             return None
 
-        is_valid, error_msg = _validate_file_magic_bytes(filepath, inferred_ext)
+        if truncated:
+            _safe_remove(part_path)
+            return None
+
+        # Reject zero-byte downloads outright.
+        if bytes_written == 0:
+            logger.warning("Downloaded 0 bytes for %s; discarding.", url)
+            _safe_remove(part_path)
+            return None
+
+        # When the server declared a Content-Length, require the written byte
+        # count to match; a short read means the stream was truncated.
+        if content_len is not None and bytes_written != content_len:
+            logger.error(
+                "Incomplete download for %s: wrote %d of %d declared bytes; "
+                "discarding.",
+                url,
+                bytes_written,
+                content_len,
+            )
+            _safe_remove(part_path)
+            return None
+
+        is_valid, error_msg = _validate_file_magic_bytes(part_path, inferred_ext)
         if not is_valid:
-            logger.warning("%s; removing: %s", error_msg, filepath)
-            try:
-                os.remove(filepath)
-            except Exception:
-                pass
+            logger.warning("%s; discarding: %s", error_msg, url)
+            _safe_remove(part_path)
             return None
 
         if inferred_ext == ".html":
-            is_valid, error_msg = _validate_html_not_login_page(filepath, url, provider)
+            is_valid, error_msg = _validate_html_not_login_page(
+                part_path, url, provider
+            )
             if not is_valid:
-                logger.warning("%s; removing: %s", error_msg, filepath)
-                try:
-                    os.remove(filepath)
-                except Exception:
-                    pass
+                logger.warning("%s; discarding: %s", error_msg, url)
+                _safe_remove(part_path)
                 return None
+
+        try:
+            os.replace(part_path, filepath)
+        except OSError as e:
+            logger.error("Failed to finalize download %s: %s", filepath, e)
+            _safe_remove(part_path)
+            return None
 
         log_suffix = " (insecure)" if is_insecure_retry else ""
         logger.info("Downloaded %s -> %s%s", url, filepath, log_suffix)
@@ -437,7 +527,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
 
         if not counts_as_success:
             logger.info(
-                "File saved to metadata folder; not counting as successful download for work completion"
+                "File saved to metadata folder; not counting as successful "
+                "download for work completion"
             )
             return None
         return filepath
@@ -450,7 +541,10 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 try:
                     retry_dt = parsedate_to_datetime(retry_after)
                     return min(
-                        max(0.0, (retry_dt - datetime.now(retry_dt.tzinfo)).total_seconds()),
+                        max(
+                            0.0,
+                            (retry_dt - datetime.now(retry_dt.tzinfo)).total_seconds(),
+                        ),
                         max_backoff,
                     )
                 except Exception:
@@ -507,6 +601,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     return None
 
                 response.raise_for_status()
+                if cb:
+                    cb.record_success()
                 return _process_response(response)
 
         logger.error(
@@ -514,12 +610,15 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             max_attempts,
             url,
         )
+        if cb:
+            cb.record_failure(provider or "unknown")
         return None
 
     except requests.exceptions.SSLError as e:
         if ssl_policy == "retry_insecure_once":
             logger.warning(
-                "SSL verify failed for %s; retrying once with verify=False due to policy.",
+                "SSL verify failed for %s; retrying once with verify=False due "
+                "to policy.",
                 url,
             )
             try:
@@ -540,6 +639,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
 
     except requests.exceptions.RequestException as e:
         logger.error("Error downloading %s: %s", url, e)
+        if cb:
+            cb.record_failure(provider or "unknown")
         return None
 
     except OSError as e:
@@ -575,19 +676,21 @@ def save_json(data: Any, folder_path: str, filename: str) -> str | None:
     key = (stem, prov_slug or "unknown", "metadata")
     idx = increment_counter(key)
 
-    if idx <= 1:
-        base = f"{stem}_{prov_slug}"
-    else:
-        base = f"{stem}_{prov_slug}_{idx}"
+    base = f"{stem}_{prov_slug}" if idx <= 1 else f"{stem}_{prov_slug}_{idx}"
 
     filepath = os.path.join(meta_dir, sanitize_filename(base) + ".json")
 
     try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        atomic_write_json(filepath, data)
         logger.info("Saved JSON: %s", filepath)
+        # Book metadata bytes against the metadata budget bucket.
+        try:
+            size = os.path.getsize(filepath)
+            _BUDGET.record_download("metadata", get_current_work(), size)
+        except OSError:
+            pass
         return filepath
-    except (OSError, TypeError) as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.error("Error saving JSON %s: %s", filepath, e)
         return None
 

@@ -8,6 +8,8 @@ image from a service base using default and info.json-derived candidates.
 from __future__ import annotations
 
 import logging
+import threading
+from collections import OrderedDict
 from typing import Any
 
 from ..core.download import download_file
@@ -22,21 +24,35 @@ __all__ = [
     "download_one_from_service",
 ]
 
-_INFO_JSON_CACHE: dict[str, dict[str, Any]] = {}
+# Bounded LRU cache of info.json documents (one per image service). Unbounded
+# growth would leak memory across a long multi-work run.
+_INFO_JSON_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_INFO_JSON_CACHE_MAX = 512
+_INFO_JSON_CACHE_LOCK = threading.Lock()
+
+# Cap on speculative Image-API URL guesses tried per page before consulting
+# info.json. Each miss costs a full network retry cycle; the first two guesses
+# cover the overwhelming majority of IIIF servers.
+_MAX_SPECULATIVE_CANDIDATES = 3
 
 
 def _fetch_info_json(service_base: str) -> dict[str, Any] | None:
     b = service_base.rstrip("/")
-    cached = _INFO_JSON_CACHE.get(b)
-
-    if isinstance(cached, dict) and cached:
-        return cached
+    with _INFO_JSON_CACHE_LOCK:
+        cached = _INFO_JSON_CACHE.get(b)
+        if isinstance(cached, dict) and cached:
+            _INFO_JSON_CACHE.move_to_end(b)
+            return cached
 
     info_url = f"{b}/info.json"
     info = make_request(info_url)
 
     if isinstance(info, dict) and info:
-        _INFO_JSON_CACHE[b] = info
+        with _INFO_JSON_CACHE_LOCK:
+            _INFO_JSON_CACHE[b] = info
+            _INFO_JSON_CACHE.move_to_end(b)
+            while len(_INFO_JSON_CACHE) > _INFO_JSON_CACHE_MAX:
+                _INFO_JSON_CACHE.popitem(last=False)
         return info
 
     return None
@@ -250,7 +266,10 @@ def image_url_candidates(
 def download_one_from_service(
     service_base: str, output_folder: str, filename: str
 ) -> bool:
-    for url in image_url_candidates(service_base):
+    # Try a bounded number of speculative URL patterns first; each miss costs
+    # a full retry cycle, so the long tail is deferred to the info.json pass.
+    speculative = image_url_candidates(service_base)[:_MAX_SPECULATIVE_CANDIDATES]
+    for url in speculative:
         if download_file(url, output_folder, filename):
             return True
 
@@ -260,7 +279,10 @@ def download_one_from_service(
         info = None
 
     if info:
+        tried = set(speculative)
         for url in image_url_candidates(service_base, info=info):
+            if url in tried:
+                continue
             if download_file(url, output_folder, filename):
                 return True
 

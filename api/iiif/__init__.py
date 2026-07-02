@@ -17,6 +17,7 @@ Public surface:
   download_from_iiif_manifest, is_direct_download_enabled,
   get_direct_link_column, get_naming_template, resolve_file_stem
 """
+
 from __future__ import annotations
 
 from ._direct import (

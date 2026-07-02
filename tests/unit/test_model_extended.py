@@ -1,9 +1,8 @@
 """Extended tests for api.model module — SearchResult and helper functions."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from api.model import (
     QuotaDeferredException,
@@ -14,10 +13,10 @@ from api.model import (
     resolve_item_id,
 )
 
-
 # ============================================================================
 # resolve_item_field
 # ============================================================================
+
 
 class TestResolveItemField:
     """Tests for unified field extraction."""
@@ -46,7 +45,9 @@ class TestResolveItemField:
         assert resolve_item_field(42, "key", default="fallback") == "fallback"  # type: ignore[arg-type]
 
     def test_searchresult_attr_defaults_to_raw_key(self) -> None:
-        sr = SearchResult(provider="IA", title="Test", source_id="src1", raw={"source_id": "raw"})
+        sr = SearchResult(
+            provider="IA", title="Test", source_id="src1", raw={"source_id": "raw"}
+        )
         # attr defaults to raw_key ("source_id"), which matches a real attribute
         assert resolve_item_field(sr, "source_id") == "src1"
 
@@ -54,6 +55,7 @@ class TestResolveItemField:
 # ============================================================================
 # resolve_item_id
 # ============================================================================
+
 
 class TestResolveItemId:
     """Tests for ID extraction from SearchResult or dict."""
@@ -63,11 +65,15 @@ class TestResolveItemId:
         assert resolve_item_id(sr) == "abc"
 
     def test_searchresult_raw_fallback(self) -> None:
-        sr = SearchResult(provider="IA", title="Test", source_id=None, raw={"id": "123"})
+        sr = SearchResult(
+            provider="IA", title="Test", source_id=None, raw={"id": "123"}
+        )
         assert resolve_item_id(sr) == "123"
 
     def test_searchresult_multiple_keys(self) -> None:
-        sr = SearchResult(provider="IA", title="Test", source_id=None, raw={"identifier": "x"})
+        sr = SearchResult(
+            provider="IA", title="Test", source_id=None, raw={"identifier": "x"}
+        )
         assert resolve_item_id(sr, "id", "identifier") == "x"
 
     def test_searchresult_none_when_missing(self) -> None:
@@ -96,6 +102,7 @@ class TestResolveItemId:
 # ============================================================================
 # _as_list
 # ============================================================================
+
 
 class TestAsList:
     """Tests for value-to-list conversion."""
@@ -128,6 +135,7 @@ class TestAsList:
 # ============================================================================
 # convert_to_searchresult
 # ============================================================================
+
 
 class TestConvertToSearchResult:
     """Tests for dict-to-SearchResult conversion."""
@@ -203,11 +211,12 @@ class TestConvertToSearchResult:
 # QuotaDeferredException
 # ============================================================================
 
+
 class TestQuotaDeferredExceptionExtended:
     """Extended tests for QuotaDeferredException."""
 
     def test_repr_with_reset_time(self) -> None:
-        dt = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        dt = datetime(2025, 1, 1, tzinfo=UTC)
         exc = QuotaDeferredException("ia", reset_time=dt)
         r = repr(exc)
         assert "ia" in r
@@ -232,6 +241,7 @@ class TestQuotaDeferredExceptionExtended:
 # ============================================================================
 # SearchResult
 # ============================================================================
+
 
 class TestSearchResultExtended:
     """Extended tests for SearchResult dataclass."""

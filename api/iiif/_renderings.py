@@ -6,6 +6,7 @@ by `config.download.download_manifest_renderings`,
 `config.download.rendering_mime_whitelist`, and
 `config.download.max_renderings_per_manifest`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -72,9 +73,12 @@ def download_iiif_renderings(
         fmt = (it.get("format") or it.get("type") or "").lower()
         if not url or not isinstance(url, str):
             continue
-        if whitelist and all(w not in fmt for w in whitelist):
-            if not any(url.lower().endswith(ext) for ext in (".pdf", ".epub")):
-                continue
+        if (
+            whitelist
+            and all(w not in fmt for w in whitelist)
+            and not any(url.lower().endswith(ext) for ext in (".pdf", ".epub"))
+        ):
+            continue
         if url in seen:
             continue
         seen.add(url)

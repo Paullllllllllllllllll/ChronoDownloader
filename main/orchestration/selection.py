@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from api.core.config import get_config, get_min_title_score, get_provider_setting
-from api.matching import combined_match_score
+from api.matching import creator_score, title_score
 from api.model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
@@ -96,16 +96,19 @@ def score_candidate(
         creator_weight: Weight for creator matching (0.0-1.0)
 
     Returns:
-        Dictionary with 'score', 'boost', and 'total' keys
+        Dictionary with keys ``score`` (pure title score, used for the
+        ``min_title_score`` gate), ``creator_score``, ``creator_bonus``,
+        ``boost`` (quality signals), and ``total`` (ranking score).
+
+    Per the matching decision, ``min_title_score`` gates the pure title score
+    only; creator similarity contributes a positive ranking bonus and never
+    penalizes a candidate that lacks creator metadata.
     """
-    score = combined_match_score(
-        query_title=query_title,
-        item_title=sr.title,
-        query_creator=query_creator,
-        creators=sr.creators,
-        creator_weight=float(creator_weight),
-        method="token_set",
-    )
+    title = float(title_score(query_title, sr.title, method="token_set"))
+
+    cw = max(0.0, min(1.0, float(creator_weight or 0.0)))
+    cs = float(creator_score(query_creator, sr.creators)) if query_creator else 0.0
+    creator_bonus = cw * cs
 
     # Quality signals boost
     boost = 0.0
@@ -114,9 +117,16 @@ def score_candidate(
     if sr.item_url:
         boost += 0.5
 
-    total = score + boost
+    total = title + creator_bonus + boost
 
-    return {"score": score, "boost": boost, "total": total}
+    return {
+        "score": title,
+        "title_score": title,
+        "creator_score": cs,
+        "creator_bonus": creator_bonus,
+        "boost": boost,
+        "total": total,
+    }
 
 
 def attach_scores(

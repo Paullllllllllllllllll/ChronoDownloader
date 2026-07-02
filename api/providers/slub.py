@@ -3,17 +3,24 @@
 Search uses the SLUB LOD API /search endpoint and downloads via IIIF manifests
 hosted by SLUB's digital collections.
 """
+
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
-from typing import Any, cast
+from typing import Any
 
-from ..iiif import download_iiif_manifest_and_images
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
-from ..query_helpers import escape_sru_literal
-from ..core.network import make_request
 from ..core.download import save_json
+from ..core.network import make_request
+from ..iiif import download_iiif_manifest_and_images
+from ..model import (
+    SearchResult,
+    convert_to_searchresult,
+    resolve_item_field,
+    resolve_item_id,
+)
+from ..query_helpers import escape_sru_literal
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +29,19 @@ SOURCE_URL = "https://data.slub-dresden.de/source/kxp-de14/{record_id}"
 IIIF_MANIFEST_URL = "https://iiif.slub-dresden.de/iiif/2/{ppn}/manifest.json"
 DIGITAL_ITEM_URL = "https://digital.slub-dresden.de/id{ppn}"
 
+
 def _extract_title(item: dict[str, Any]) -> str:
     title = item.get("preferredName") or ""
     if isinstance(item.get("title"), dict):
-        title = item["title"].get("mainTitle") or item["title"].get("preferredName") or title
+        title = (
+            item["title"].get("mainTitle")
+            or item["title"].get("preferredName")
+            or title
+        )
     elif isinstance(item.get("title"), str):
         title = item.get("title")
     return title or "N/A"
+
 
 def _extract_creator(item: dict[str, Any]) -> str:
     contrib = item.get("contributor") or []
@@ -38,11 +51,13 @@ def _extract_creator(item: dict[str, Any]) -> str:
                 return str(c.get("name"))
     return "N/A"
 
+
 def _extract_record_id(item: dict[str, Any]) -> str | None:
     record_id = item.get("@id") or item.get("id")
     if record_id and isinstance(record_id, str):
-        return cast(str, record_id.rstrip("/").split("/")[-1])
+        return record_id.rstrip("/").split("/")[-1]
     return None
+
 
 def _extract_ppn_from_url(url: str | None) -> str | None:
     if not url or not isinstance(url, str):
@@ -55,15 +70,16 @@ def _extract_ppn_from_url(url: str | None) -> str | None:
         return match.group(1)
     return None
 
-def _resolve_ppn_from_source(record_id: str, output_folder: str) -> tuple[str | None, str | None]:
+
+def _resolve_ppn_from_source(
+    record_id: str, output_folder: str
+) -> tuple[str | None, str | None]:
     """Fetch source record and extract digital URL + PPN."""
     url = SOURCE_URL.format(record_id=record_id)
     data = make_request(url)
     if isinstance(data, dict):
-        try:
+        with contextlib.suppress(Exception):
             save_json(data, output_folder, f"slub_{record_id}_source")
-        except Exception:
-            pass
     if not isinstance(data, dict):
         return None, None
 
@@ -79,7 +95,10 @@ def _resolve_ppn_from_source(record_id: str, output_folder: str) -> tuple[str | 
     ppn = _extract_ppn_from_url(digital_url)
     return ppn, digital_url
 
-def search_slub(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_slub(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search SLUB LOD API for digitized resources."""
     q = title if not creator else f"{title} {creator}"
     q = escape_sru_literal(q)
@@ -101,7 +120,11 @@ def search_slub(title: str, creator: str | None = None, max_results: int = 3) ->
             continue
         access_mode = str(item.get("accessMode") or "").lower()
         reproduction_type = str(item.get("reproductionType") or "").lower()
-        if access_mode and access_mode != "online" and "online" not in reproduction_type:
+        if (
+            access_mode
+            and access_mode != "online"
+            and "online" not in reproduction_type
+        ):
             continue
 
         record_id = _extract_record_id(item)
@@ -120,7 +143,10 @@ def search_slub(title: str, creator: str | None = None, max_results: int = 3) ->
 
     return results
 
-def download_slub_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_slub_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download SLUB item via IIIF manifest derived from the source record."""
     record_id = resolve_item_id(item_data)
     manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")

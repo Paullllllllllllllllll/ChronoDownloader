@@ -99,7 +99,8 @@ def search_hathitrust(
     results: list[SearchResult] = []
     if not id_hints:
         logger.info(
-            "HathiTrust: no explicit identifiers found in query '%s'; skipping search (no public keyword API).",
+            "HathiTrust: no explicit identifiers found in query '%s'; skipping "
+            "search (no public keyword API).",
             title,
         )
         return results

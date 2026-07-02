@@ -7,6 +7,7 @@ Three cohesive concerns previously peer-level under ``main/``:
 - :mod:`main.data.work` -- per-work directory naming, work.json persistence,
   candidate/selection formatters, resume-mode decisions
 """
+
 from __future__ import annotations
 
 from .index import (

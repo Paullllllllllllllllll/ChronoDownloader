@@ -38,7 +38,8 @@ def _build_manifest_url_from_id(
 ) -> str | None:
     """Construct the Europeana IIIF Manifest API URL from a Europeana record id.
 
-    Europeana search results typically have ids like "/9200379/BibliographicResource_3000117247947".
+    Europeana search results typically have ids like
+    "/9200379/BibliographicResource_3000117247947".
     The manifest URL format is:
       https://iiif.europeana.eu/presentation/{collectionId}/{recordId}/manifest?wskey=KEY[&format=3]
     """
@@ -48,7 +49,10 @@ def _build_manifest_url_from_id(
     # Expect [collectionId, recordId]
     if len(parts) >= 2:
         collection_id, record_id = parts[-2], parts[-1]
-        url = f"{EUROPEANA_MANIFEST_HOST}/presentation/{collection_id}/{record_id}/manifest"
+        url = (
+            f"{EUROPEANA_MANIFEST_HOST}/presentation/"
+            f"{collection_id}/{record_id}/manifest"
+        )
         params = []
         if api_key:
             params.append(f"wskey={api_key}")
@@ -185,7 +189,8 @@ def download_europeana_work(
         )
         if renders > 0 and prefer_pdf_over_images():
             logger.info(
-                "Europeana: downloaded %d rendering(s); skipping image downloads per config.",
+                "Europeana: downloaded %d rendering(s); skipping image downloads "
+                "per config.",
                 renders,
             )
             return True
@@ -254,7 +259,8 @@ def download_europeana_work(
                     )
         else:
             logger.info(
-                "No IIIF image services or direct images found in Europeana manifest for %s",
+                "No IIIF image services or direct images found in Europeana "
+                "manifest for %s",
                 item_id,
             )
 

@@ -1,9 +1,11 @@
-"""Provider registry mapping provider keys to (search_func, download_func, display_name).
+"""Provider registry mapping provider keys to (search_func, download_func,
+display_name).
 
 Centralizes provider imports and the mapping consumed by the orchestration
 layer. Internal to the :mod:`api.providers` package; downstream code should
 import :data:`PROVIDERS` from :mod:`api.providers`.
 """
+
 from __future__ import annotations
 
 from typing import Any

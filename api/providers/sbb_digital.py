@@ -3,24 +3,32 @@
 Search uses the GBV SRU endpoint for StaBiKat and downloads via the
 METS resolver (digitized collections) that exposes direct image/PDF URLs.
 """
+
 from __future__ import annotations
 
+import contextlib
 import logging
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
-from ..query_helpers import escape_sru_literal
 from ..core.budget import budget_exhausted
 from ..core.config import get_max_pages, prefer_pdf_over_images
-from ..core.network import make_request
 from ..core.download import download_file, save_json
+from ..core.network import make_request
+from ..model import (
+    SearchResult,
+    convert_to_searchresult,
+    resolve_item_field,
+    resolve_item_id,
+)
+from ..query_helpers import escape_sru_literal
 
 logger = logging.getLogger(__name__)
 
 SRU_URL = "https://sru.gbv.de/stabikat"
 METS_URL = "https://digital.staatsbibliothek-berlin.de/dms/metsresolver/?PPN={ppn}"
 ITEM_URL = "https://digital.staatsbibliothek-berlin.de/werkansicht?PPN={ppn}"
+
 
 def _candidate_queries(title: str, creator: str | None) -> list[str]:
     q_title = escape_sru_literal(title)
@@ -34,7 +42,10 @@ def _candidate_queries(title: str, creator: str | None) -> list[str]:
     queries.append(f'"{q_title}"')
     return [q for q in queries if q]
 
-def search_sbb_digital(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_sbb_digital(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search StaBiKat via SRU for potential digitized items."""
     results: list[SearchResult] = []
     for query in _candidate_queries(title, creator):
@@ -46,7 +57,9 @@ def search_sbb_digital(title: str, creator: str | None = None, max_results: int 
             "recordSchema": "mods",
         }
         logger.info("Searching StaBiKat SRU for: %s", title)
-        response_text = make_request(SRU_URL, params=params, headers={"Accept": "application/xml"})
+        response_text = make_request(
+            SRU_URL, params=params, headers={"Accept": "application/xml"}
+        )
         if not isinstance(response_text, str):
             continue
 
@@ -63,20 +76,33 @@ def search_sbb_digital(title: str, creator: str | None = None, max_results: int 
 
                 title_el = mods.find(".//mods:titleInfo/mods:title", ns)
                 subtitle_el = mods.find(".//mods:titleInfo/mods:subTitle", ns)
-                item_title = title_el.text.strip() if title_el is not None and title_el.text else "N/A"
+                item_title = (
+                    title_el.text.strip()
+                    if title_el is not None and title_el.text
+                    else "N/A"
+                )
                 if subtitle_el is not None and subtitle_el.text:
                     item_title = f"{item_title} {subtitle_el.text.strip()}"
 
                 creator_el = mods.find(".//mods:name/mods:displayForm", ns)
                 if creator_el is None:
                     creator_el = mods.find(".//mods:name/mods:namePart", ns)
-                item_creator = creator_el.text.strip() if creator_el is not None and creator_el.text else "N/A"
+                item_creator = (
+                    creator_el.text.strip()
+                    if creator_el is not None and creator_el.text
+                    else "N/A"
+                )
 
                 record_id = None
-                for rec_id in mods.findall(".//mods:recordInfo/mods:recordIdentifier", ns):
+                for rec_id in mods.findall(
+                    ".//mods:recordInfo/mods:recordIdentifier", ns
+                ):
                     if rec_id is None or not rec_id.text:
                         continue
-                    if rec_id.get("source") and "ppn" in (rec_id.get("source") or "").lower():
+                    if (
+                        rec_id.get("source")
+                        and "ppn" in (rec_id.get("source") or "").lower()
+                    ):
                         record_id = rec_id.text.strip()
                         break
                     if not record_id:
@@ -108,6 +134,7 @@ def search_sbb_digital(title: str, creator: str | None = None, max_results: int 
 
     return results
 
+
 def _collect_mets_urls(mets_xml: str) -> tuple[list[str], list[str]]:
     ns = {
         "mets": "http://www.loc.gov/METS/",
@@ -129,12 +156,17 @@ def _collect_mets_urls(mets_xml: str) -> tuple[list[str], list[str]]:
         if "pdf" in mimetype or href_lower.endswith(".pdf"):
             pdf_urls.append(href)
             continue
-        if "image" in mimetype or href_lower.endswith((".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2")):
+        if "image" in mimetype or href_lower.endswith(
+            (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2")
+        ):
             image_urls.append(href)
 
     return pdf_urls, image_urls
 
-def download_sbb_digital_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_sbb_digital_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download PDF/images using METS resolver URLs."""
     ppn = resolve_item_id(item_data)
     mets_url = resolve_item_field(item_data, "mets_url")
@@ -154,10 +186,8 @@ def download_sbb_digital_work(item_data: SearchResult | dict[str, Any], output_f
         logger.warning("Failed to fetch METS for %s", ppn)
         return False
 
-    try:
+    with contextlib.suppress(Exception):
         save_json({"mets_xml": mets_xml}, output_folder, f"sbb_{ppn}_mets")
-    except Exception:
-        pass
 
     try:
         pdf_urls, image_urls = _collect_mets_urls(mets_xml)
@@ -177,7 +207,8 @@ def download_sbb_digital_work(item_data: SearchResult | dict[str, Any], output_f
     for idx, url in enumerate(to_download, start=1):
         if budget_exhausted():
             logger.warning(
-                "Download budget exhausted; stopping SBB downloads at %d/%d pages for %s",
+                "Download budget exhausted; stopping SBB downloads at %d/%d "
+                "pages for %s",
                 idx - 1,
                 len(to_download),
                 ppn,

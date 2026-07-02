@@ -1,4 +1,5 @@
 """``--id`` CLI handler: resolve a provider-specific identifier to a download."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,13 +10,19 @@ from typing import Any
 from api.providers import PROVIDERS
 from main.orchestration.execution import process_direct_iiif
 
+from ..exit_codes import EXIT_FAILURES, EXIT_OK, EXIT_USAGE
+
 
 def run_identifier_cli(
     args: argparse.Namespace,
     config: dict[str, Any],
     logger: logging.Logger,
-) -> None:
-    """Resolve ``--id`` to a manifest URL (or native download) and fetch the work."""
+) -> int:
+    """Resolve ``--id`` to a manifest URL (or native download) and fetch the work.
+
+    Returns:
+        A process exit code (see :mod:`main.cli.exit_codes`).
+    """
     from api.identifier_resolver import (
         download_by_native_provider,
         resolve_identifier,
@@ -32,13 +39,13 @@ def run_identifier_cli(
             "Unknown provider key '%s'. Use --list-providers for valid keys.",
             provider_key,
         )
-        return
+        return EXIT_USAGE
 
     try:
         candidates = resolve_identifier(identifier, provider_key)
     except KeyError as exc:
         logger.error("%s", exc)
-        return
+        return EXIT_USAGE
 
     if not candidates:
         logger.error(
@@ -48,7 +55,7 @@ def run_identifier_cli(
             identifier,
             ", ".join(sorted(PROVIDERS.keys())),
         )
-        return
+        return EXIT_USAGE
 
     entry_id = f"ID_{identifier}"
     title = name_stem
@@ -67,10 +74,13 @@ def run_identifier_cli(
                     identifier,
                     pkey,
                 )
-                return
+                return EXIT_OK
 
             ok = download_by_native_provider(
-                identifier, pkey, work_dir, title=title,
+                identifier,
+                pkey,
+                work_dir,
+                title=title,
             )
             if ok:
                 logger.info(
@@ -78,7 +88,7 @@ def run_identifier_cli(
                     pkey,
                     identifier,
                 )
-                return
+                return EXIT_OK
             logger.warning("Native download failed via %s", pkey)
             continue
 
@@ -93,20 +103,14 @@ def run_identifier_cli(
             )
 
             status = result.get("status", "")
-            if status == "completed":
+            if status in ("completed", "dry_run"):
                 logger.info(
-                    "Download completed via %s for identifier '%s'",
+                    "%s via %s for identifier '%s'",
+                    "Dry-run complete" if status == "dry_run" else "Download completed",
                     pkey,
                     identifier,
                 )
-                return
-            if status == "dry_run":
-                logger.info(
-                    "Dry-run complete via %s for identifier '%s'",
-                    pkey,
-                    identifier,
-                )
-                return
+                return EXIT_OK
 
             logger.warning(
                 "Failed via %s (%s): %s",
@@ -115,6 +119,5 @@ def run_identifier_cli(
                 result.get("error", "unknown"),
             )
 
-    logger.error(
-        "All provider candidates failed for identifier '%s'", identifier
-    )
+    logger.error("All provider candidates failed for identifier '%s'", identifier)
+    return EXIT_FAILURES

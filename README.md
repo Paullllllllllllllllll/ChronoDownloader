@@ -1,4 +1,4 @@
-# ChronoDownloader v1.6.0
+# ChronoDownloader v1.7.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -224,8 +224,20 @@ python -m main.cli my_books.csv --config config_small.json
 
 CLI mode activates automatically when positional CSV, `--iiif`,
 `--id`, `--dry-run`, or other CLI-style arguments are present.
-Force it explicitly with `--cli` or `interactive_mode: false` in
-config.
+Force it explicitly with `--cli` / `--non-interactive`, or
+`interactive_mode: false` in config. Interactive mode requires a
+TTY: if it is requested without one, the tool exits with code `2`
+instead of blocking on a prompt.
+
+`--dry-run` has no side effects: it performs discovery, resume
+classification, and candidate matching, but writes no work
+directories, `work.json` files, or `index.csv` rows and makes no
+downloads.
+
+Downloads that hit a provider quota are recorded as `deferred` in
+the works CSV (retriable, distinct from `failed`). Ready deferred
+items are retried automatically and synchronously at the start of
+the next run; there is no long-lived background daemon.
 
 ### Common Workflows
 
@@ -263,11 +275,14 @@ ChronoDownloader uses a unified CSV as both input and output.
 
 **Optional columns**:
 
-- `main_author`: creator/author name (improves matching)
+- `main_author`: creator/author name (improves ranking)
 - `direct_link`: IIIF manifest URL for direct download (bypasses
   search)
-- `retrievable`: download status (`True`/`False`/empty,
-  automatically updated)
+- `retrievable`: download status (`True`/`False`/`deferred`/empty,
+  automatically updated). `deferred` marks a quota-deferred work
+  that will be retried automatically at the start of the next run;
+  it is distinct from `False` (failed) and counts as pending for
+  resume purposes.
 - `link`: item URL (automatically populated after download)
 
 Additional columns are preserved but not used.
@@ -316,7 +331,15 @@ optional in interactive).
   verbosity (default: `INFO`)
 - `--config PATH` -- configuration JSON file
   (default: `config.json`)
-- `--interactive` / `--cli` -- force execution mode
+- `--interactive` / `--cli` / `--non-interactive` -- force execution
+  mode (override the config-file mode)
+- `--json` -- emit one machine-readable JSON summary line on stdout
+  at exit (files processed / succeeded / failed / deferred / skipped,
+  output paths)
+- `--verify` -- verify the works already downloaded under
+  `--output_dir` (non-empty objects, PDF/EPUB magic bytes, and
+  recorded page counts) and flip any incomplete work to `partial`
+  for re-download, then exit
 
 **Direct downloads** (bypass search):
 
@@ -338,10 +361,19 @@ optional in interactive).
 
 **Quota utilities**:
 
-- `--quota-status` -- display quota usage, deferred queue, and
-  background scheduler status
+- `--quota-status` -- display quota usage and deferred queue status
+- `--status` -- display works-CSV progress (pass the csv_file) plus
+  quota and deferred queue status
 - `--cleanup-deferred` -- remove completed items from deferred
   queue
+
+**Exit codes** (the CLI agent contract):
+
+- `0` -- full success
+- `1` -- one or more works failed or are partial
+- `2` -- usage or configuration error (missing/invalid CSV, no
+  providers enabled, or interactive mode requested without a TTY)
+- `130` -- interrupted by the user (Ctrl-C)
 
 **Processing scope**:
 
@@ -353,9 +385,16 @@ optional in interactive).
 **Runtime config overrides**:
 
 - `--resume-mode {skip_completed,reprocess_all,skip_if_has_objects,resume_from_csv}`
+  -- `resume_from_csv` is a row-filter mode: it relies solely on the
+  `retrievable` column of the source CSV to decide which rows to
+  process (completed rows are filtered out before processing); it
+  performs no per-work-directory status check.
 - `--selection-strategy {collect_and_select,sequential_first_hit}`
-- `--min-title-score FLOAT` -- fuzzy match threshold (0--100)
-- `--creator-weight FLOAT` -- author match weight (0.0--1.0)
+- `--min-title-score FLOAT` -- minimum PURE title-match score to
+  accept a candidate (0--100). Creator similarity never lowers this
+  gate; missing creator metadata is not penalized.
+- `--creator-weight FLOAT` -- author match weight (0.0--1.0), applied
+  as a positive ranking bonus only
 - `--max-candidates-per-provider INT`
 - `--download-strategy {selected_only,all}`
 - `--[no-]keep-non-selected-metadata`
@@ -730,11 +769,14 @@ multiple exist (`_2.pdf`).
 
 ### Index File
 
-`index.csv` is a thread-safe ledger tracking all processed works:
+`index.csv` is a thread-safe ledger with one row per work, keyed by
+`work_id`: re-processing a work updates its row in place (upsert)
+instead of appending duplicates, and the full column set is always
+written.
 
 | Column | Description |
 |--------|-------------|
-| `work_id` | Stable hash-based identifier |
+| `work_id` | Stable hash-based identifier (upsert key) |
 | `entry_id` | Your CSV entry ID |
 | `work_dir` | Path to work folder |
 | `title` | Work title |
@@ -745,7 +787,14 @@ multiple exist (`_2.pdf`).
 | `selected_dir` | Download directory |
 | `work_json` | Path to work.json |
 | `item_url` | Public URL (landing page or manifest) |
-| `status` | `completed`, `failed`, `deferred`, `no_match` |
+| `status` | `completed`, `partial`, `failed`, `deferred`, `no_match` |
+| `pages_expected` | Page count expected from the IIIF manifest |
+| `pages_downloaded` | Pages actually downloaded |
+
+A work is `completed` only when every expected page arrived;
+page-level gaps yield `partial`, which is not treated as
+retrievable and is picked up again on the next run (and by
+`--verify`).
 
 ### work.json
 
@@ -809,9 +858,21 @@ python -m main.cli batch_001.csv --output_dir output_batch_1
 
 Quota-limited providers (currently Anna's Archive, 875 fast
 downloads/day) automatically defer downloads when the quota is
-exhausted. Deferred items are persisted to
-`.downloader_state.json` and retried automatically by a background
-scheduler when quotas reset.
+exhausted -- both when the local counter is spent and when the
+provider's API itself reports a quota error. Deferred works are
+marked `deferred` in the works CSV and persisted to the unified
+state file; ready items are retried synchronously at the start of
+the next run, and a successful retry updates the works CSV,
+`work.json`, and `index.csv`. Quota units are only recorded when
+the fast-download API was actually used (public-scraping fallbacks
+do not consume quota).
+
+The state file lives at `~/.chronodownloader/.downloader_state.json`
+by default, so quota counters persist across working directories. A
+legacy `.downloader_state.json` in the current directory is adopted
+(copied) once automatically. Override the location with
+`deferred.state_dir` (directory) or `deferred.state_file` (full
+path) in the config.
 
 ```bash
 # Check quota usage and deferred queue
@@ -1017,6 +1078,41 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.7.0** (2 July 2026) -- Hardening release closing the data-integrity
+    defects found in a full production audit. Downloads now stream to a
+    `.part` file and are promoted atomically only after validation, so
+    truncated transfers are discarded instead of being recorded as complete;
+    `.pdf`/`.epub` files must carry correct magic bytes, and extension
+    inference prefers the Content-Type header. The works CSV becomes the
+    authoritative ledger: quota-deferred works are recorded with a new
+    `deferred` status instead of `failed`, ready deferred items are retried
+    synchronously at the start of every run (replacing the dead background
+    daemon and its no-op prompt), and retry successes write through to
+    work.json, index.csv, and the CSV. The state file and works CSV write
+    atomically (corrupt state is preserved as `.corrupt` rather than silently
+    resetting quota counters), and the state file moves to a user-level
+    directory with a `deferred.state_dir` override and one-time legacy
+    adoption. IIIF works record `pages_expected`/`pages_downloaded` and are
+    marked `partial` unless complete, and a new `--verify` command audits
+    existing corpora (size, magic bytes, page counts) and flips failures to
+    `partial` for re-download. Matching semantics change deliberately:
+    `min_title_score` now gates the pure title score, with creator similarity
+    as a ranking bonus only, so perfect title matches lacking creator
+    metadata are no longer rejected (recall-improving). The rate limiter and
+    circuit breaker are thread-safe, downloads and 5xx/connection failures
+    feed the breaker, fallback downloads acquire the actual provider's
+    semaphore, and urllib3-internal status retries are removed. Anna's
+    Archive gains the active `.gl` domain, host-relative link rebuilding,
+    server-side quota deferral, and honest quota accounting. index.csv
+    becomes an upsert-by-work_id snapshot with a fixed 14-column schema;
+    budget accounting classifies bytes by type; `worker_timeout_s: 0` truly
+    waits indefinitely. The CLI adopts the agent contract: exit codes
+    0/1/2/130, a `--json` run summary, a non-TTY guard, `--non-interactive`,
+    a side-effect-free `--dry-run`, and `--status`/`--quota-status` folded
+    into argparse. Windows reserved device names are guarded, CSV reads use
+    explicit UTF-8, ruff and mypy run clean with `verification/` excluded and
+    pandas-stubs/types-requests added as dev dependencies.
 
 - **v1.6.0** (28 June 2026) -- Move config.json to a user-local
     example/real split: a tracked `config.example.json` template ships

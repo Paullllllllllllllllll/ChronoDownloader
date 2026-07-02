@@ -1,17 +1,16 @@
 """Integration tests for provider API modules with mocked responses."""
+
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from api.model import SearchResult
 
 
 class TestInternetArchiveProvider:
     """Integration tests for Internet Archive provider."""
-    
+
     def test_search_returns_results(
         self, mock_ia_search_response: dict[str, Any]
     ) -> None:
@@ -57,11 +56,12 @@ class TestInternetArchiveProvider:
 
             results = search_internet_archive("The Art of Cooking")
 
-            assert results[0].raw["item_url"] == "https://archive.org/details/artofcooking1850"
+            assert (
+                results[0].raw["item_url"]
+                == "https://archive.org/details/artofcooking1850"
+            )
 
-    def test_search_with_creator(
-        self, mock_ia_search_response: dict[str, Any]
-    ) -> None:
+    def test_search_with_creator(self, mock_ia_search_response: dict[str, Any]) -> None:
         """Test search with creator parameter."""
         with patch(
             "api.providers.internet_archive.make_request",
@@ -89,18 +89,14 @@ class TestInternetArchiveProvider:
 
     def test_search_none_response(self) -> None:
         """Test search with None response."""
-        with patch(
-            "api.providers.internet_archive.make_request", return_value=None
-        ):
+        with patch("api.providers.internet_archive.make_request", return_value=None):
             from api.providers.internet_archive import search_internet_archive
 
             results = search_internet_archive("Title")
 
             assert results == []
 
-    def test_search_max_results(
-        self, mock_ia_search_response: dict[str, Any]
-    ) -> None:
+    def test_search_max_results(self, mock_ia_search_response: dict[str, Any]) -> None:
         """Test that max_results parameter is passed."""
         with patch(
             "api.providers.internet_archive.make_request",
@@ -117,7 +113,7 @@ class TestInternetArchiveProvider:
 
 class TestGallicaProvider:
     """Integration tests for BnF Gallica provider."""
-    
+
     def test_search_with_results(self) -> None:
         """Test that search can process results."""
         # Note: The actual Gallica API response format may differ
@@ -142,7 +138,7 @@ class TestGallicaProvider:
 
 class TestLocProvider:
     """Integration tests for Library of Congress provider."""
-    
+
     def test_search_returns_results(self) -> None:
         """Test that search returns SearchResult objects."""
         mock_response = {
@@ -151,7 +147,7 @@ class TestLocProvider:
                     "id": "http://www.loc.gov/item/12345/",
                     "title": "American Cookbook",
                     "contributor": ["Chef Smith"],
-                    "date": "1900"
+                    "date": "1900",
                 }
             ]
         }
@@ -167,7 +163,7 @@ class TestLocProvider:
 
 class TestMdzProvider:
     """Integration tests for MDZ (Münchener DigitalisierungsZentrum) provider."""
-    
+
     def test_search_handles_none_response(self) -> None:
         """Test that search handles None response gracefully."""
         with patch("api.providers.mdz.make_request", return_value=None):
@@ -181,7 +177,7 @@ class TestMdzProvider:
 
 class TestProviderRegistry:
     """Tests for the providers registry."""
-    
+
     def test_all_providers_registered(self) -> None:
         """Test that all expected providers are registered."""
         from api.providers import PROVIDERS
@@ -200,7 +196,7 @@ class TestProviderRegistry:
             "google_books",
             "hathitrust",
             "wellcome",
-            "annas_archive"
+            "annas_archive",
         ]
 
         for provider in expected_providers:
@@ -234,7 +230,7 @@ class TestProviderRegistry:
 
 class TestDownloadFunctions:
     """Tests for provider download functions with mocked responses."""
-    
+
     def test_ia_download_with_no_identifier(self, temp_output_dir: str) -> None:
         """Test IA download returns False when no identifier."""
         from api.providers.internet_archive import download_ia_work
@@ -250,34 +246,37 @@ class TestDownloadFunctions:
         mock_metadata = {
             "metadata": {
                 "identifier": "artofcooking1850",
-                "title": "The Art of Cooking"
+                "title": "The Art of Cooking",
             },
-            "files": []
+            "files": [],
         }
 
-        with patch(
-            "api.providers.internet_archive.make_request", return_value=mock_metadata
-        ):
-            with patch(
+        with (
+            patch(
+                "api.providers.internet_archive.make_request",
+                return_value=mock_metadata,
+            ),
+            patch(
                 "api.providers.internet_archive.save_json",
                 return_value="/path/to/saved.json",
-            ):
-                from api.providers.internet_archive import download_ia_work
+            ),
+        ):
+            from api.providers.internet_archive import download_ia_work
 
-                # Note: This will return False as there are no downloadable files
-                # but it should not raise an error
-                result = download_ia_work(sample_search_result, temp_output_dir)
+            # Note: This will return False as there are no downloadable files
+            # but it should not raise an error
+            result = download_ia_work(sample_search_result, temp_output_dir)
 
-                # With empty files list, should return False
-                assert result is False
+            # With empty files list, should return False
+            assert result is False
 
 
 class TestSearchResultScoring:
     """Tests for search result scoring integration."""
-    
+
     def test_attach_scores_to_search_result(self, sample_search_result: Any) -> None:
         """Test that scores can be attached to SearchResult."""
-        from api.matching import title_score, creator_score
+        from api.matching import creator_score, title_score
 
         query_title = "The Art of Cooking"
         query_creator = "John Smith"
@@ -289,7 +288,7 @@ class TestSearchResultScoring:
         sample_search_result.raw["__matching__"] = {
             "score": ts,
             "creator_score": cs,
-            "total": ts * 0.8 + cs * 0.2
+            "total": ts * 0.8 + cs * 0.2,
         }
 
         assert sample_search_result.raw["__matching__"]["score"] == 100

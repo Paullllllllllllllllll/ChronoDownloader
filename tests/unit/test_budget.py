@@ -1,16 +1,15 @@
 """Unit tests for api.core.budget module."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
-
-import pytest
 
 from api.core.budget import DownloadBudget, budget_exhausted, get_budget
 
 
 class TestDownloadBudget:
     """Tests for DownloadBudget class."""
-    
+
     def test_initialization(self, fresh_budget: DownloadBudget) -> None:
         """Test that budget initializes with zero counters."""
         assert fresh_budget.total_images_bytes == 0
@@ -112,18 +111,20 @@ class TestDownloadBudget:
 
     def test_policy_stop(self, fresh_budget: DownloadBudget) -> None:
         """Test 'stop' policy."""
-        with patch("api.core.budget.get_download_limits", return_value={"on_exceed": "stop"}):
+        with patch(
+            "api.core.budget.get_download_limits", return_value={"on_exceed": "stop"}
+        ):
             assert fresh_budget._policy() == "stop"
 
 
 class TestBudgetLimits:
     """Tests for budget limit enforcement."""
-    
+
     def test_global_limit_exceeded(self, fresh_budget: DownloadBudget) -> None:
         """Test that global limit is enforced."""
         limits = {
             "total": {"images_gb": 0.001},  # ~1MB
-            "on_exceed": "skip"
+            "on_exceed": "skip",
         }
         with patch("api.core.budget.get_download_limits", return_value=limits):
             # First should be allowed
@@ -137,7 +138,7 @@ class TestBudgetLimits:
         """Test that per-work limit is enforced."""
         limits = {
             "per_work": {"images_gb": 0.001},  # ~1MB
-            "on_exceed": "skip"
+            "on_exceed": "skip",
         }
         with patch("api.core.budget.get_download_limits", return_value=limits):
             # First work should be allowed
@@ -149,10 +150,7 @@ class TestBudgetLimits:
 
     def test_stop_policy_sets_exhausted(self, fresh_budget: DownloadBudget) -> None:
         """Test that 'stop' policy sets exhausted flag."""
-        limits = {
-            "total": {"images_gb": 0.001},
-            "on_exceed": "stop"
-        }
+        limits = {"total": {"images_gb": 0.001}, "on_exceed": "stop"}
         with patch("api.core.budget.get_download_limits", return_value=limits):
             fresh_budget.record_download("images", "work_1", 1_000_000)
             fresh_budget.allow_content("images", "work_1", 500_000)
@@ -161,7 +159,7 @@ class TestBudgetLimits:
 
 class TestGlobalBudget:
     """Tests for global budget functions."""
-    
+
     def test_get_budget_returns_singleton(self) -> None:
         """Test that get_budget returns the same instance."""
         budget1 = get_budget()
@@ -185,7 +183,7 @@ class TestGlobalBudget:
 
 class TestBudgetThreadSafety:
     """Tests for budget thread safety."""
-    
+
     def test_concurrent_record_download(self, fresh_budget: DownloadBudget) -> None:
         """Test concurrent record_download calls."""
         import threading

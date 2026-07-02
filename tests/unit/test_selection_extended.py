@@ -1,7 +1,7 @@
 """Extended tests for main.selection module — candidate scoring and ranking."""
+
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,7 +9,6 @@ import pytest
 from api.model import SearchResult
 from main.orchestration.selection import (
     _collect_candidates_exhaustive,
-    _collect_candidates_parallel,
     _get_max_parallel_searches,
     _search_single_provider,
     attach_scores,
@@ -43,12 +42,18 @@ def _make_sr(
 def _make_provider_tuple(
     key: str = "ia", name: str = "Internet Archive"
 ) -> tuple[str, MagicMock, MagicMock, str]:
-    return (key, MagicMock(name=f"search_{key}"), MagicMock(name=f"download_{key}"), name)
+    return (
+        key,
+        MagicMock(name=f"search_{key}"),
+        MagicMock(name=f"download_{key}"),
+        name,
+    )
 
 
 # ============================================================================
 # score_candidate
 # ============================================================================
+
 
 class TestScoreCandidate:
     """Tests for individual candidate scoring."""
@@ -86,6 +91,7 @@ class TestScoreCandidate:
 # attach_scores
 # ============================================================================
 
+
 class TestAttachScores:
     """Tests for attaching scores to SearchResult raw dict."""
 
@@ -107,6 +113,7 @@ class TestAttachScores:
 # ============================================================================
 # get_max_results_for_provider
 # ============================================================================
+
 
 class TestGetMaxResultsForProvider:
     """Tests for provider-specific max_results."""
@@ -132,10 +139,14 @@ class TestGetMaxResultsForProvider:
 # _get_max_parallel_searches
 # ============================================================================
 
+
 class TestGetMaxParallelSearches:
     """Tests for parallel search config."""
 
-    @patch("main.orchestration.selection.get_config", return_value={"selection": {"max_parallel_searches": 4}})
+    @patch(
+        "main.orchestration.selection.get_config",
+        return_value={"selection": {"max_parallel_searches": 4}},
+    )
     def test_returns_configured_value(self, mock_cfg: MagicMock) -> None:
         assert _get_max_parallel_searches() == 4
 
@@ -143,11 +154,17 @@ class TestGetMaxParallelSearches:
     def test_returns_1_when_not_configured(self, mock_cfg: MagicMock) -> None:
         assert _get_max_parallel_searches() == 1
 
-    @patch("main.orchestration.selection.get_config", return_value={"selection": {"max_parallel_searches": 0}})
+    @patch(
+        "main.orchestration.selection.get_config",
+        return_value={"selection": {"max_parallel_searches": 0}},
+    )
     def test_minimum_is_1(self, mock_cfg: MagicMock) -> None:
         assert _get_max_parallel_searches() == 1
 
-    @patch("main.orchestration.selection.get_config", return_value={"selection": {"max_parallel_searches": "invalid"}})
+    @patch(
+        "main.orchestration.selection.get_config",
+        return_value={"selection": {"max_parallel_searches": "invalid"}},
+    )
     def test_returns_1_on_invalid(self, mock_cfg: MagicMock) -> None:
         assert _get_max_parallel_searches() == 1
 
@@ -156,14 +173,17 @@ class TestGetMaxParallelSearches:
 # _search_single_provider
 # ============================================================================
 
+
 class TestSearchSingleProvider:
     """Tests for single-provider search in parallel mode."""
 
     @patch("main.orchestration.selection.get_max_results_for_provider", return_value=5)
     def test_returns_scored_candidates(self, mock_max: MagicMock) -> None:
-        search_fn = MagicMock(return_value=[
-            SearchResult(provider="IA", title="Test Book", raw={}, creators=[]),
-        ])
+        search_fn = MagicMock(
+            return_value=[
+                SearchResult(provider="IA", title="Test Book", raw={}, creators=[]),
+            ]
+        )
         provider_tuple = ("ia", search_fn, MagicMock(), "Internet Archive")
         pkey, pname, candidates = _search_single_provider(
             provider_tuple, "Test Book", None, 5, 0.2
@@ -196,6 +216,7 @@ class TestSearchSingleProvider:
 # _collect_candidates_exhaustive
 # ============================================================================
 
+
 class TestCollectCandidatesExhaustive:
     """Tests for exhaustive sequential candidate collection."""
 
@@ -225,6 +246,7 @@ class TestCollectCandidatesExhaustive:
 # collect_candidates_all
 # ============================================================================
 
+
 class TestCollectCandidatesAll:
     """Tests for the collect_candidates_all dispatch."""
 
@@ -251,6 +273,7 @@ class TestCollectCandidatesAll:
 # ============================================================================
 # select_best_candidate
 # ============================================================================
+
 
 class TestSelectBestCandidateExtended:
     """Extended tests for best candidate selection logic."""

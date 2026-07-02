@@ -4,6 +4,7 @@ Shared orchestration patterns used by multiple providers: download page images
 in a loop with budget checks; fetch a manifest, save it, try renderings, fall
 back to page images; try PDFs first with IIIF fallback.
 """
+
 from __future__ import annotations
 
 import logging
@@ -74,7 +75,8 @@ def download_page_images(
     for idx, svc in enumerate(to_download, start=1):
         if budget_exhausted():
             logger.warning(
-                "Download budget exhausted; stopping %s downloads at %d/%d pages for %s",
+                "Download budget exhausted; stopping %s downloads at %d/%d "
+                "pages for %s",
                 provider_key,
                 idx - 1,
                 len(to_download),
@@ -150,7 +152,8 @@ def download_iiif_manifest_and_images(
             any_downloaded = True
             if skip_images_if_rendering and prefer_pdf_over_images():
                 logger.info(
-                    "%s: downloaded %d rendering(s); skipping image downloads per config.",
+                    "%s: downloaded %d rendering(s); skipping image downloads "
+                    "per config.",
                     provider_key.upper(),
                     renders,
                 )

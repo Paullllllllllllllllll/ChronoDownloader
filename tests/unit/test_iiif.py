@@ -1,10 +1,9 @@
 """Tests for api.iiif module — IIIF manifest parsing and image URL generation."""
+
 from __future__ import annotations
 
 from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from api.iiif import (
     download_one_from_service,
@@ -14,15 +13,17 @@ from api.iiif import (
 )
 from api.iiif._parsing import _INFO_JSON_CACHE, _fetch_info_json
 
-
 # ============================================================================
 # extract_image_service_bases – IIIF v2
 # ============================================================================
 
+
 class TestExtractImageServiceBasesV2:
     """Tests for IIIF v2 manifest parsing."""
 
-    def test_extracts_service_ids_from_v2(self, sample_iiif_manifest_v2: dict[str, Any]) -> None:
+    def test_extracts_service_ids_from_v2(
+        self, sample_iiif_manifest_v2: dict[str, Any]
+    ) -> None:
         bases = extract_image_service_bases(sample_iiif_manifest_v2)
         assert len(bases) == 2
         assert bases[0] == "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k123/f1"
@@ -31,34 +32,46 @@ class TestExtractImageServiceBasesV2:
     def test_extracts_from_resource_id_fallback(self) -> None:
         """Fallback when service is missing but resource @id contains /full/."""
         manifest = {
-            "sequences": [{
-                "canvases": [{
-                    "images": [{
-                        "resource": {
-                            "@id": "https://example.org/iiif/img1/full/max/0/default.jpg",
-                            "service": {}
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "@id": "https://example.org/iiif/img1/full/max/0/default.jpg",
+                                        "service": {},
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
-            }]
+                    ]
+                }
+            ]
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
 
     def test_skips_canvas_without_images(self) -> None:
         manifest = {
-            "sequences": [{
-                "canvases": [
-                    {"images": []},
-                    {
-                        "images": [{
-                            "resource": {
-                                "service": {"@id": "https://example.org/iiif/img1"}
-                            }
-                        }]
-                    },
-                ]
-            }]
+            "sequences": [
+                {
+                    "canvases": [
+                        {"images": []},
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {
+                                            "@id": "https://example.org/iiif/img1"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                    ]
+                }
+            ]
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
@@ -68,27 +81,53 @@ class TestExtractImageServiceBasesV2:
 
     def test_deduplicates_service_bases(self) -> None:
         manifest = {
-            "sequences": [{
-                "canvases": [
-                    {"images": [{"resource": {"service": {"@id": "https://example.org/img"}}}]},
-                    {"images": [{"resource": {"service": {"@id": "https://example.org/img"}}}]},
-                ]
-            }]
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {"@id": "https://example.org/img"}
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {"@id": "https://example.org/img"}
+                                    }
+                                }
+                            ]
+                        },
+                    ]
+                }
+            ]
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/img"]
 
     def test_uses_id_key_when_at_id_missing(self) -> None:
         manifest = {
-            "sequences": [{
-                "canvases": [{
-                    "images": [{
-                        "resource": {
-                            "service": {"id": "https://example.org/iiif/img1"}
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {
+                                            "id": "https://example.org/iiif/img1"
+                                        }
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
-            }]
+                    ]
+                }
+            ]
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
@@ -98,25 +137,38 @@ class TestExtractImageServiceBasesV2:
 # extract_image_service_bases – IIIF v3
 # ============================================================================
 
+
 class TestExtractImageServiceBasesV3:
     """Tests for IIIF v3 manifest parsing."""
 
-    def test_extracts_from_v3_manifest(self, sample_iiif_manifest_v3: dict[str, Any]) -> None:
+    def test_extracts_from_v3_manifest(
+        self, sample_iiif_manifest_v3: dict[str, Any]
+    ) -> None:
         bases = extract_image_service_bases(sample_iiif_manifest_v3)
         assert bases == ["https://example.org/iiif/img1"]
 
     def test_v3_body_as_list(self) -> None:
         """v3 where body is a list instead of a dict."""
         manifest = {
-            "items": [{
-                "items": [{
-                    "items": [{
-                        "body": [{
-                            "service": [{"id": "https://example.org/iiif/img1"}]
-                        }]
-                    }]
-                }]
-            }]
+            "items": [
+                {
+                    "items": [
+                        {
+                            "items": [
+                                {
+                                    "body": [
+                                        {
+                                            "service": [
+                                                {"id": "https://example.org/iiif/img1"}
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
@@ -124,15 +176,23 @@ class TestExtractImageServiceBasesV3:
     def test_v3_service_as_dict(self) -> None:
         """v3 where service is a dict instead of a list."""
         manifest = {
-            "items": [{
-                "items": [{
-                    "items": [{
-                        "body": {
-                            "service": {"@id": "https://example.org/iiif/img1"}
+            "items": [
+                {
+                    "items": [
+                        {
+                            "items": [
+                                {
+                                    "body": {
+                                        "service": {
+                                            "@id": "https://example.org/iiif/img1"
+                                        }
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
-            }]
+                    ]
+                }
+            ]
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
@@ -140,36 +200,32 @@ class TestExtractImageServiceBasesV3:
     def test_v3_fallback_from_body_id(self) -> None:
         """v3 fallback from body.id when service is missing."""
         manifest = {
-            "items": [{
-                "items": [{
-                    "items": [{
-                        "body": {
-                            "id": "https://example.org/iiif/img1/full/max/0/default.jpg"
+            "items": [
+                {
+                    "items": [
+                        {
+                            "items": [
+                                {
+                                    "body": {
+                                        "id": "https://example.org/iiif/img1/full/max/0/default.jpg"
+                                    }
+                                }
+                            ]
                         }
-                    }]
-                }]
-            }]
+                    ]
+                }
+            ]
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
 
     def test_v3_skips_empty_annotation_pages(self) -> None:
-        manifest: dict[str, Any] = {
-            "items": [{
-                "items": []
-            }]
-        }
+        manifest: dict[str, Any] = {"items": [{"items": []}]}
         bases = extract_image_service_bases(manifest)
         assert bases == []
 
     def test_v3_skips_empty_annotations(self) -> None:
-        manifest: dict[str, Any] = {
-            "items": [{
-                "items": [{
-                    "items": []
-                }]
-            }]
-        }
+        manifest: dict[str, Any] = {"items": [{"items": [{"items": []}]}]}
         bases = extract_image_service_bases(manifest)
         assert bases == []
 
@@ -178,25 +234,42 @@ class TestExtractImageServiceBasesV3:
 # extract_image_service_bases – Mixed v2+v3
 # ============================================================================
 
+
 class TestExtractImageServiceBasesMixed:
     """Tests for manifests with both v2 and v3 structures."""
 
     def test_both_v2_and_v3_deduped(self) -> None:
         manifest = {
-            "sequences": [{
-                "canvases": [{
-                    "images": [{
-                        "resource": {"service": {"@id": "https://example.org/img1"}}
-                    }]
-                }]
-            }],
-            "items": [{
-                "items": [{
-                    "items": [{
-                        "body": {"service": [{"id": "https://example.org/img1"}]}
-                    }]
-                }]
-            }]
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {"@id": "https://example.org/img1"}
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "items": [
+                {
+                    "items": [
+                        {
+                            "items": [
+                                {
+                                    "body": {
+                                        "service": [{"id": "https://example.org/img1"}]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
         }
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/img1"]
@@ -206,17 +279,28 @@ class TestExtractImageServiceBasesMixed:
 # extract_direct_image_urls
 # ============================================================================
 
+
 class TestExtractDirectImageUrls:
     """Tests for extracting direct image URLs."""
 
     def test_extracts_v2_image_urls(self) -> None:
         manifest = {
-            "sequences": [{
-                "canvases": [
-                    {"images": [{"resource": {"@id": "https://example.org/page1.jpg"}}]},
-                    {"images": [{"resource": {"@id": "https://example.org/page2.jpg"}}]},
-                ]
-            }]
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/page1.jpg"}}
+                            ]
+                        },
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/page2.jpg"}}
+                            ]
+                        },
+                    ]
+                }
+            ]
         }
         urls = extract_direct_image_urls(manifest)
         assert urls == [
@@ -226,25 +310,35 @@ class TestExtractDirectImageUrls:
 
     def test_extracts_v3_image_urls(self) -> None:
         manifest = {
-            "items": [{
-                "items": [{
-                    "items": [{
-                        "body": {"id": "https://example.org/page1.jpg"}
-                    }]
-                }]
-            }]
+            "items": [
+                {
+                    "items": [
+                        {"items": [{"body": {"id": "https://example.org/page1.jpg"}}]}
+                    ]
+                }
+            ]
         }
         urls = extract_direct_image_urls(manifest)
         assert urls == ["https://example.org/page1.jpg"]
 
     def test_deduplicates_urls(self) -> None:
         manifest = {
-            "sequences": [{
-                "canvases": [
-                    {"images": [{"resource": {"@id": "https://example.org/same.jpg"}}]},
-                    {"images": [{"resource": {"@id": "https://example.org/same.jpg"}}]},
-                ]
-            }]
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/same.jpg"}}
+                            ]
+                        },
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/same.jpg"}}
+                            ]
+                        },
+                    ]
+                }
+            ]
         }
         urls = extract_direct_image_urls(manifest)
         assert urls == ["https://example.org/same.jpg"]
@@ -258,13 +352,13 @@ class TestExtractDirectImageUrls:
 
     def test_v3_body_as_list(self) -> None:
         manifest = {
-            "items": [{
-                "items": [{
-                    "items": [{
-                        "body": [{"id": "https://example.org/page1.jpg"}]
-                    }]
-                }]
-            }]
+            "items": [
+                {
+                    "items": [
+                        {"items": [{"body": [{"id": "https://example.org/page1.jpg"}]}]}
+                    ]
+                }
+            ]
         }
         urls = extract_direct_image_urls(manifest)
         assert urls == ["https://example.org/page1.jpg"]
@@ -273,6 +367,7 @@ class TestExtractDirectImageUrls:
 # ============================================================================
 # image_url_candidates
 # ============================================================================
+
 
 class TestImageUrlCandidates:
     """Tests for URL candidate generation."""
@@ -291,7 +386,9 @@ class TestImageUrlCandidates:
         assert "https://example.org/iiif/img1/full/full/0/default.jpg" in candidates
 
     def test_with_info_sizes(self) -> None:
-        info = {"sizes": [{"width": 1000, "height": 800}, {"width": 2000, "height": 1600}]}
+        info = {
+            "sizes": [{"width": 1000, "height": 800}, {"width": 2000, "height": 1600}]
+        }
         candidates = image_url_candidates("https://example.org/iiif/img1", info=info)
         assert "https://example.org/iiif/img1/full/2000,/0/default.jpg" in candidates
         assert "https://example.org/iiif/img1/full/2000,/0/native.jpg" in candidates
@@ -334,6 +431,7 @@ class TestImageUrlCandidates:
 # _fetch_info_json
 # ============================================================================
 
+
 class TestFetchInfoJson:
     """Tests for info.json fetching and caching."""
 
@@ -375,6 +473,7 @@ class TestFetchInfoJson:
 # download_one_from_service
 # ============================================================================
 
+
 class TestDownloadOneFromService:
     """Tests for single-image download from IIIF service."""
 
@@ -387,13 +486,17 @@ class TestDownloadOneFromService:
     @patch("api.iiif._parsing.download_file")
     def test_succeeds_on_first_candidate(self, mock_dl: MagicMock) -> None:
         mock_dl.return_value = "/path/to/file.jpg"
-        result = download_one_from_service("https://example.org/iiif/img1", "/out", "page_001.jpg")
+        result = download_one_from_service(
+            "https://example.org/iiif/img1", "/out", "page_001.jpg"
+        )
         assert result is True
         mock_dl.assert_called_once()
 
     @patch("api.iiif._parsing._fetch_info_json")
     @patch("api.iiif._parsing.download_file")
-    def test_falls_back_to_info_json(self, mock_dl: MagicMock, mock_info: MagicMock) -> None:
+    def test_falls_back_to_info_json(
+        self, mock_dl: MagicMock, mock_info: MagicMock
+    ) -> None:
         # All default candidates fail, then info.json candidates succeed
         default_count = len(image_url_candidates("https://example.org/iiif/img1"))
         call_count = [0]
@@ -406,30 +509,44 @@ class TestDownloadOneFromService:
 
         mock_dl.side_effect = side_effect
         mock_info.return_value = {"sizes": [{"width": 2000}]}
-        result = download_one_from_service("https://example.org/iiif/img1", "/out", "page_001.jpg")
+        result = download_one_from_service(
+            "https://example.org/iiif/img1", "/out", "page_001.jpg"
+        )
         assert result is True
         mock_info.assert_called_once()
 
     @patch("api.iiif._parsing._fetch_info_json")
     @patch("api.iiif._parsing.download_file")
-    def test_returns_false_when_all_fail(self, mock_dl: MagicMock, mock_info: MagicMock) -> None:
+    def test_returns_false_when_all_fail(
+        self, mock_dl: MagicMock, mock_info: MagicMock
+    ) -> None:
         mock_dl.return_value = None
         mock_info.return_value = {"sizes": [{"width": 1000}]}
-        result = download_one_from_service("https://example.org/iiif/img1", "/out", "page_001.jpg")
+        result = download_one_from_service(
+            "https://example.org/iiif/img1", "/out", "page_001.jpg"
+        )
         assert result is False
 
     @patch("api.iiif._parsing._fetch_info_json")
     @patch("api.iiif._parsing.download_file")
-    def test_handles_info_json_failure(self, mock_dl: MagicMock, mock_info: MagicMock) -> None:
+    def test_handles_info_json_failure(
+        self, mock_dl: MagicMock, mock_info: MagicMock
+    ) -> None:
         mock_dl.return_value = None
         mock_info.return_value = None
-        result = download_one_from_service("https://example.org/iiif/img1", "/out", "page_001.jpg")
+        result = download_one_from_service(
+            "https://example.org/iiif/img1", "/out", "page_001.jpg"
+        )
         assert result is False
 
     @patch("api.iiif._parsing._fetch_info_json")
     @patch("api.iiif._parsing.download_file")
-    def test_handles_info_json_exception(self, mock_dl: MagicMock, mock_info: MagicMock) -> None:
+    def test_handles_info_json_exception(
+        self, mock_dl: MagicMock, mock_info: MagicMock
+    ) -> None:
         mock_dl.return_value = None
         mock_info.side_effect = Exception("network error")
-        result = download_one_from_service("https://example.org/iiif/img1", "/out", "page_001.jpg")
+        result = download_one_from_service(
+            "https://example.org/iiif/img1", "/out", "page_001.jpg"
+        )
         assert result is False

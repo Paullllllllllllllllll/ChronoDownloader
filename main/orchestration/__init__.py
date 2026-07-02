@@ -23,6 +23,7 @@ Public surface (stable imports for CLI and UI layers):
   :func:`collect_candidates_sequential`,
   :func:`select_best_candidate` (from selection)
 """
+
 from __future__ import annotations
 
 from .execution import (

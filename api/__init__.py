@@ -13,6 +13,7 @@ Public structure:
 - :mod:`api.model` -- SearchResult and related data classes.
 - :mod:`api.query_helpers` -- SRU / SPARQL escaping.
 """
+
 from __future__ import annotations
 
 from .model import QuotaDeferredException, SearchResult, convert_to_searchresult

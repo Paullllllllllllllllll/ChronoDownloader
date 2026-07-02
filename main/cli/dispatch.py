@@ -1,7 +1,11 @@
-"""CLI dispatch: configure logging, apply overrides, and route to the matching subcommand."""
+"""CLI dispatch: configure logging, apply overrides, and route to the matching
+subcommand.
+"""
+
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import sys
@@ -13,18 +17,22 @@ from .commands.batch import run_batch_cli
 from .commands.direct_iiif import run_direct_iiif_cli
 from .commands.identifier import run_identifier_cli
 from .commands.providers import list_providers
+from .exit_codes import EXIT_OK, EXIT_USAGE
 from .overrides import (
     _apply_provider_cli_overrides,
     _apply_runtime_config_overrides,
 )
 
 
-def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> None:
+def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Run the downloader in CLI mode.
 
     Configures logging, applies runtime overrides, loads providers, and
     dispatches to the appropriate subcommand handler (IIIF, identifier,
     list-providers, or CSV batch).
+
+    Returns:
+        A process exit code (see :mod:`main.cli.exit_codes`).
     """
     if sys.platform == "win32":
         try:
@@ -49,12 +57,10 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> None:
 
     if getattr(args, "list_providers", False):
         list_providers()
-        return
+        return EXIT_OK
 
-    try:
+    with contextlib.suppress(Exception):
         os.environ["CHRONO_CONFIG_PATH"] = args.config
-    except Exception:
-        pass
 
     config = _apply_runtime_config_overrides(args, config, logger)
 
@@ -68,14 +74,12 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> None:
             "No providers are enabled. Update %s to enable providers.",
             args.config,
         )
-        return
+        return EXIT_USAGE
 
     if args.iiif_urls:
-        run_direct_iiif_cli(args, config, logger)
-        return
+        return run_direct_iiif_cli(args, config, logger)
 
     if getattr(args, "id", None):
-        run_identifier_cli(args, config, logger)
-        return
+        return run_identifier_cli(args, config, logger)
 
-    run_batch_cli(args, config, logger)
+    return run_batch_cli(args, config, logger)

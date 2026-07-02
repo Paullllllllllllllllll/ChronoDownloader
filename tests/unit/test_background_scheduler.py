@@ -1,10 +1,9 @@
 """Tests for main.background_scheduler module — background retry scheduling."""
+
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Generator
-from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,7 +22,11 @@ def reset_scheduler_singleton() -> Generator[None, None, None]:
         instance = BackgroundRetryScheduler._instance
         if hasattr(instance, "_stop_event"):
             instance._stop_event.set()
-        if hasattr(instance, "_thread") and instance._thread and instance._thread.is_alive():
+        if (
+            hasattr(instance, "_thread")
+            and instance._thread
+            and instance._thread.is_alive()
+        ):
             instance._thread.join(timeout=5)
     BackgroundRetryScheduler._instance = None
 
@@ -31,6 +34,7 @@ def reset_scheduler_singleton() -> Generator[None, None, None]:
 # ============================================================================
 # Singleton pattern
 # ============================================================================
+
 
 class TestBackgroundSchedulerSingleton:
     """Tests for singleton pattern."""
@@ -51,22 +55,27 @@ class TestBackgroundSchedulerSingleton:
 # Configuration
 # ============================================================================
 
+
 class TestBackgroundSchedulerConfig:
     """Tests for scheduler configuration."""
 
-    @patch("main.state.background.get_config", return_value={
-        "deferred": {
-            "check_interval_minutes": 5,
-            "background_enabled": True,
-        }
-    })
+    @patch(
+        "main.state.background.get_config",
+        return_value={
+            "deferred": {
+                "check_interval_minutes": 5,
+                "background_enabled": True,
+            }
+        },
+    )
     def test_reads_check_interval(self, mock_cfg: MagicMock) -> None:
         s = BackgroundRetryScheduler()
         assert s._check_interval_s == 5 * 60
 
-    @patch("main.state.background.get_config", return_value={
-        "deferred": {"background_enabled": False}
-    })
+    @patch(
+        "main.state.background.get_config",
+        return_value={"deferred": {"background_enabled": False}},
+    )
     def test_disabled_by_config(self, mock_cfg: MagicMock) -> None:
         s = BackgroundRetryScheduler()
         assert s._enabled is False
@@ -75,6 +84,7 @@ class TestBackgroundSchedulerConfig:
 # ============================================================================
 # set_provider_download_fn
 # ============================================================================
+
 
 class TestSetProviderDownloadFn:
     """Tests for registering download functions."""
@@ -90,6 +100,7 @@ class TestSetProviderDownloadFn:
 # ============================================================================
 # set_callbacks
 # ============================================================================
+
 
 class TestSetCallbacks:
     """Tests for callback registration."""
@@ -108,22 +119,29 @@ class TestSetCallbacks:
 # start / stop / pause / resume
 # ============================================================================
 
+
 class TestBackgroundSchedulerLifecycle:
     """Tests for scheduler lifecycle management."""
 
-    @patch("main.state.background.get_config", return_value={
-        "deferred": {"background_enabled": False}
-    })
+    @patch(
+        "main.state.background.get_config",
+        return_value={"deferred": {"background_enabled": False}},
+    )
     def test_start_returns_false_when_disabled(self, mock_cfg: MagicMock) -> None:
         s = BackgroundRetryScheduler()
         assert s.start() is False
 
     @patch("main.state.background.get_deferred_queue")
     @patch("main.state.background.get_quota_manager")
-    @patch("main.state.background.get_config", return_value={
-        "deferred": {"background_enabled": True, "check_interval_minutes": 0.01}
-    })
-    def test_start_and_stop(self, mock_cfg: MagicMock, mock_qm: MagicMock, mock_dq: MagicMock) -> None:
+    @patch(
+        "main.state.background.get_config",
+        return_value={
+            "deferred": {"background_enabled": True, "check_interval_minutes": 0.01}
+        },
+    )
+    def test_start_and_stop(
+        self, mock_cfg: MagicMock, mock_qm: MagicMock, mock_dq: MagicMock
+    ) -> None:
         s = BackgroundRetryScheduler()
         assert s.start() is True
         assert s.is_running() is True
@@ -132,9 +150,12 @@ class TestBackgroundSchedulerLifecycle:
 
     @patch("main.state.background.get_deferred_queue")
     @patch("main.state.background.get_quota_manager")
-    @patch("main.state.background.get_config", return_value={
-        "deferred": {"background_enabled": True, "check_interval_minutes": 0.01}
-    })
+    @patch(
+        "main.state.background.get_config",
+        return_value={
+            "deferred": {"background_enabled": True, "check_interval_minutes": 0.01}
+        },
+    )
     def test_start_returns_false_when_already_running(
         self, mock_cfg: MagicMock, mock_qm: MagicMock, mock_dq: MagicMock
     ) -> None:
@@ -150,9 +171,12 @@ class TestBackgroundSchedulerLifecycle:
 
     @patch("main.state.background.get_deferred_queue")
     @patch("main.state.background.get_quota_manager")
-    @patch("main.state.background.get_config", return_value={
-        "deferred": {"background_enabled": True, "check_interval_minutes": 0.01}
-    })
+    @patch(
+        "main.state.background.get_config",
+        return_value={
+            "deferred": {"background_enabled": True, "check_interval_minutes": 0.01}
+        },
+    )
     def test_pause_and_resume(
         self, mock_cfg: MagicMock, mock_qm: MagicMock, mock_dq: MagicMock
     ) -> None:
@@ -168,6 +192,7 @@ class TestBackgroundSchedulerLifecycle:
 # ============================================================================
 # get_stats
 # ============================================================================
+
 
 class TestBackgroundSchedulerStats:
     """Tests for statistics tracking."""
@@ -185,6 +210,7 @@ class TestBackgroundSchedulerStats:
 # ============================================================================
 # _reconstruct_search_result
 # ============================================================================
+
 
 class TestReconstructSearchResult:
     """Tests for SearchResult reconstruction from DeferredItem."""
@@ -244,6 +270,7 @@ class TestReconstructSearchResult:
 # _check_and_retry
 # ============================================================================
 
+
 class TestCheckAndRetry:
     """Tests for the check-and-retry cycle."""
 
@@ -280,6 +307,7 @@ class TestCheckAndRetry:
 # ============================================================================
 # _retry_item
 # ============================================================================
+
 
 class TestRetryItem:
     """Tests for individual item retry logic."""

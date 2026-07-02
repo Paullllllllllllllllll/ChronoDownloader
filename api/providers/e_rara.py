@@ -3,22 +3,29 @@
 Searches e-rara via its SRU endpoint (MODS schema) and downloads via IIIF
 manifests published for each VLID (Visual Library ID).
 """
+
 from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from ..iiif import download_iiif_manifest_and_images
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id, resolve_item_field
-from ..query_helpers import escape_sru_literal
 from ..core.network import make_request
+from ..iiif import download_iiif_manifest_and_images
+from ..model import (
+    SearchResult,
+    convert_to_searchresult,
+    resolve_item_field,
+    resolve_item_id,
+)
+from ..query_helpers import escape_sru_literal
 
 logger = logging.getLogger(__name__)
 
 SRU_URL = "https://www.e-rara.ch/sru"
 IIIF_MANIFEST_URL = "https://www.e-rara.ch/i3f/v20/{vlid}/manifest"
 ITEM_URL = "https://www.e-rara.ch/{prefix}/{vlid}"
+
 
 def _build_query(title: str, creator: str | None) -> str:
     parts: list[str] = []
@@ -28,7 +35,10 @@ def _build_query(title: str, creator: str | None) -> str:
         parts.append(f'"{escape_sru_literal(creator)}"')
     return " ".join(parts).strip()
 
-def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_e_rara(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search e-rara via SRU (MODS schema)."""
     query = _build_query(title, creator)
     if not query:
@@ -61,12 +71,20 @@ def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) 
                 continue
 
             title_el = mods.find(".//mods:titleInfo/mods:title", ns)
-            item_title = title_el.text.strip() if title_el is not None and title_el.text else "N/A"
+            item_title = (
+                title_el.text.strip()
+                if title_el is not None and title_el.text
+                else "N/A"
+            )
 
             creator_el = mods.find(".//mods:name/mods:displayForm", ns)
             if creator_el is None:
                 creator_el = mods.find(".//mods:name/mods:namePart", ns)
-            item_creator = creator_el.text.strip() if creator_el is not None and creator_el.text else "N/A"
+            item_creator = (
+                creator_el.text.strip()
+                if creator_el is not None and creator_el.text
+                else "N/A"
+            )
 
             vlid = None
             prefix = None
@@ -86,7 +104,9 @@ def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) 
                 "creator": item_creator,
                 "id": vlid,
                 "prefix": prefix,
-                "item_url": ITEM_URL.format(prefix=prefix, vlid=vlid) if prefix else None,
+                "item_url": ITEM_URL.format(prefix=prefix, vlid=vlid)
+                if prefix
+                else None,
                 "iiif_manifest": IIIF_MANIFEST_URL.format(vlid=vlid),
             }
             results.append(convert_to_searchresult("e-rara", raw))
@@ -99,7 +119,10 @@ def search_e_rara(title: str, creator: str | None = None, max_results: int = 3) 
 
     return results
 
-def download_e_rara_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_e_rara_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download via e-rara IIIF manifest."""
     vlid = resolve_item_id(item_data)
     manifest_url = resolve_item_field(item_data, "iiif_manifest", attr="iiif_manifest")

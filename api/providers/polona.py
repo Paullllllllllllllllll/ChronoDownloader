@@ -1,17 +1,22 @@
 """Connector for the Polona.pl API."""
+
 from __future__ import annotations
 
 import logging
 import urllib.parse
 from typing import Any
 
-from ..core.config import get_max_pages, prefer_pdf_over_images
-from ..core.network import make_request
-from ..core.download import save_json
-from ..iiif import download_iiif_renderings
-from ..iiif import extract_image_service_bases, download_one_from_service
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 from bs4 import BeautifulSoup
+
+from ..core.config import get_max_pages, prefer_pdf_over_images
+from ..core.download import save_json
+from ..core.network import make_request
+from ..iiif import (
+    download_iiif_renderings,
+    download_one_from_service,
+    extract_image_service_bases,
+)
+from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +25,10 @@ logger = logging.getLogger(__name__)
 SEARCH_PAGE_URL = "https://polona.pl/search/?query={query}"
 IIIF_MANIFEST_URL = "https://polona.pl/iiif/item/{item_id}/manifest.json"
 
-def search_polona(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_polona(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search Polona by parsing the public search page for item links.
 
     Note: Polona does not expose a stable, documented JSON search for items.
@@ -61,10 +69,14 @@ def search_polona(title: str, creator: str | None = None, max_results: int = 3) 
                 continue
     return results
 
-def download_polona_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_polona_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download IIIF manifest and page images for a Polona item.
 
-    Polona exposes a stable IIIF manifest per item; we parse v2/v3 and download full-size images.
+    Polona exposes a stable IIIF manifest per item; we parse v2/v3 and download
+    full-size images.
     """
 
     item_id = resolve_item_id(item_data)
@@ -83,12 +95,20 @@ def download_polona_work(item_data: SearchResult | dict[str, Any], output_folder
 
     # Prefer manifest-level PDF/EPUB renderings when available
     try:
-        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"polona_{item_id}_")
+        renders = download_iiif_renderings(
+            manifest, output_folder, filename_prefix=f"polona_{item_id}_"
+        )
         if renders > 0 and prefer_pdf_over_images():
-            logger.info("Polona: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            logger.info(
+                "Polona: downloaded %d rendering(s); skipping image downloads "
+                "per config.",
+                renders,
+            )
             return True
     except Exception:
-        logger.exception("Polona: error while downloading manifest renderings for %s", item_id)
+        logger.exception(
+            "Polona: error while downloading manifest renderings for %s", item_id
+        )
 
     # Extract IIIF Image API service bases
     service_bases: list[str] = extract_image_service_bases(manifest)
@@ -101,8 +121,12 @@ def download_polona_work(item_data: SearchResult | dict[str, Any], output_folder
 
     max_pages = get_max_pages("polona")
     total = len(service_bases)
-    to_download = service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
-    logger.info("Polona: downloading %d/%d page images for %s", len(to_download), total, item_id)
+    to_download = (
+        service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
+    )
+    logger.info(
+        "Polona: downloading %d/%d page images for %s", len(to_download), total, item_id
+    )
     ok_any = False
     for idx, svc in enumerate(to_download, start=1):
         try:
@@ -112,5 +136,7 @@ def download_polona_work(item_data: SearchResult | dict[str, Any], output_folder
             else:
                 logger.warning("Failed to download Polona image from %s", svc)
         except Exception:
-            logger.exception("Error downloading Polona image for %s from %s", item_id, svc)
+            logger.exception(
+                "Error downloading Polona image for %s from %s", item_id, svc
+            )
     return ok_any

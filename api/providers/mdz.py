@@ -1,4 +1,5 @@
 """Connector for the Münchener DigitalisierungsZentrum (MDZ) API."""
+
 from __future__ import annotations
 
 import logging
@@ -6,27 +7,38 @@ import re
 import urllib.parse
 from typing import Any
 
-from ..iiif import download_page_images
-from ..iiif import extract_image_service_bases
-from ..core.config import prefer_pdf_over_images
-from ..core.network import make_request
-from ..core.download import save_json
-from ..iiif import download_iiif_renderings
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 from bs4 import BeautifulSoup
+
+from ..core.config import prefer_pdf_over_images
+from ..core.download import save_json
+from ..core.network import make_request
+from ..iiif import (
+    download_iiif_renderings,
+    download_page_images,
+    extract_image_service_bases,
+)
+from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
 
 # MDZ API endpoints (Solr endpoints deprecated as of 2024/2025)
 # Primary search endpoint is the web API which returns JSON
 MDZ_WEB_SEARCH_URL = "https://www.digitale-sammlungen.de/api/search"
-IIIF_MANIFEST_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v2/{object_id}/manifest"
-IIIF_MANIFEST_V3_URL = "https://api.digitale-sammlungen.de/iiif/presentation/v3/{object_id}/manifest"
+IIIF_MANIFEST_URL = (
+    "https://api.digitale-sammlungen.de/iiif/presentation/v2/{object_id}/manifest"
+)
+IIIF_MANIFEST_V3_URL = (
+    "https://api.digitale-sammlungen.de/iiif/presentation/v3/{object_id}/manifest"
+)
 
-def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_mdz(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search MDZ using the public JSON search endpoint, with HTML/Solr fallbacks.
 
-    Primary endpoint: /api/search (same domain as the website), returns JSON with 'docs'.
+    Primary endpoint: /api/search (same domain as the website), returns JSON
+    with 'docs'.
     We filter for iiifAvailable=true to prioritize digitized items.
     """
 
@@ -52,7 +64,11 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
                 # Strip simple tags from highlighted title
                 title_text = re.sub(r"<[^>]+>", "", title_html)
                 authors = doc.get("authors") or []
-                creator_text = ", ".join(authors) if isinstance(authors, list) else (authors or "N/A")
+                creator_text = (
+                    ", ".join(authors)
+                    if isinstance(authors, list)
+                    else (authors or "N/A")
+                )
                 raw = {
                     "title": title_text,
                     "creator": creator_text,
@@ -94,12 +110,16 @@ def search_mdz(title: str, creator: str | None = None, max_results: int = 3) -> 
     # Legacy Solr endpoints are deprecated and removed as of 2024/2025
     return results
 
-def download_mdz_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_mdz_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download the IIIF manifest and page images for an MDZ item.
 
     - Fetches the IIIF Presentation manifest (v2 or v3).
     - Extracts the IIIF Image API service base for each canvas.
-    - Downloads up to DEFAULT_MAX_PAGES (override via env MDZ_MAX_PAGES) images using the IIIF Image API.
+    - Downloads up to DEFAULT_MAX_PAGES (override via env MDZ_MAX_PAGES) images
+      using the IIIF Image API.
     """
 
     object_id = resolve_item_id(item_data)
@@ -124,12 +144,20 @@ def download_mdz_work(item_data: SearchResult | dict[str, Any], output_folder: s
 
     # Try to download manifest-level PDF/EPUB renderings first
     try:
-        renderings_downloaded = download_iiif_renderings(manifest, output_folder, filename_prefix=f"mdz_{object_id}_")
+        renderings_downloaded = download_iiif_renderings(
+            manifest, output_folder, filename_prefix=f"mdz_{object_id}_"
+        )
         if renderings_downloaded > 0 and prefer_pdf_over_images():
-            logger.info("MDZ: downloaded %d manifest rendering(s); skipping image downloads per config.", renderings_downloaded)
+            logger.info(
+                "MDZ: downloaded %d manifest rendering(s); skipping image "
+                "downloads per config.",
+                renderings_downloaded,
+            )
             return True
     except Exception:
-        logger.exception("MDZ: error while downloading manifest renderings for %s", object_id)
+        logger.exception(
+            "MDZ: error while downloading manifest renderings for %s", object_id
+        )
 
     # Extract per-canvas Image API service base URLs and download
     image_service_bases = extract_image_service_bases(manifest)

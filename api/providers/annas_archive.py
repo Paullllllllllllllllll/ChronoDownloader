@@ -33,7 +33,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from typing import Any
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -42,6 +44,7 @@ from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ..matching import normalize_text, title_score
 from ..model import (
+    QuotaDeferredException,
     SearchResult,
     convert_to_searchresult,
     resolve_item_id,
@@ -69,6 +72,24 @@ def is_api_backed() -> bool:
     applies to a given download attempt.
     """
     return bool(_get_api_key())
+
+
+# Thread-local marker: did the most recent download on this thread consume a
+# fast-download (quota-gated) API unit? The orchestration layer consumes this
+# after each successful download so quota is only recorded for actual fast-API
+# successes, not for public-scraping fallbacks.
+_thread_state = threading.local()
+
+
+def _mark_fast_api_used(used: bool) -> None:
+    _thread_state.fast_api_used = used
+
+
+def consume_fast_api_used() -> bool:
+    """Return and clear the fast-API-used marker for this thread."""
+    used = bool(getattr(_thread_state, "fast_api_used", False))
+    _thread_state.fast_api_used = False
+    return used
 
 
 def _clean_title_candidate(text: str) -> str:
@@ -348,7 +369,8 @@ def search_annas_archive(
                     seen_md5s.add(md5)
 
                     # Extract metadata from table cells
-                    # Table structure: [icons, title, authors, publisher, year, filename]
+                    # Table structure: [icons, title, authors, publisher, year,
+                    # filename]
                     cells = row.find_all(["td", "th"])
 
                     title_candidates: list[str] = []
@@ -385,7 +407,8 @@ def search_annas_archive(
                     logger.debug("Error parsing Anna's Archive table row: %s", e)
                     continue
 
-        # Strategy 2: If no structured containers found, fall back to scanning all MD5 links
+        # Strategy 2: If no structured containers found, fall back to scanning
+        # all MD5 links
         if not results:
             for link in soup.find_all("a", href=True):
                 if len(results) >= max_results:
@@ -487,13 +510,16 @@ def download_annas_archive_work(
         return False
 
     api_key = _get_api_key()
+    _mark_fast_api_used(False)
 
     if api_key:
         logger.info("Anna's Archive: Using fast download API (member)")
         if _download_with_api(md5, api_key, output_folder):
+            _mark_fast_api_used(True)
             return True
         logger.info(
-            "Anna's Archive: Fast download API unavailable; falling back to public scraping"
+            "Anna's Archive: Fast download API unavailable; falling back to "
+            "public scraping"
         )
         return _download_via_scraping(md5, output_folder)
 
@@ -540,7 +566,14 @@ def _download_with_api(md5: str, api_key: str, output_folder: str) -> bool:
             # Specific error handling
             error_lower = error_msg.lower() if error_msg else ""
             if "quota" in error_lower or "limit" in error_lower:
+                # Server-side quota exhaustion: signal a deferral so the
+                # orchestration layer queues the work for retry after reset
+                # instead of recording an ordinary failure.
                 logger.error("Download quota reached. Wait for daily reset.")
+                raise QuotaDeferredException(
+                    provider="annas_archive",
+                    message=f"Anna's Archive fast-download quota: {error_msg}",
+                )
             elif "invalid key" in error_lower:
                 logger.error(
                     "Invalid API key. Check ANNAS_ARCHIVE_API_KEY configuration."
@@ -556,7 +589,8 @@ def _download_with_api(md5: str, api_key: str, output_folder: str) -> bool:
         # Handle 204 No Content case - valid request but no fast download
         if not download_url:
             logger.info(
-                "No fast download URL available (HTTP 204). File may require fallback download."
+                "No fast download URL available (HTTP 204). File may require "
+                "fallback download."
             )
             # Save API response showing quota info even without download
             if response.get("account_fast_download_info"):
@@ -585,6 +619,9 @@ def _download_with_api(md5: str, api_key: str, output_folder: str) -> bool:
             logger.warning("Failed to download from fast download URL")
             return False
 
+    except QuotaDeferredException:
+        # Propagate to the orchestration layer's deferral handler.
+        raise
     except Exception as e:
         logger.exception("Error using Anna's Archive fast download API: %s", e)
         return False
@@ -618,6 +655,11 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
 
     any_downloaded = False
 
+    # Rebuild relative links against the host the page was actually fetched
+    # from, not a hardcoded mirror.
+    parsed_page = urlparse(md5_page_url)
+    page_base = f"{parsed_page.scheme}://{parsed_page.netloc}"
+
     # Parse the page to extract metadata and download links
     soup = BeautifulSoup(html, "html.parser")
 
@@ -631,17 +673,6 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
     title_elem = soup.find("h1") or soup.find("div", class_="text-xl")
     if title_elem:
         metadata["title"] = title_elem.get_text(strip=True)
-
-    # Look for file extension from page
-    file_ext = ".pdf"  # Default
-    for text_elem in soup.find_all(text=True):
-        text_lower = str(text_elem).lower()
-        if ".epub" in text_lower:
-            file_ext = ".epub"
-            break
-        elif ".djvu" in text_lower:
-            file_ext = ".djvu"
-            break
 
     # Save metadata
     save_json(metadata, output_folder, f"annas_{md5}_metadata")
@@ -685,10 +716,10 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
         ):
             continue
 
-        # Build full URL
+        # Build full URL against the fetched host
         full_url = href
         if href.startswith("/"):
-            full_url = f"https://annas-archive.li{href}"
+            full_url = f"{page_base}{href}"
         elif not href.startswith("http"):
             continue
 
@@ -720,7 +751,7 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
             r'https?://[^"\s<>]+(?:\.pdf|\.epub|\.djvu|\.mobi)[^"\s<>]*', script_text
         ):
             url = match.group(0).rstrip(",\"');")
-            if url not in [l["url"] for l in direct_file_links]:
+            if url not in [link["url"] for link in direct_file_links]:
                 direct_file_links.append({"url": url, "source": "script"})
 
     # Prioritized download attempts

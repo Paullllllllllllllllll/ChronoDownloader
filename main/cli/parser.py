@@ -4,6 +4,7 @@ Kept deliberately separate from dispatch logic so the full option surface
 can be introspected (``-h`` / ``--help``) without importing the heavier
 orchestration and state modules.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,7 +30,8 @@ Examples:
   python -m main.cli --interactive
 
   # Download from a single IIIF manifest URL
-  python -m main.cli --iiif "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k1511262r/manifest.json" --name Taillevent
+  python -m main.cli --iiif \
+"https://gallica.bnf.fr/iiif/ark:/12148/bpt6k1511262r/manifest.json" --name Taillevent
 
   # Download multiple IIIF manifests
   python -m main.cli --iiif URL1 --iiif URL2 --output_dir my_downloads
@@ -46,7 +48,8 @@ Examples:
         "csv_file",
         nargs="?",
         default=None,
-        help="Path to CSV file. Must contain 'short_title' or 'direct_link' (with required 'entry_id').",
+        help="Path to CSV file. Must contain 'short_title' or 'direct_link' (with "
+        "required 'entry_id').",
     )
 
     parser.add_argument(
@@ -79,14 +82,15 @@ Examples:
         action="append",
         dest="iiif_urls",
         metavar="URL",
-        help="Direct IIIF manifest URL(s) to download (repeatable). Bypasses CSV and search.",
+        help="Direct IIIF manifest URL(s) to download (repeatable). Bypasses CSV "
+        "and search.",
     )
 
     parser.add_argument(
         "--name",
         default=None,
-        help="Output name stem for IIIF and identifier downloads (e.g. 'Taillevent_Viandier'). "
-        "Used for folder and file naming.",
+        help="Output name stem for IIIF and identifier downloads (e.g. "
+        "'Taillevent_Viandier'). Used for folder and file naming.",
     )
 
     parser.add_argument(
@@ -125,9 +129,36 @@ Examples:
     )
 
     parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Display works-CSV progress (with csv_file) plus quota and "
+        "deferred queue status, then exit.",
+    )
+
+    parser.add_argument(
         "--cleanup-deferred",
         action="store_true",
         help="Remove completed items from deferred queue, then exit.",
+    )
+
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify downloaded works under --output_dir (size, magic bytes, "
+        "page counts) and flip incomplete works to 'partial', then exit.",
+    )
+
+    parser.add_argument(
+        "--json",
+        dest="json_summary",
+        action="store_true",
+        help="Emit a single machine-readable JSON summary line on stdout at exit.",
+    )
+
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Force non-interactive (CLI) mode; never prompt.",
     )
 
     parser.add_argument(
@@ -135,7 +166,8 @@ Examples:
         action="append",
         default=None,
         metavar="KEYS",
-        help="Comma-separated provider keys to use for this run (e.g. mdz,bnf_gallica,slub).",
+        help="Comma-separated provider keys to use for this run (e.g. "
+        "mdz,bnf_gallica,slub).",
     )
 
     parser.add_argument(
@@ -143,7 +175,8 @@ Examples:
         action="append",
         default=None,
         metavar="KEYS",
-        help="Provider key(s) to force-enable for this run (comma-separated or repeat flag).",
+        help="Provider key(s) to force-enable for this run (comma-separated or "
+        "repeat flag).",
     )
 
     parser.add_argument(
@@ -151,7 +184,8 @@ Examples:
         action="append",
         default=None,
         metavar="KEYS",
-        help="Provider key(s) to force-disable for this run (comma-separated or repeat flag).",
+        help="Provider key(s) to force-disable for this run (comma-separated or "
+        "repeat flag).",
     )
 
     parser.add_argument(
@@ -164,7 +198,8 @@ Examples:
         "--pending-mode",
         default="all",
         choices=["all", "new", "failed"],
-        help="Which CSV rows to process: all pending+failed (default), only never-tried rows, or only failed rows.",
+        help="Which CSV rows to process: all pending+failed (default), only "
+        "never-tried rows, or only failed rows.",
     )
 
     parser.add_argument(
@@ -172,7 +207,8 @@ Examples:
         action="append",
         default=None,
         metavar="IDS",
-        help="Restrict processing to specific entry_id values (comma-separated or repeat flag).",
+        help="Restrict processing to specific entry_id values (comma-separated "
+        "or repeat flag).",
     )
 
     parser.add_argument(
@@ -263,7 +299,8 @@ Examples:
         action="append",
         default=None,
         metavar="MIMES",
-        help="Override download.rendering_mime_whitelist (comma-separated MIME values).",
+        help="Override download.rendering_mime_whitelist (comma-separated MIME "
+        "values).",
     )
 
     parser.add_argument(

@@ -3,6 +3,7 @@
 Kept free of orchestration imports so tests can exercise the override
 and filter logic without pulling in the full pipeline.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,10 +15,12 @@ import pandas as pd
 
 import api.core.config as core_config
 from api.providers import PROVIDERS
-from main.data.works_csv import ENTRY_ID_COL, STATUS_COL, get_pending_works
-
-_TRUTHY = frozenset({"true", "1", "yes", "y"})
-_FALSY = frozenset({"false", "0", "no", "n"})
+from main.data.works_csv import (
+    ENTRY_ID_COL,
+    STATUS_COL,
+    _parse_status,
+    get_pending_works,
+)
 
 
 def _split_csv_values(values: list[str] | None) -> list[str]:
@@ -48,18 +51,11 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
 
 
 def _classify_status(value: Any) -> str:
-    """Classify CSV status cell as completed, failed, or pending."""
-    if pd.isna(value):
-        return "pending"
-    if isinstance(value, bool):
-        return "completed" if value else "failed"
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in _TRUTHY:
-            return "completed"
-        if lowered in _FALSY:
-            return "failed"
-    return "pending"
+    """Classify a CSV status cell (delegates to the single shared classifier).
+
+    Returns ``"completed"``, ``"failed"``, ``"deferred"``, or ``"pending"``.
+    """
+    return _parse_status(value)
 
 
 def _apply_runtime_config_overrides(
@@ -114,7 +110,9 @@ def _apply_runtime_config_overrides(
     if creator_weight is not None:
         sel_cfg["creator_weight"] = float(creator_weight)
     if max_candidates_per_provider is not None:
-        sel_cfg["max_candidates_per_provider"] = int(max(1, max_candidates_per_provider))
+        sel_cfg["max_candidates_per_provider"] = int(
+            max(1, max_candidates_per_provider)
+        )
     if download_strategy is not None:
         sel_cfg["download_strategy"] = download_strategy
     if keep_non_selected_metadata is not None:
@@ -134,8 +132,12 @@ def _apply_provider_cli_overrides(
     logger: logging.Logger,
 ) -> list[Any]:
     """Apply provider selection overrides while preserving provider ordering."""
-    explicit_keys = _dedupe_keep_order(_split_csv_values(getattr(args, "providers", None)))
-    force_enable = _dedupe_keep_order(_split_csv_values(getattr(args, "enable_provider", None)))
+    explicit_keys = _dedupe_keep_order(
+        _split_csv_values(getattr(args, "providers", None))
+    )
+    force_enable = _dedupe_keep_order(
+        _split_csv_values(getattr(args, "enable_provider", None))
+    )
     force_disable = set(
         _dedupe_keep_order(_split_csv_values(getattr(args, "disable_provider", None)))
     )
@@ -145,10 +147,14 @@ def _apply_provider_cli_overrides(
 
     available = set(PROVIDERS.keys())
     unknown = [
-        k for k in explicit_keys + force_enable + list(force_disable) if k not in available
+        k
+        for k in explicit_keys + force_enable + list(force_disable)
+        if k not in available
     ]
     if unknown:
-        logger.warning("Ignoring unknown provider key(s): %s", ", ".join(sorted(set(unknown))))
+        logger.warning(
+            "Ignoring unknown provider key(s): %s", ", ".join(sorted(set(unknown)))
+        )
 
     current_keys = [p[0] for p in providers if isinstance(p, tuple) and len(p) >= 4]
 
@@ -161,7 +167,9 @@ def _apply_provider_cli_overrides(
         if key in available and key not in ordered_keys:
             ordered_keys.append(key)
 
-    ordered_keys = [k for k in ordered_keys if k not in force_disable and k in available]
+    ordered_keys = [
+        k for k in ordered_keys if k not in force_disable and k in available
+    ]
 
     overridden: list[Any] = []
     for key in ordered_keys:
@@ -194,10 +202,14 @@ def _filter_pending_rows(
         else:  # pending_mode == "failed"
             pending_df = works_df[status_labels == "failed"].copy()
 
-    requested_ids = _dedupe_keep_order(_split_csv_values(getattr(args, "entry_ids", None)))
+    requested_ids = _dedupe_keep_order(
+        _split_csv_values(getattr(args, "entry_ids", None))
+    )
     if requested_ids:
         id_set = {str(i) for i in requested_ids}
-        pending_df = pending_df[pending_df[ENTRY_ID_COL].astype(str).isin(id_set)].copy()
+        pending_df = pending_df[
+            pending_df[ENTRY_ID_COL].astype(str).isin(id_set)
+        ].copy()
 
     limit = getattr(args, "limit", None)
     if limit is not None and limit >= 0:
@@ -216,6 +228,9 @@ def _looks_like_cli_invocation(argv: list[str]) -> bool:
 
     cli_flags = {
         "--cli",
+        "--non-interactive",
+        "--verify",
+        "--json",
         "--help",
         "-h",
         "--output_dir",

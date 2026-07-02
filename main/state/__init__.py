@@ -10,6 +10,7 @@ public surface:
 - :class:`BackgroundRetryScheduler` / :func:`get_background_scheduler` /
   :func:`start_background_scheduler` / :func:`stop_background_scheduler`
 """
+
 from __future__ import annotations
 
 from .background import (

@@ -7,7 +7,7 @@ packages = ["api", "main"]
 
 [project]
 name = "chronodownloader"
-version = "1.6.0"
+version = "1.7.0"
 description = "Discover and download digitized historical sources from 17 digital libraries"
 readme = "README.md"
 license = "MIT"
@@ -22,6 +22,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "pandas-stubs>=3.0.3.260530",
+    "types-requests>=2.33.0.20260518",
 ]
 
 [tool.pytest.ini_options]
@@ -45,6 +52,8 @@ markers = [
 python_version = "3.13"
 strict = true
 warn_unused_ignores = true
+# verification/ holds ad-hoc multi-provider test scripts, not shipped source.
+exclude = ["verification/"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"
@@ -54,7 +63,18 @@ disallow_untyped_decorators = false
 line-length = 88
 target-version = "py311"
 extend-include = ["*.ipynb"]
-extend-exclude = ["data/", "outputs/", "scratch", ".claude", "backup", "deprecated", "exploratory", "explorative", "extras"]
+extend-exclude = [
+    "data/",
+    "outputs/",
+    "scratch",
+    ".claude",
+    "backup",
+    "deprecated",
+    "exploratory",
+    "explorative",
+    "extras",
+    "verification",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

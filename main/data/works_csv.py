@@ -9,16 +9,19 @@ Expected CSV columns (from bib_sampling.ipynb):
     re_sampled, full_title, main_author, earliest_year, regional_editions,
     total_editions, pps_weight, design_weight, short_note, retrievable, link
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import shutil
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
+
+from api.core.atomic import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +41,13 @@ LINK_COL = "link"
 PROVIDER_COL = "download_provider"
 TIMESTAMP_COL = "download_timestamp"
 
-# Direct IIIF link column (optional - for bypassing search with known IIIF manifest URLs)
+# Direct IIIF link column (optional - for bypassing search with known IIIF
+# manifest URLs)
 DIRECT_LINK_COL = "direct_link"
 
 _TRUTHY = frozenset({"true", "1", "yes", "y"})
 _FALSY = frozenset({"false", "0", "no", "n"})
+
 
 def _parse_status(val: object) -> str:
     """Classify a single status cell value.
@@ -60,26 +65,29 @@ def _parse_status(val: object) -> str:
             return "completed"
         if lowered in _FALSY:
             return "failed"
+        if lowered == "deferred":
+            return "deferred"
     return "pending"
+
 
 def load_works_csv(csv_path: str) -> pd.DataFrame:
     """Load the works CSV file.
-    
+
     Args:
         csv_path: Path to the CSV file
-        
+
     Returns:
         DataFrame with all columns preserved
-        
+
     Raises:
         FileNotFoundError: If CSV file doesn't exist
         ValueError: If required columns are missing
     """
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
-    
-    df = pd.read_csv(csv_path)
-    
+
+    df = pd.read_csv(csv_path, encoding="utf-8")
+
     # Validate required columns: entry_id is always required;
     # short_title is required unless a direct_link column is present
     # (IIIF-only CSVs may omit titles entirely).
@@ -90,53 +98,56 @@ def load_works_csv(csv_path: str) -> pd.DataFrame:
             f"CSV must have a '{TITLE_COL}' column or a '{DIRECT_LINK_COL}' column "
             f"(or both). Found columns: {list(df.columns)}"
         )
-    
+
     # Ensure status and link columns exist
     if STATUS_COL not in df.columns:
         df[STATUS_COL] = pd.NA
     if LINK_COL not in df.columns:
         df[LINK_COL] = pd.NA
-    
+
     return df
+
 
 def get_pending_works(df: pd.DataFrame) -> pd.DataFrame:
     """Get works that need to be processed.
-    
+
     A work is pending if:
     - retrievable is empty/NA (never attempted)
     - retrievable is False (failed, eligible for retry)
-    
+
     Args:
         df: DataFrame loaded from CSV
-        
+
     Returns:
         Filtered DataFrame of pending works
     """
     # Convert to nullable boolean for proper comparison
     status = df[STATUS_COL]
-    
+
     # Pending = not completed
     mask = status.apply(lambda v: _parse_status(v) != "completed")
     return df[mask].copy()
 
+
 def get_completed_entry_ids(df: pd.DataFrame) -> set[str]:
     """Get set of entry_ids that are already completed.
-    
+
     Args:
         df: DataFrame loaded from CSV
-        
+
     Returns:
         Set of entry_id values where retrievable=True
     """
     mask = df[STATUS_COL].apply(lambda v: _parse_status(v) == "completed")
     return set(df.loc[mask, ENTRY_ID_COL].astype(str))
 
+
 def _backup_csv(csv_path: str) -> str:
     """Create a timestamped backup of the CSV file.
-    
+
     Args:
         csv_path: Path to the CSV file
-        
+
     Returns:
         Path to the backup file
     """
@@ -145,14 +156,35 @@ def _backup_csv(csv_path: str) -> str:
     shutil.copy2(csv_path, backup_path)
     return backup_path
 
+
+def backup_works_csv(csv_path: str) -> str | None:
+    """Create a one-off timestamped backup of the works CSV (best-effort).
+
+    Intended to be called once per run before any status writes so a crash or
+    a bad write cannot lose the ledger. Returns the backup path, or None if the
+    source is missing or the copy fails.
+    """
+    if not os.path.exists(csv_path):
+        return None
+    try:
+        backup_path = _backup_csv(csv_path)
+        logger.info("Backed up works CSV to %s", backup_path)
+        return backup_path
+    except Exception:
+        logger.warning("Failed to back up works CSV %s", csv_path, exc_info=True)
+        return None
+
+
 def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
-    """Save DataFrame to CSV, preserving all columns.
-    
+    """Save DataFrame to CSV atomically, preserving all columns.
+
     Args:
         df: DataFrame to save
         csv_path: Path to save to
     """
-    df.to_csv(csv_path, index=False, encoding="utf-8")
+    csv_text = df.to_csv(index=False)
+    atomic_write_text(csv_path, csv_text)
+
 
 def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
     mtime = 0.0
@@ -167,9 +199,10 @@ def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
         if cached_mtime == mtime:
             return df
 
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, encoding="utf-8")
     _csv_cache[csv_path] = (df, mtime)
     return df
+
 
 def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
     _save_csv(df, csv_path)
@@ -179,6 +212,7 @@ def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
         mtime = 0.0
     _csv_cache[csv_path] = (df, mtime)
 
+
 def mark_success(
     csv_path: str,
     entry_id: str,
@@ -186,56 +220,57 @@ def mark_success(
     provider: str | None = None,
 ) -> bool:
     """Mark a work as successfully downloaded.
-    
+
     Thread-safe update that sets retrievable=True and populates link.
-    
+
     Args:
         csv_path: Path to the CSV file
         entry_id: Entry ID to update
         item_url: URL of the downloaded item
         provider: Optional provider name
-        
+
     Returns:
         True if update succeeded, False otherwise
     """
     with _csv_lock:
         try:
             df = _load_csv_for_update(csv_path)
-            
+
             # Find the row
             mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
             if not mask.any():
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
-            
+
             # Ensure columns have compatible dtype for mixed values
             if STATUS_COL in df.columns:
                 df[STATUS_COL] = df[STATUS_COL].astype(object)
             if LINK_COL in df.columns:
                 df[LINK_COL] = df[LINK_COL].astype(object)
-            
+
             # Update status and link
             df.loc[mask, STATUS_COL] = True
             df.loc[mask, LINK_COL] = item_url
-            
+
             # Add provider if column exists or create it
             if provider:
                 if PROVIDER_COL not in df.columns:
                     df[PROVIDER_COL] = pd.NA
                 df.loc[mask, PROVIDER_COL] = provider
-            
+
             # Add timestamp
             if TIMESTAMP_COL not in df.columns:
                 df[TIMESTAMP_COL] = pd.NA
-            df.loc[mask, TIMESTAMP_COL] = datetime.now(timezone.utc).isoformat()
-            
+            df.loc[mask, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
+
             _save_csv_and_update_cache(df, csv_path)
             logger.debug("Marked entry %s as success", entry_id)
             return True
-            
+
         except Exception:
             logger.exception("Failed to mark entry %s as success", entry_id)
             return False
+
 
 def mark_failed(
     csv_path: str,
@@ -243,100 +278,112 @@ def mark_failed(
     reason: str | None = None,
 ) -> bool:
     """Mark a work as failed to download.
-    
+
     Thread-safe update that sets retrievable=False.
-    
+
     Args:
         csv_path: Path to the CSV file
         entry_id: Entry ID to update
         reason: Optional failure reason (not stored in CSV, just logged)
-        
+
     Returns:
         True if update succeeded, False otherwise
     """
     with _csv_lock:
         try:
             df = _load_csv_for_update(csv_path)
-            
+
             # Find the row
             mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
             if not mask.any():
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
-            
+
             # Ensure column has compatible dtype for mixed values
             if STATUS_COL in df.columns:
                 df[STATUS_COL] = df[STATUS_COL].astype(object)
-            
+
             # Update status
             df.loc[mask, STATUS_COL] = False
-            
+
             # Add timestamp
             if TIMESTAMP_COL not in df.columns:
                 df[TIMESTAMP_COL] = pd.NA
-            df.loc[mask, TIMESTAMP_COL] = datetime.now(timezone.utc).isoformat()
-            
+            df.loc[mask, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
+
             _save_csv_and_update_cache(df, csv_path)
-            
+
             if reason:
                 logger.debug("Marked entry %s as failed: %s", entry_id, reason)
             else:
                 logger.debug("Marked entry %s as failed", entry_id)
             return True
-            
+
         except Exception:
             logger.exception("Failed to mark entry %s as failed", entry_id)
             return False
+
 
 def mark_deferred(
     csv_path: str,
     entry_id: str,
 ) -> bool:
     """Mark a work as deferred (e.g., rate-limited, will retry later).
-    
-    Deferred works are left with retrievable=NA so they will be retried.
-    
+
+    Deferred works carry an explicit ``deferred`` status in the retrievable
+    column. They remain eligible for retry (``get_pending_works`` treats any
+    non-completed status as pending) while staying distinguishable from
+    never-attempted and failed works in the ledger.
+
     Args:
         csv_path: Path to the CSV file
         entry_id: Entry ID to update
-        
+
     Returns:
         True if update succeeded, False otherwise
     """
     with _csv_lock:
         try:
             df = _load_csv_for_update(csv_path)
-            
+
             # Find the row
             mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
             if not mask.any():
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
-            
-            # Leave status as NA (pending for retry)
-            df.loc[mask, STATUS_COL] = pd.NA
-            
+
+            # Ensure column can hold the string status value
+            if STATUS_COL in df.columns:
+                df[STATUS_COL] = df[STATUS_COL].astype(object)
+
+            df.loc[mask, STATUS_COL] = "deferred"
+
+            if TIMESTAMP_COL not in df.columns:
+                df[TIMESTAMP_COL] = pd.NA
+            df.loc[mask, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
+
             _save_csv_and_update_cache(df, csv_path)
             logger.debug("Marked entry %s as deferred", entry_id)
             return True
-            
+
         except Exception:
             logger.exception("Failed to mark entry %s as deferred", entry_id)
             return False
 
+
 def get_stats(csv_path: str) -> dict[str, Any]:
     """Get download statistics from the CSV.
-    
+
     Args:
         csv_path: Path to the CSV file
-        
+
     Returns:
-        Dictionary with counts: total, completed, failed, pending
+        Dictionary with counts: total, completed, failed, deferred, pending
     """
     try:
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, encoding="utf-8")
         total = len(df)
-        
+
         # Handle CSVs that don't have the status column yet
         if STATUS_COL not in df.columns:
             # All works are pending if no status column exists
@@ -344,20 +391,23 @@ def get_stats(csv_path: str) -> dict[str, Any]:
                 "total": total,
                 "completed": 0,
                 "failed": 0,
+                "deferred": 0,
                 "pending": total,
             }
-        
+
         status_counts = df[STATUS_COL].apply(_parse_status).value_counts()
-        
+
         return {
             "total": total,
             "completed": int(status_counts.get("completed", 0)),
             "failed": int(status_counts.get("failed", 0)),
+            "deferred": int(status_counts.get("deferred", 0)),
             "pending": int(status_counts.get("pending", 0)),
         }
     except Exception:
         logger.exception("Failed to get stats from CSV")
-        return {"total": 0, "completed": 0, "failed": 0, "pending": 0}
+        return {"total": 0, "completed": 0, "failed": 0, "deferred": 0, "pending": 0}
+
 
 __all__ = [
     "ENTRY_ID_COL",
@@ -369,6 +419,7 @@ __all__ = [
     "load_works_csv",
     "get_pending_works",
     "get_completed_entry_ids",
+    "backup_works_csv",
     "mark_success",
     "mark_failed",
     "mark_deferred",

@@ -1,17 +1,16 @@
 """Integration tests for main.pipeline module."""
+
 from __future__ import annotations
 
 import json
 import os
 from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 
 class TestLoadEnabledApis:
     """Tests for load_enabled_apis function."""
-    
+
     def test_loads_from_config_file(
         self, config_file: str, sample_config: dict[str, Any]
     ) -> None:
@@ -56,7 +55,7 @@ class TestLoadEnabledApis:
 
 class TestFilterEnabledProvidersForKeys:
     """Tests for filter_enabled_providers_for_keys function."""
-    
+
     def test_keeps_providers_without_key_requirement(self) -> None:
         """Test that providers without key requirements are kept."""
         from main.orchestration.pipeline import filter_enabled_providers_for_keys
@@ -108,7 +107,7 @@ class TestFilterEnabledProvidersForKeys:
 
 class TestProviderOrder:
     """Tests for _provider_order function."""
-    
+
     def test_reorders_by_hierarchy(self) -> None:
         """Test that providers are reordered by hierarchy."""
         from main.orchestration.pipeline import _provider_order
@@ -167,7 +166,7 @@ class TestProviderOrder:
 
 class TestGetSelectionConfig:
     """Tests for _get_selection_config function."""
-    
+
     def test_returns_dict(self, mock_config: dict[str, Any]) -> None:
         """Test that selection config is returned as dict."""
         from main.orchestration.pipeline import _get_selection_config
@@ -192,7 +191,7 @@ class TestGetSelectionConfig:
 
 class TestUpdateWorkStatus:
     """Tests for update_work_status function."""
-    
+
     def test_updates_status(self, work_dir_structure: dict[str, str]) -> None:
         """Test updating work status."""
         from main.data.work import update_work_status
@@ -212,10 +211,11 @@ class TestUpdateWorkStatus:
 
         work_json_path = work_dir_structure["work_json_path"]
 
-        update_work_status(work_json_path, "completed", {
-            "provider": "Internet Archive",
-            "source_id": "test123"
-        })
+        update_work_status(
+            work_json_path,
+            "completed",
+            {"provider": "Internet Archive", "source_id": "test123"},
+        )
 
         with open(work_json_path) as f:
             data = json.load(f)
@@ -243,7 +243,7 @@ class TestBuildIndexRow:
             selected_source_id="source123",
             work_json_path="/path/to/work.json",
             status="completed",
-            item_url="https://example.com"
+            item_url="https://example.com",
         )
 
         assert isinstance(row, dict)

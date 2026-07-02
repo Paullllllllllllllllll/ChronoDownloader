@@ -3,6 +3,7 @@
 Manages global and per-work download limits by content type (images, PDFs, metadata)
 to prevent runaway jobs and respect configured constraints.
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,6 +13,7 @@ from typing import Any
 from .config import get_download_limits
 
 logger = logging.getLogger(__name__)
+
 
 class DownloadBudget:
     """Tracks and enforces download limits across the whole run.
@@ -38,7 +40,8 @@ class DownloadBudget:
         self.total_images_bytes = 0
         self.total_pdfs_bytes = 0
         self.total_metadata_bytes = 0
-        # Per-work counters: {work_id: {"images": bytes, "pdfs": bytes, "metadata": bytes}}
+        # Per-work counters:
+        # {work_id: {"images": bytes, "pdfs": bytes, "metadata": bytes}}
         self.per_work: dict[str, dict[str, int]] = {}
         self._exhausted = False
 
@@ -80,7 +83,9 @@ class DownloadBudget:
         with self._lock:
             return self._exhausted
 
-    def _inc(self, bucket: dict[str, dict[str, int]], key: str, field: str, delta: int) -> int:
+    def _inc(
+        self, bucket: dict[str, dict[str, int]], key: str, field: str, delta: int
+    ) -> int:
         """Increment a counter in a nested bucket."""
         m = bucket.setdefault(key, {"images": 0, "pdfs": 0, "metadata": 0})
         m[field] = int(m.get(field, 0)) + int(delta)
@@ -90,33 +95,47 @@ class DownloadBudget:
         """Get a counter value from a nested bucket."""
         return int(bucket.get(key, {}).get(field, 0))
 
-    def allow_content(self, content_type: str, work_id: str | None, add_bytes: int | None) -> bool:
+    def allow_content(
+        self, content_type: str, work_id: str | None, add_bytes: int | None
+    ) -> bool:
         """Check if additional content can be downloaded within budget limits.
-        
+
+        The check runs entirely under the internal lock so concurrent workers
+        cannot both pass a limit check and jointly overshoot it (TOCTOU).
+
         Args:
             content_type: Type of content ("images", "pdfs", or "metadata")
             work_id: Work ID for per-work limits
             add_bytes: Number of bytes to add
-            
+
         Returns:
             True if content is allowed, False if limit would be exceeded
         """
         if not add_bytes or add_bytes <= 0:
             return True
-        
+
         if content_type not in ["images", "pdfs", "metadata"]:
-            logger.warning("Unknown content type: %s, defaulting to allow", content_type)
+            logger.warning(
+                "Unknown content type: %s, defaulting to allow", content_type
+            )
             return True
-        
+
+        with self._lock:
+            return self._allow_content_locked(content_type, work_id, add_bytes)
+
+    def _allow_content_locked(
+        self, content_type: str, work_id: str | None, add_bytes: int
+    ) -> bool:
+        """Limit check body; caller must hold ``self._lock``."""
         dl = get_download_limits()
-        
+
         # Get total limits
         total_limits = dl.get("total", {})
-        
+
         # Global limit for this content type
         limit_key = f"{content_type}_gb"
         max_total = self._gb_to_bytes(total_limits.get(limit_key))
-        
+
         current_total = getattr(self, f"total_{content_type}_bytes", 0)
         if max_total is not None and (current_total + add_bytes) > max_total:
             logger.info(
@@ -126,14 +145,13 @@ class DownloadBudget:
                 max_total / (1024**3),
             )
             if self._policy() == "stop":
-                with self._lock:
-                    self._exhausted = True
+                self._exhausted = True
             return False
-        
+
         # Per-work limit for this content type
         if work_id:
             per_work_limits = dl.get("per_work", {})
-            
+
             # Handle MB for metadata, GB for others
             if content_type == "metadata":
                 limit_key = "metadata_mb"
@@ -141,20 +159,23 @@ class DownloadBudget:
             else:
                 limit_key = f"{content_type}_gb"
                 max_work = self._gb_to_bytes(per_work_limits.get(limit_key))
-            
+
             current_work = self._get(self.per_work, work_id, content_type)
             if max_work is not None and (current_work + add_bytes) > max_work:
-                logger.info("Per-work %s limit would be exceeded for %s", content_type, work_id)
+                logger.info(
+                    "Per-work %s limit would be exceeded for %s", content_type, work_id
+                )
                 if self._policy() == "stop":
-                    with self._lock:
-                        self._exhausted = True
+                    self._exhausted = True
                 return False
-        
+
         return True
 
-    def record_download(self, content_type: str, work_id: str | None, size_bytes: int) -> None:
+    def record_download(
+        self, content_type: str, work_id: str | None, size_bytes: int
+    ) -> None:
         """Record a completed download.
-        
+
         Args:
             content_type: Type of content ("images", "pdfs", or "metadata")
             work_id: Work ID for per-work tracking
@@ -163,13 +184,13 @@ class DownloadBudget:
         if content_type not in ["images", "pdfs", "metadata"]:
             logger.warning("Unknown content type for recording: %s", content_type)
             return
-        
+
         with self._lock:
             # Update global counter
             attr_name = f"total_{content_type}_bytes"
             current = getattr(self, attr_name, 0)
             setattr(self, attr_name, current + size_bytes)
-            
+
             # Update per-work counter
             if work_id:
                 self._inc(self.per_work, work_id, content_type, size_bytes)
@@ -198,39 +219,65 @@ class DownloadBudget:
         """Legacy method for backward compatibility. Always returns True."""
         return not self._exhausted
 
-    def allow_bytes(self, provider: str | None, work_id: str | None, add_bytes: int | None) -> bool:
-        """Legacy method for backward compatibility. Checks against total limits."""
+    def allow_bytes(
+        self,
+        provider: str | None,
+        work_id: str | None,
+        add_bytes: int | None,
+        content_type: str = "images",
+    ) -> bool:
+        """Check byte allowance for a pending download.
+
+        Args:
+            provider: Provider key (unused; kept for signature compatibility)
+            work_id: Work ID for per-work limits
+            add_bytes: Number of bytes about to be downloaded
+            content_type: Budget bucket ("images", "pdfs", or "metadata"),
+                classified by the caller from the file extension.
+        """
         if not add_bytes or add_bytes <= 0:
             return True
-        # Default to checking against images limit for legacy calls
-        return self.allow_content("images", work_id, add_bytes)
+        return self.allow_content(content_type, work_id, add_bytes)
 
-    def add_bytes(self, provider: str | None, work_id: str | None, add_bytes: int) -> bool:
-        """Add bytes to budget during streaming download.
-        
+    def add_bytes(
+        self,
+        provider: str | None,
+        work_id: str | None,
+        add_bytes: int,
+        content_type: str = "images",
+    ) -> bool:
+        """Atomically check-and-record bytes during a streaming download.
+
+        The limit check and the counter update run under one lock acquisition
+        so concurrent workers cannot jointly overshoot a limit.
+
         Args:
-            provider: Provider key (unused in new system)
+            provider: Provider key (unused; kept for signature compatibility)
             work_id: Work ID for per-work tracking
             add_bytes: Number of bytes to add
-            
+            content_type: Budget bucket ("images", "pdfs", or "metadata"),
+                classified by the caller from the file extension.
+
         Returns:
             True if bytes were accepted, False if limit exceeded
         """
-        # Try to allow the bytes first (checks limits)
-        if not self.allow_content("images", work_id, add_bytes):
-            return False
-        
-        # Record the bytes
+        if content_type not in ("images", "pdfs", "metadata"):
+            content_type = "images"
+
         with self._lock:
-            self.total_images_bytes += add_bytes
+            if not self._allow_content_locked(content_type, work_id, add_bytes):
+                return False
+
+            attr_name = f"total_{content_type}_bytes"
+            setattr(self, attr_name, getattr(self, attr_name, 0) + add_bytes)
             if work_id:
-                self._inc(self.per_work, work_id, "images", add_bytes)
-        
+                self._inc(self.per_work, work_id, content_type, add_bytes)
+
         return True
 
     def add_file(self, provider: str | None, work_id: str | None) -> None:
         """Record a completed file download (legacy method).
-        
+
         Args:
             provider: Provider key (unused in new system)
             work_id: Work ID for per-work tracking
@@ -239,16 +286,15 @@ class DownloadBudget:
         # The size was already tracked via add_bytes during download
         pass
 
-    def record_file(self, provider: str | None, work_id: str | None, size_bytes: int) -> None:
-        """Legacy method for backward compatibility."""
-        self.record_download("images", work_id, size_bytes)
 
 # Global singleton budget tracker
 _BUDGET = DownloadBudget()
 
+
 def get_budget() -> DownloadBudget:
     """Get the global download budget tracker."""
     return _BUDGET
+
 
 def budget_exhausted() -> bool:
     """Check if the global download budget has been exhausted."""

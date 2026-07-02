@@ -1,17 +1,14 @@
 """Unit tests for api.utils module."""
+
 from __future__ import annotations
 
 import os
-import tempfile
-from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 
 class TestInferExtensionFromContentType:
     """Tests for _infer_extension_from_content_type function."""
-    
+
     def test_pdf_content_type(self) -> None:
         """Test PDF content type."""
         from api.core.download import _infer_extension_from_content_type
@@ -45,7 +42,7 @@ class TestInferExtensionFromContentType:
 
 class TestShouldRejectHtmlResponse:
     """Tests for _should_reject_html_response function."""
-    
+
     def test_accepts_non_html(self) -> None:
         """Test that non-HTML responses are accepted."""
         from api.core.download import _should_reject_html_response
@@ -80,7 +77,7 @@ class TestShouldRejectHtmlResponse:
 
 class TestValidateFileMagicBytes:
     """Tests for _validate_file_magic_bytes function."""
-    
+
     def test_valid_pdf(self, temp_dir: str) -> None:
         """Test validation of valid PDF."""
         from api.core.download import _validate_file_magic_bytes
@@ -122,10 +119,11 @@ class TestValidateFileMagicBytes:
 
 class TestDetermineTargetDirectory:
     """Tests for _determine_target_directory function."""
-    
+
     def test_default_to_objects(self) -> None:
         """Test that default target is objects directory."""
         import os
+
         from api.core.download import _determine_target_directory
 
         target, msg, success = _determine_target_directory(
@@ -151,6 +149,7 @@ class TestDetermineTargetDirectory:
     def test_saves_disallowed_to_metadata(self) -> None:
         """Test saving disallowed files to metadata."""
         import os
+
         from api.core.download import _determine_target_directory
 
         target, msg, success = _determine_target_directory(
@@ -164,11 +163,11 @@ class TestDetermineTargetDirectory:
 
 class TestBuildStandardizedFilename:
     """Tests for _build_standardized_filename function."""
-    
+
     def test_basic_filename(self) -> None:
         """Test building basic filename."""
-        from api.core.download import _build_standardized_filename
         from api.core.context import reset_counters
+        from api.core.download import _build_standardized_filename
 
         reset_counters()
 
@@ -180,8 +179,8 @@ class TestBuildStandardizedFilename:
 
     def test_increments_sequence(self) -> None:
         """Test that sequence number increments."""
-        from api.core.download import _build_standardized_filename
         from api.core.context import reset_counters
+        from api.core.download import _build_standardized_filename
 
         reset_counters()
 
@@ -193,8 +192,8 @@ class TestBuildStandardizedFilename:
 
     def test_image_naming(self) -> None:
         """Test image file naming."""
-        from api.core.download import _build_standardized_filename
         from api.core.context import reset_counters
+        from api.core.download import _build_standardized_filename
 
         reset_counters()
 
@@ -206,11 +205,15 @@ class TestBuildStandardizedFilename:
 
 class TestSaveJson:
     """Tests for save_json function."""
-    
+
     def test_saves_json_file(self, temp_dir: str) -> None:
         """Test saving JSON data to file."""
+        from api.core.context import (
+            reset_counters,
+            set_current_name_stem,
+            set_current_provider,
+        )
         from api.core.download import save_json
-        from api.core.context import set_current_name_stem, set_current_provider, reset_counters
 
         reset_counters()
         set_current_name_stem("test_work")
@@ -234,8 +237,8 @@ class TestSaveJson:
 
     def test_creates_metadata_directory(self, temp_dir: str) -> None:
         """Test that metadata directory is created."""
+        from api.core.context import reset_counters, set_current_name_stem
         from api.core.download import save_json
-        from api.core.context import set_current_name_stem, reset_counters
 
         reset_counters()
         set_current_name_stem("test_work")
@@ -243,14 +246,14 @@ class TestSaveJson:
         output_dir = os.path.join(temp_dir, "new_work")
 
         with patch("api.core.download.include_metadata", return_value=True):
-            result = save_json({"data": 123}, output_dir, "test")
+            save_json({"data": 123}, output_dir, "test")
 
         assert os.path.exists(os.path.join(output_dir, "metadata"))
 
 
 class TestFilenameFromContentDisposition:
     """Tests for _filename_from_content_disposition function."""
-    
+
     def test_simple_filename(self) -> None:
         """Test parsing simple filename."""
         from api.core.download import _filename_from_content_disposition
@@ -288,13 +291,15 @@ class TestFilenameFromContentDisposition:
 
 class TestDownloadIiifRenderings:
     """Tests for download_iiif_renderings function."""
-    
+
     def test_skips_when_disabled(self, temp_dir: str) -> None:
         """Test that download is skipped when disabled."""
         from api.iiif import download_iiif_renderings
 
         manifest = {
-            "rendering": [{"@id": "https://example.com/pdf", "format": "application/pdf"}]
+            "rendering": [
+                {"@id": "https://example.com/pdf", "format": "application/pdf"}
+            ]
         }
 
         with patch(
@@ -312,21 +317,23 @@ class TestDownloadIiifRenderings:
         manifest = {
             "rendering": [
                 {"@id": "https://example.com/pdf", "format": "application/pdf"},
-                {"@id": "https://example.com/html", "format": "text/html"}
+                {"@id": "https://example.com/html", "format": "text/html"},
             ]
         }
 
         config = {
             "download_manifest_renderings": True,
             "rendering_mime_whitelist": ["application/pdf"],
-            "max_renderings_per_manifest": 10
+            "max_renderings_per_manifest": 10,
         }
 
-        with patch("api.iiif._renderings.get_download_config", return_value=config):
-            with patch(
+        with (
+            patch("api.iiif._renderings.get_download_config", return_value=config),
+            patch(
                 "api.iiif._renderings.download_file", return_value="/path/to/file"
-            ) as mock_dl:
-                count = download_iiif_renderings(manifest, temp_dir)
+            ) as mock_dl,
+        ):
+            download_iiif_renderings(manifest, temp_dir)
 
         # Should only attempt PDF download
         assert mock_dl.call_count == 1
@@ -345,13 +352,15 @@ class TestDownloadIiifRenderings:
         config = {
             "download_manifest_renderings": True,
             "rendering_mime_whitelist": ["application/pdf"],
-            "max_renderings_per_manifest": 2
+            "max_renderings_per_manifest": 2,
         }
 
-        with patch("api.iiif._renderings.get_download_config", return_value=config):
-            with patch(
+        with (
+            patch("api.iiif._renderings.get_download_config", return_value=config),
+            patch(
                 "api.iiif._renderings.download_file", return_value="/path/to/file"
-            ) as mock_dl:
-                count = download_iiif_renderings(manifest, temp_dir)
+            ) as mock_dl,
+        ):
+            download_iiif_renderings(manifest, temp_dir)
 
         assert mock_dl.call_count <= 2

@@ -5,6 +5,7 @@ and that every exported name resolves to a callable, class, module,
 constant, or frozen collection. These tests guard against accidental
 interface regressions during future refactors.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -67,10 +68,23 @@ def test_api_providers_package_surface() -> None:
     # 17 providers
     assert len(PROVIDERS) == 17, f"Expected 17 providers, got {len(PROVIDERS)}"
     expected_keys = {
-        "annas_archive", "bne", "bnf_gallica", "british_library", "ddb",
-        "dpla", "e_rara", "europeana", "google_books", "hathitrust",
-        "internet_archive", "loc", "mdz", "polona", "sbb_digital",
-        "slub", "wellcome",
+        "annas_archive",
+        "bne",
+        "bnf_gallica",
+        "british_library",
+        "ddb",
+        "dpla",
+        "e_rara",
+        "europeana",
+        "google_books",
+        "hathitrust",
+        "internet_archive",
+        "loc",
+        "mdz",
+        "polona",
+        "sbb_digital",
+        "slub",
+        "wellcome",
     }
     assert set(PROVIDERS.keys()) == expected_keys
 
@@ -226,13 +240,13 @@ def test_no_provider_to_main_reverse_dependency() -> None:
                 for alias in node.names:
                     if alias.name == "main" or alias.name.startswith("main."):
                         bad_imports.append((str(path), alias.name))
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and (
-                    node.module == "main" or node.module.startswith("main.")
-                ):
-                    bad_imports.append((str(path), node.module))
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and (node.module == "main" or node.module.startswith("main."))
+            ):
+                bad_imports.append((str(path), node.module))
 
-    assert not bad_imports, (
-        "api/ has reverse dependencies on main/: "
-        + ", ".join(f"{p}: {m}" for p, m in bad_imports)
+    assert not bad_imports, "api/ has reverse dependencies on main/: " + ", ".join(
+        f"{p}: {m}" for p, m in bad_imports
     )

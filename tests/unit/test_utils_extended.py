@@ -1,12 +1,11 @@
 """Extended tests for api.utils module — file download and utility functions."""
+
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from api.core.download import (
     _build_standardized_filename,
@@ -20,10 +19,10 @@ from api.core.download import (
 )
 from api.iiif import download_iiif_renderings
 
-
 # ============================================================================
 # _infer_extension_from_content_type
 # ============================================================================
+
 
 class TestInferExtensionFromContentType:
     """Tests for MIME type to extension mapping."""
@@ -50,12 +49,16 @@ class TestInferExtensionFromContentType:
         assert _infer_extension_from_content_type("Application/PDF") == ".pdf"
 
     def test_with_charset(self) -> None:
-        assert _infer_extension_from_content_type("application/json; charset=utf-8") == ".json"
+        assert (
+            _infer_extension_from_content_type("application/json; charset=utf-8")
+            == ".json"
+        )
 
 
 # ============================================================================
 # _should_reject_html_response
 # ============================================================================
+
 
 class TestShouldRejectHtmlResponse:
     """Tests for HTML response rejection logic."""
@@ -104,6 +107,7 @@ class TestShouldRejectHtmlResponse:
 # _validate_file_magic_bytes
 # ============================================================================
 
+
 class TestValidateFileMagicBytes:
     """Tests for file content validation."""
 
@@ -147,6 +151,7 @@ class TestValidateFileMagicBytes:
 # _validate_html_not_login_page
 # ============================================================================
 
+
 class TestValidateHtmlNotLoginPage:
     """Tests for Anna's Archive login page detection."""
 
@@ -176,6 +181,7 @@ class TestValidateHtmlNotLoginPage:
 # ============================================================================
 # _determine_target_directory
 # ============================================================================
+
 
 class TestDetermineTargetDirectory:
     """Tests for target directory determination."""
@@ -217,11 +223,13 @@ class TestDetermineTargetDirectory:
 # _build_standardized_filename
 # ============================================================================
 
+
 class TestBuildStandardizedFilename:
     """Tests for filename standardization."""
 
     def test_basic_filename(self) -> None:
         from api.core.context import reset_counters
+
         reset_counters()
         name = _build_standardized_filename(".pdf", "test_book", "ia")
         assert name.endswith(".pdf")
@@ -230,6 +238,7 @@ class TestBuildStandardizedFilename:
 
     def test_image_filename_includes_sequence(self) -> None:
         from api.core.context import reset_counters
+
         reset_counters()
         name = _build_standardized_filename(".jpg", "test", "mdz")
         assert "image" in name
@@ -237,6 +246,7 @@ class TestBuildStandardizedFilename:
 
     def test_truncates_long_stem(self) -> None:
         from api.core.context import reset_counters
+
         reset_counters()
         long_stem = "a" * 100
         name = _build_standardized_filename(".pdf", long_stem, "ia", max_stem_len=50)
@@ -247,6 +257,7 @@ class TestBuildStandardizedFilename:
 # _filename_from_content_disposition
 # ============================================================================
 
+
 class TestFilenameFromContentDisposition:
     """Tests for Content-Disposition header parsing."""
 
@@ -255,7 +266,9 @@ class TestFilenameFromContentDisposition:
         assert result == "test.pdf"
 
     def test_filename_star(self) -> None:
-        result = _filename_from_content_disposition("attachment; filename*=UTF-8''test%20file.pdf")
+        result = _filename_from_content_disposition(
+            "attachment; filename*=UTF-8''test%20file.pdf"
+        )
         assert result == "test file.pdf"
 
     def test_none_input(self) -> None:
@@ -276,6 +289,7 @@ class TestFilenameFromContentDisposition:
 # ============================================================================
 # save_json
 # ============================================================================
+
 
 class TestSaveJson:
     """Tests for JSON metadata saving."""
@@ -310,22 +324,29 @@ class TestSaveJson:
 # download_iiif_renderings
 # ============================================================================
 
+
 class TestDownloadIIIFRenderings:
     """Tests for IIIF manifest rendering downloads."""
 
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": False,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": False,
+        },
+    )
     def test_disabled_by_config(self, mock_cfg: MagicMock) -> None:
         result = download_iiif_renderings({}, "/out")
         assert result == 0
 
     @patch("api.iiif._renderings.download_file")
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": True,
-        "rendering_mime_whitelist": ["application/pdf"],
-        "max_renderings_per_manifest": 1,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": True,
+            "rendering_mime_whitelist": ["application/pdf"],
+            "max_renderings_per_manifest": 1,
+        },
+    )
     def test_downloads_pdf_rendering(
         self, mock_cfg: MagicMock, mock_dl: MagicMock
     ) -> None:
@@ -339,29 +360,33 @@ class TestDownloadIIIFRenderings:
         assert result == 1
 
     @patch("api.iiif._renderings.download_file")
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": True,
-        "rendering_mime_whitelist": ["application/pdf"],
-        "max_renderings_per_manifest": 1,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": True,
+            "rendering_mime_whitelist": ["application/pdf"],
+            "max_renderings_per_manifest": 1,
+        },
+    )
     def test_skips_non_whitelisted_format(
         self, mock_cfg: MagicMock, mock_dl: MagicMock
     ) -> None:
         manifest = {
-            "rendering": [
-                {"@id": "https://example.org/file.xml", "format": "text/xml"}
-            ]
+            "rendering": [{"@id": "https://example.org/file.xml", "format": "text/xml"}]
         }
         result = download_iiif_renderings(manifest, "/out")
         assert result == 0
         mock_dl.assert_not_called()
 
     @patch("api.iiif._renderings.download_file")
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": True,
-        "rendering_mime_whitelist": ["application/pdf"],
-        "max_renderings_per_manifest": 1,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": True,
+            "rendering_mime_whitelist": ["application/pdf"],
+            "max_renderings_per_manifest": 1,
+        },
+    )
     def test_respects_max_renderings_limit(
         self, mock_cfg: MagicMock, mock_dl: MagicMock
     ) -> None:
@@ -375,21 +400,27 @@ class TestDownloadIIIFRenderings:
         result = download_iiif_renderings(manifest, "/out")
         assert result == 1  # Only 1 due to limit
 
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": True,
-        "rendering_mime_whitelist": ["application/pdf"],
-        "max_renderings_per_manifest": 1,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": True,
+            "rendering_mime_whitelist": ["application/pdf"],
+            "max_renderings_per_manifest": 1,
+        },
+    )
     def test_handles_empty_manifest(self, mock_cfg: MagicMock) -> None:
         result = download_iiif_renderings({}, "/out")
         assert result == 0
 
     @patch("api.iiif._renderings.download_file")
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": True,
-        "rendering_mime_whitelist": ["application/pdf"],
-        "max_renderings_per_manifest": 2,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": True,
+            "rendering_mime_whitelist": ["application/pdf"],
+            "max_renderings_per_manifest": 2,
+        },
+    )
     def test_deduplicates_rendering_urls(
         self, mock_cfg: MagicMock, mock_dl: MagicMock
     ) -> None:
@@ -404,35 +435,42 @@ class TestDownloadIIIFRenderings:
         assert result == 1  # Deduplicated
 
     @patch("api.iiif._renderings.download_file")
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": True,
-        "rendering_mime_whitelist": [],
-        "max_renderings_per_manifest": 1,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": True,
+            "rendering_mime_whitelist": [],
+            "max_renderings_per_manifest": 1,
+        },
+    )
     def test_allows_pdf_by_url_suffix_when_no_whitelist(
         self, mock_cfg: MagicMock, mock_dl: MagicMock
     ) -> None:
         mock_dl.return_value = "/path"
         manifest = {
-            "rendering": [
-                {"@id": "https://example.org/file.pdf", "format": ""}
-            ]
+            "rendering": [{"@id": "https://example.org/file.pdf", "format": ""}]
         }
         result = download_iiif_renderings(manifest, "/out")
         assert result == 1
 
     @patch("api.iiif._renderings.download_file")
-    @patch("api.iiif._renderings.get_download_config", return_value={
-        "download_manifest_renderings": True,
-        "rendering_mime_whitelist": ["application/pdf"],
-        "max_renderings_per_manifest": 1,
-    })
+    @patch(
+        "api.iiif._renderings.get_download_config",
+        return_value={
+            "download_manifest_renderings": True,
+            "rendering_mime_whitelist": ["application/pdf"],
+            "max_renderings_per_manifest": 1,
+        },
+    )
     def test_rendering_as_dict_not_list(
         self, mock_cfg: MagicMock, mock_dl: MagicMock
     ) -> None:
         mock_dl.return_value = "/path"
         manifest = {
-            "rendering": {"@id": "https://example.org/file.pdf", "format": "application/pdf"}
+            "rendering": {
+                "@id": "https://example.org/file.pdf",
+                "format": "application/pdf",
+            }
         }
         result = download_iiif_renderings(manifest, "/out")
         assert result == 1

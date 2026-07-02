@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -77,7 +78,8 @@ def search_google_books(
             "printType": "books",
             "orderBy": "relevance",
             "projection": "full",
-            # Set a default country to normalize viewability; adjust if needed via config later
+            # Set a default country to normalize viewability; adjust if needed via
+            # config later
             "country": "US",
         }
         if key:
@@ -85,7 +87,8 @@ def search_google_books(
         if use_filter:
             p["filter"] = use_filter
         # The Books API supports 'download=epub' to restrict to downloadable EPUBs;
-        # only add this hint when EPUB is preferred to avoid excluding PDF-only free books.
+        # only add this hint when EPUB is preferred to avoid excluding PDF-only free
+        # books.
         try:
             if _gb_prefer_format() == "epub":
                 p.setdefault("download", "epub")
@@ -112,12 +115,8 @@ def search_google_books(
     q4 = re.sub(r"[^\w\s]", " ", title).strip()
 
     queries = [q1, q2, q3, q4]
-    filters = []
-    if free_only:
-        # Try strictly free first, then any ebook, then no filter
-        filters = ["free-ebooks", "ebooks", None]
-    else:
-        filters = ["ebooks", None]
+    # Try strictly free first, then any ebook, then no filter (when free_only).
+    filters = ["free-ebooks", "ebooks", None] if free_only else ["ebooks", None]
 
     logger.info("Searching Google Books for: %s", title)
     data = None
@@ -158,8 +157,8 @@ def search_google_books(
                 return None
 
             download_link = _dl(access_info)
-            # If configured to free_only, accept items that are clearly free/public domain
-            # even when the API does not expose a direct downloadLink.
+            # If configured to free_only, accept items that are clearly free/public
+            # domain even when the API does not expose a direct downloadLink.
             public_domain = bool(access_info.get("publicDomain"))
             viewability = str(
                 access_info.get("viewability") or volume_info.get("viewability") or ""
@@ -173,8 +172,9 @@ def search_google_books(
                     "full",
                 )
             )
-            # Only accept clearly downloadable or fully viewable items when free_only is requested
-            # Some items report generic ebook availability without a direct download; exclude those
+            # Only accept clearly downloadable or fully viewable items when free_only
+            # is requested. Some items report generic ebook availability without a
+            # direct download; exclude those.
             if free_only and not (download_link or public_domain or is_full_view):
                 # Skip items that are not obviously free when free_only is requested
                 continue
@@ -277,7 +277,8 @@ def download_google_books_work(
     # This works when direct PDF download fails (which is common)
     if not any_ok and (public_domain or is_full_view):
         logger.info(
-            "Google Books: No direct download available for %s, attempting page image extraction",
+            "Google Books: No direct download available for %s, attempting page "
+            "image extraction",
             volume_id,
         )
         any_ok = _download_page_images(volume_id, output_folder, max_files)
@@ -350,14 +351,16 @@ def _is_placeholder_image(filepath: str) -> bool:
 
             # Check against known placeholder signatures
             for sig_size, sig_hash in GB_PLACEHOLDER_SIGNATURES:
-                if file_size == sig_size:
-                    if sig_hash is None or file_hash == sig_hash:
-                        return True
+                if file_size == sig_size and (
+                    sig_hash is None or file_hash == sig_hash
+                ):
+                    return True
 
             # Also flag very small images as suspicious
             if file_size < 10000:  # Less than 10KB is almost certainly a placeholder
                 logger.debug(
-                    "Google Books: Detected small image (%d bytes), likely placeholder: %s",
+                    "Google Books: Detected small image (%d bytes), likely "
+                    "placeholder: %s",
                     file_size,
                     filepath,
                 )
@@ -405,7 +408,8 @@ def _download_page_images(
 
         if consecutive_placeholders >= max_consecutive_placeholders:
             logger.info(
-                "Google Books: Stopping page extraction after %d consecutive placeholder images for %s",
+                "Google Books: Stopping page extraction after %d consecutive "
+                "placeholder images for %s",
                 max_consecutive_placeholders,
                 volume_id,
             )
@@ -428,14 +432,13 @@ def _download_page_images(
                 # Check if it's a placeholder image
                 if _is_placeholder_image(downloaded_path):
                     logger.debug(
-                        "Google Books: Detected placeholder image for page %d, removing: %s",
+                        "Google Books: Detected placeholder image for page %d, "
+                        "removing: %s",
                         page_num,
                         downloaded_path,
                     )
-                    try:
+                    with contextlib.suppress(Exception):
                         os.remove(downloaded_path)
-                    except Exception:
-                        pass
                     placeholder_count += 1
                     consecutive_placeholders += 1
                     # Don't count as downloaded, but don't count as failure either
@@ -456,14 +459,16 @@ def _download_page_images(
 
     if valid_pages_downloaded > 0:
         logger.info(
-            "Google Books: Downloaded %d valid page images for %s (rejected %d placeholders)",
+            "Google Books: Downloaded %d valid page images for %s (rejected %d "
+            "placeholders)",
             valid_pages_downloaded,
             volume_id,
             placeholder_count,
         )
     elif placeholder_count > 0:
         logger.warning(
-            "Google Books: All %d downloaded images were placeholders for %s - book may not have full preview",
+            "Google Books: All %d downloaded images were placeholders for %s - "
+            "book may not have full preview",
             placeholder_count,
             volume_id,
         )

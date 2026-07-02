@@ -4,12 +4,12 @@ Maps (provider_key, identifier) pairs to downloadable manifest URLs,
 enabling the ``--id`` CLI flag. Supports auto-detection of provider
 from identifier format patterns when ``--provider`` is omitted.
 """
+
 from __future__ import annotations
 
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
 
 from .model import SearchResult
 from .providers import PROVIDERS
@@ -42,14 +42,16 @@ MANIFEST_TEMPLATES: dict[str, str | list[str]] = {
 
 # Providers that lack a simple IIIF Presentation manifest template and must
 # use their native ``download_*`` function instead.
-NATIVE_DOWNLOAD_PROVIDERS: frozenset[str] = frozenset({
-    "google_books",
-    "annas_archive",
-    "sbb_digital",
-    "wellcome",  # uses IIIF Image API directly; no presentation manifest from ID
-    "dpla",      # aggregator -- IDs don't map to a single manifest template
-    "ddb",       # aggregator -- IDs don't map to a single manifest template
-})
+NATIVE_DOWNLOAD_PROVIDERS: frozenset[str] = frozenset(
+    {
+        "google_books",
+        "annas_archive",
+        "sbb_digital",
+        "wellcome",  # uses IIIF Image API directly; no presentation manifest from ID
+        "dpla",  # aggregator -- IDs don't map to a single manifest template
+        "ddb",  # aggregator -- IDs don't map to a single manifest template
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Identifier auto-detection
@@ -83,6 +85,7 @@ IDENTIFIER_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # Data types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ResolvedIdentifier:
     """Result of resolving an identifier to a downloadable target."""
@@ -95,6 +98,7 @@ class ResolvedIdentifier:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def build_manifest_url(provider_key: str, identifier: str) -> list[str]:
     """Construct IIIF manifest URL(s) for *provider_key* and *identifier*.
@@ -173,17 +177,21 @@ def resolve_identifier(
                 f"Valid keys: {', '.join(sorted(PROVIDERS.keys()))}"
             )
         if provider_key in NATIVE_DOWNLOAD_PROVIDERS:
-            return [ResolvedIdentifier(
-                provider_key=provider_key,
-                manifest_urls=[],
-                use_native=True,
-            )]
+            return [
+                ResolvedIdentifier(
+                    provider_key=provider_key,
+                    manifest_urls=[],
+                    use_native=True,
+                )
+            ]
         urls = build_manifest_url(provider_key, identifier)
-        return [ResolvedIdentifier(
-            provider_key=provider_key,
-            manifest_urls=urls,
-            use_native=False,
-        )]
+        return [
+            ResolvedIdentifier(
+                provider_key=provider_key,
+                manifest_urls=urls,
+                use_native=False,
+            )
+        ]
 
     # Auto-detect
     detected = detect_provider(identifier)
@@ -193,18 +201,22 @@ def resolve_identifier(
     results: list[ResolvedIdentifier] = []
     for pkey in detected:
         if pkey in NATIVE_DOWNLOAD_PROVIDERS:
-            results.append(ResolvedIdentifier(
-                provider_key=pkey,
-                manifest_urls=[],
-                use_native=True,
-            ))
+            results.append(
+                ResolvedIdentifier(
+                    provider_key=pkey,
+                    manifest_urls=[],
+                    use_native=True,
+                )
+            )
         else:
             urls = build_manifest_url(pkey, identifier)
-            results.append(ResolvedIdentifier(
-                provider_key=pkey,
-                manifest_urls=urls,
-                use_native=False,
-            ))
+            results.append(
+                ResolvedIdentifier(
+                    provider_key=pkey,
+                    manifest_urls=urls,
+                    use_native=False,
+                )
+            )
     return results
 
 

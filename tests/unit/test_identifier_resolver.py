@@ -1,4 +1,5 @@
 """Tests for api.identifier_resolver -- identifier-to-manifest resolution."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -8,17 +9,16 @@ import pytest
 from api.identifier_resolver import (
     MANIFEST_TEMPLATES,
     NATIVE_DOWNLOAD_PROVIDERS,
-    ResolvedIdentifier,
     build_manifest_url,
     detect_provider,
     download_by_native_provider,
     resolve_identifier,
 )
 
-
 # ============================================================================
 # build_manifest_url
 # ============================================================================
+
 
 class TestBuildManifestUrl:
     """Verify manifest URL construction for each provider."""
@@ -53,9 +53,7 @@ class TestBuildManifestUrl:
 
     def test_loc(self) -> None:
         urls = build_manifest_url("loc", "2004578901")
-        assert urls == [
-            "https://www.loc.gov/item/2004578901/manifest.json"
-        ]
+        assert urls == ["https://www.loc.gov/item/2004578901/manifest.json"]
 
     def test_british_library(self) -> None:
         urls = build_manifest_url("british_library", "vdc_000000001")
@@ -71,9 +69,7 @@ class TestBuildManifestUrl:
 
     def test_polona(self) -> None:
         urls = build_manifest_url("polona", "abc123def")
-        assert urls == [
-            "https://polona.pl/iiif/item/abc123def/manifest.json"
-        ]
+        assert urls == ["https://polona.pl/iiif/item/abc123def/manifest.json"]
 
     def test_bne_returns_multiple(self) -> None:
         urls = build_manifest_url("bne", "bne_id_123")
@@ -82,7 +78,9 @@ class TestBuildManifestUrl:
         assert "https://iiif.bne.es/bne_id_123/manifest.json" in urls
 
     def test_europeana(self) -> None:
-        urls = build_manifest_url("europeana", "9200396/BibliographicResource_3000135551475")
+        urls = build_manifest_url(
+            "europeana", "9200396/BibliographicResource_3000135551475"
+        )
         assert urls == [
             "https://iiif.europeana.eu/presentation/9200396/BibliographicResource_3000135551475/manifest"
         ]
@@ -107,24 +105,28 @@ class TestBuildManifestUrl:
 # detect_provider
 # ============================================================================
 
+
 class TestDetectProvider:
     """Verify auto-detection of provider from identifier format."""
 
-    @pytest.mark.parametrize("identifier, expected", [
-        ("bsb11280551", ["mdz"]),
-        ("bsb00073751", ["mdz"]),
-        ("BSB11280551", ["mdz"]),  # case-insensitive
-        ("bpt6k1511262r", ["bnf_gallica"]),
-        ("btv1b8600069s", ["bnf_gallica"]),
-        ("cb343161870", ["bnf_gallica"]),
-        ("ark:/12148/bpt6k1511262r", ["bnf_gallica"]),
-        ("mdp.39015012345678", ["hathitrust"]),
-        ("inu.30000088654321", ["hathitrust"]),
-        ("uc1.b123456", ["hathitrust"]),
-        ("hvd.hw1abc", ["hathitrust"]),
-        ("nyp.33433082123456", ["hathitrust"]),
-        ("vdc_100000000001", ["british_library"]),
-    ])
+    @pytest.mark.parametrize(
+        "identifier, expected",
+        [
+            ("bsb11280551", ["mdz"]),
+            ("bsb00073751", ["mdz"]),
+            ("BSB11280551", ["mdz"]),  # case-insensitive
+            ("bpt6k1511262r", ["bnf_gallica"]),
+            ("btv1b8600069s", ["bnf_gallica"]),
+            ("cb343161870", ["bnf_gallica"]),
+            ("ark:/12148/bpt6k1511262r", ["bnf_gallica"]),
+            ("mdp.39015012345678", ["hathitrust"]),
+            ("inu.30000088654321", ["hathitrust"]),
+            ("uc1.b123456", ["hathitrust"]),
+            ("hvd.hw1abc", ["hathitrust"]),
+            ("nyp.33433082123456", ["hathitrust"]),
+            ("vdc_100000000001", ["british_library"]),
+        ],
+    )
     def test_known_patterns(self, identifier: str, expected: list[str]) -> None:
         assert detect_provider(identifier) == expected
 
@@ -141,6 +143,7 @@ class TestDetectProvider:
 # ============================================================================
 # resolve_identifier
 # ============================================================================
+
 
 class TestResolveIdentifier:
     """Verify end-to-end resolution logic."""
@@ -196,6 +199,7 @@ class TestResolveIdentifier:
 # download_by_native_provider
 # ============================================================================
 
+
 class TestDownloadByNativeProvider:
     """Verify native download function dispatch."""
 
@@ -223,9 +227,7 @@ class TestDownloadByNativeProvider:
             "google_books": (MagicMock(), mock_download, "Google Books"),
         }
         with patch("api.identifier_resolver.PROVIDERS", fake_providers):
-            result = download_by_native_provider(
-                "vol_id", "google_books", temp_dir
-            )
+            result = download_by_native_provider("vol_id", "google_books", temp_dir)
         assert result is False
 
     def test_unknown_provider_raises(self, temp_dir: str) -> None:

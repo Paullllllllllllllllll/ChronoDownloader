@@ -119,7 +119,9 @@ def search_dpla(
 def download_dpla_work(
     item_data: SearchResult | dict[str, Any], output_folder: str
 ) -> bool:
-    """Download metadata, IIIF manifest, and page images for a DPLA item (when available)."""
+    """Download metadata, IIIF manifest, and page images for a DPLA item
+    (when available).
+    """
 
     item_id = resolve_item_id(item_data)
     if not item_id:
@@ -187,7 +189,8 @@ def download_dpla_work(
                 )
                 if renders > 0 and prefer_pdf_over_images():
                     logger.info(
-                        "DPLA: downloaded %d rendering(s); skipping image downloads per config.",
+                        "DPLA: downloaded %d rendering(s); skipping image "
+                        "downloads per config.",
                         renders,
                     )
                     return True
@@ -234,7 +237,8 @@ def download_dpla_work(
         return True
 
     # Fallbacks when we have no manifest or no images from manifest:
-    # Try isShownBy (often a direct media resource), then hasView entries, then object (thumbnail).
+    # Try isShownBy (often a direct media resource), then hasView entries,
+    # then object (thumbnail).
     def _as_list(v: Any) -> list[Any]:
         if v is None:
             return []

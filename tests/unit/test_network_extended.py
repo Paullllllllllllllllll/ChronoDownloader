@@ -1,15 +1,13 @@
 """Extended tests for api.core.network module — circuit breaker and request handling."""
+
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from api.core.network import (
+    _CIRCUIT_BREAKERS,
     CircuitBreaker,
     CircuitState,
-    _CIRCUIT_BREAKERS,
     build_session,
     get_circuit_breaker,
     get_provider_cooldown,
@@ -18,10 +16,10 @@ from api.core.network import (
     make_json_request,
 )
 
-
 # ============================================================================
 # CircuitBreaker
 # ============================================================================
+
 
 class TestCircuitBreaker:
     """Tests for the CircuitBreaker class."""
@@ -97,6 +95,7 @@ class TestCircuitBreaker:
 # get_circuit_breaker
 # ============================================================================
 
+
 class TestGetCircuitBreaker:
     """Tests for circuit breaker factory."""
 
@@ -109,28 +108,37 @@ class TestGetCircuitBreaker:
     def test_returns_none_for_none_provider(self) -> None:
         assert get_circuit_breaker(None) is None
 
-    @patch("api.core.network.get_network_config", return_value={
-        "circuit_breaker_enabled": True,
-        "circuit_breaker_threshold": 5,
-        "circuit_breaker_cooldown_s": 120,
-    })
+    @patch(
+        "api.core.network.get_network_config",
+        return_value={
+            "circuit_breaker_enabled": True,
+            "circuit_breaker_threshold": 5,
+            "circuit_breaker_cooldown_s": 120,
+        },
+    )
     def test_creates_circuit_breaker(self, mock_cfg: MagicMock) -> None:
         cb = get_circuit_breaker("ia")
         assert cb is not None
         assert cb.failure_threshold == 5
         assert cb.cooldown_seconds == 120
 
-    @patch("api.core.network.get_network_config", return_value={
-        "circuit_breaker_enabled": True,
-    })
+    @patch(
+        "api.core.network.get_network_config",
+        return_value={
+            "circuit_breaker_enabled": True,
+        },
+    )
     def test_returns_same_instance(self, mock_cfg: MagicMock) -> None:
         cb1 = get_circuit_breaker("ia")
         cb2 = get_circuit_breaker("ia")
         assert cb1 is cb2
 
-    @patch("api.core.network.get_network_config", return_value={
-        "circuit_breaker_enabled": False,
-    })
+    @patch(
+        "api.core.network.get_network_config",
+        return_value={
+            "circuit_breaker_enabled": False,
+        },
+    )
     def test_returns_none_when_disabled(self, mock_cfg: MagicMock) -> None:
         assert get_circuit_breaker("ia") is None
 
@@ -138,6 +146,7 @@ class TestGetCircuitBreaker:
 # ============================================================================
 # is_provider_available
 # ============================================================================
+
 
 class TestIsProviderAvailable:
     """Tests for provider availability check."""
@@ -151,11 +160,14 @@ class TestIsProviderAvailable:
     def test_none_provider_always_available(self) -> None:
         assert is_provider_available(None) is True
 
-    @patch("api.core.network.get_network_config", return_value={
-        "circuit_breaker_enabled": True,
-        "circuit_breaker_threshold": 1,
-        "circuit_breaker_cooldown_s": 300,
-    })
+    @patch(
+        "api.core.network.get_network_config",
+        return_value={
+            "circuit_breaker_enabled": True,
+            "circuit_breaker_threshold": 1,
+            "circuit_breaker_cooldown_s": 300,
+        },
+    )
     def test_unavailable_when_circuit_open(self, mock_cfg: MagicMock) -> None:
         cb = get_circuit_breaker("ia")
         assert cb is not None
@@ -166,6 +178,7 @@ class TestIsProviderAvailable:
 # ============================================================================
 # get_provider_cooldown
 # ============================================================================
+
 
 class TestGetProviderCooldown:
     """Tests for provider cooldown time."""
@@ -179,11 +192,14 @@ class TestGetProviderCooldown:
     def test_zero_for_none_provider(self) -> None:
         assert get_provider_cooldown(None) == 0.0
 
-    @patch("api.core.network.get_network_config", return_value={
-        "circuit_breaker_enabled": True,
-        "circuit_breaker_threshold": 1,
-        "circuit_breaker_cooldown_s": 300,
-    })
+    @patch(
+        "api.core.network.get_network_config",
+        return_value={
+            "circuit_breaker_enabled": True,
+            "circuit_breaker_threshold": 1,
+            "circuit_breaker_cooldown_s": 300,
+        },
+    )
     def test_positive_when_open(self, mock_cfg: MagicMock) -> None:
         cb = get_circuit_breaker("ia")
         assert cb is not None
@@ -195,14 +211,21 @@ class TestGetProviderCooldown:
 # get_provider_for_url
 # ============================================================================
 
+
 class TestGetProviderForUrlExtended:
     """Extended tests for URL-to-provider mapping."""
 
     def test_gallica(self) -> None:
-        assert get_provider_for_url("https://gallica.bnf.fr/ark:/12148/bpt6k123") == "gallica"
+        assert (
+            get_provider_for_url("https://gallica.bnf.fr/ark:/12148/bpt6k123")
+            == "gallica"
+        )
 
     def test_mdz(self) -> None:
-        assert get_provider_for_url("https://api.digitale-sammlungen.de/item/bsb123") == "mdz"
+        assert (
+            get_provider_for_url("https://api.digitale-sammlungen.de/item/bsb123")
+            == "mdz"
+        )
 
     def test_loc(self) -> None:
         assert get_provider_for_url("https://www.loc.gov/item/123") == "loc"
@@ -217,15 +240,21 @@ class TestGetProviderForUrlExtended:
         assert get_provider_for_url("not-a-url") is None
 
     def test_internet_archive(self) -> None:
-        assert get_provider_for_url("https://archive.org/details/test") == "internet_archive"
+        assert (
+            get_provider_for_url("https://archive.org/details/test")
+            == "internet_archive"
+        )
 
     def test_annas_archive(self) -> None:
-        assert get_provider_for_url("https://annas-archive.li/download") == "annas_archive"
+        assert (
+            get_provider_for_url("https://annas-archive.li/download") == "annas_archive"
+        )
 
 
 # ============================================================================
 # build_session
 # ============================================================================
+
 
 class TestBuildSession:
     """Tests for HTTP session construction."""
@@ -239,6 +268,7 @@ class TestBuildSession:
 # ============================================================================
 # make_json_request
 # ============================================================================
+
 
 class TestMakeJsonRequest:
     """Tests for JSON-specific request wrapper."""

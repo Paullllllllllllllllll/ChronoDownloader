@@ -19,6 +19,7 @@ Expected CSV columns (from bib_sampling.ipynb):
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -31,65 +32,52 @@ from api.iiif import (
     is_iiif_manifest_url,
     preview_manifest,
 )
-from api.providers import PROVIDERS
 from main.data.works_csv import (
     CREATOR_COL,
     DIRECT_LINK_COL,
     ENTRY_ID_COL,
     LINK_COL,
     TITLE_COL,
+    backup_works_csv,
+    mark_deferred,
     mark_failed,
     mark_success,
 )
-from main.state.background import (
-    BackgroundRetryScheduler,
-    get_background_scheduler,
-)
-from main.state.deferred import DeferredItem, get_deferred_queue
+from main.state.background import get_background_scheduler
+from main.state.deferred import get_deferred_queue
 
 from . import pipeline
 from .scheduler import DownloadScheduler, DownloadTask, get_parallel_download_config
 
 
-def _setup_background_scheduler(
+def _run_eager_deferred_retry(
     config: dict[str, Any],
     logger: logging.Logger,
-) -> BackgroundRetryScheduler | None:
-    """Set up and start the background retry scheduler.
+    csv_path: str | None,
+) -> None:
+    """Synchronously retry any ready deferred items before starting new work.
 
-    Args:
-        config: Configuration dictionary
-        logger: Logger instance
-
-    Returns:
-        BackgroundRetryScheduler instance if started, None if disabled
+    Replaces the former background daemon thread (which exited with the
+    process before it could do anything). Ready items are retried in-line and,
+    on success, written through the works CSV, work.json, and index.csv.
     """
     deferred_cfg = config.get("deferred", {})
     if not deferred_cfg.get("background_enabled", True):
-        logger.debug("Background retry scheduler disabled in config")
-        return None
+        logger.debug("Eager deferred retry disabled in config")
+        return
 
-    scheduler = get_background_scheduler()
-
-    # Register download functions for all providers
-    for provider_key, (search_fn, download_fn, provider_name) in PROVIDERS.items():
-        scheduler.set_provider_download_fn(provider_key, download_fn)
-
-    # Set up callbacks for logging
-    def on_success(item: DeferredItem) -> None:
-        logger.info("Background retry succeeded: '%s'", item.title)
-
-    def on_failure(item: DeferredItem, error: str) -> None:
-        logger.warning("Background retry failed: '%s' - %s", item.title, error)
-
-    scheduler.set_callbacks(on_success=on_success, on_failure=on_failure)
-
-    # Start the scheduler
-    if scheduler.start():
-        logger.info("Background retry scheduler started")
-        return scheduler
-
-    return None
+    try:
+        scheduler = get_background_scheduler()
+        stats = scheduler.retry_ready_now(csv_path=csv_path)
+        if stats.get("attempted"):
+            logger.info(
+                "Eager deferred retry: %d attempted, %d succeeded, %d failed",
+                stats.get("attempted", 0),
+                stats.get("succeeded", 0),
+                stats.get("failed", 0),
+            )
+    except Exception:
+        logger.exception("Eager deferred retry failed")
 
 
 def run_batch_downloads(
@@ -130,50 +118,49 @@ def run_batch_downloads(
     if logger is None:
         logger = logging.getLogger(__name__)
 
-    # Start background retry scheduler if enabled
-    bg_scheduler: BackgroundRetryScheduler | None = None
-    if enable_background_retry and not dry_run:
-        bg_scheduler = _setup_background_scheduler(config, logger)
+    # Back up the works CSV once per run before any status writes.
+    if csv_path and not dry_run:
+        backup_works_csv(csv_path)
 
-    try:
-        # Determine effective parallel settings
-        dl_config = config.get("download", {})
-        max_parallel = max_workers_override or int(
-            dl_config.get("max_parallel_downloads", 1) or 1
+    # Eagerly retry ready deferred items at run start (synchronous, replaces
+    # the former no-op background daemon thread).
+    if enable_background_retry and not dry_run:
+        _run_eager_deferred_retry(config, logger, csv_path)
+
+    # Determine effective parallel settings
+    dl_config = config.get("download", {})
+    max_parallel = max_workers_override or int(
+        dl_config.get("max_parallel_downloads", 1) or 1
+    )
+
+    # Use parallel mode only when configured and not dry-run
+    if use_parallel and max_parallel > 1 and not dry_run:
+        stats = _run_parallel(
+            works_df,
+            output_dir,
+            config,
+            max_workers_override,
+            logger,
+            on_submit,
+            on_complete,
+            csv_path,
+        )
+    else:
+        stats = _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
+
+    # Add deferred count to stats
+    queue = get_deferred_queue()
+    deferred_count = len(queue.get_pending())
+    stats["deferred"] = deferred_count
+
+    if deferred_count > 0:
+        logger.info(
+            "%d download(s) deferred due to quota limits. "
+            "Ready items are retried at the start of the next run.",
+            deferred_count,
         )
 
-        # Use parallel mode only when configured and not dry-run
-        if use_parallel and max_parallel > 1 and not dry_run:
-            stats = _run_parallel(
-                works_df,
-                output_dir,
-                config,
-                max_workers_override,
-                logger,
-                on_submit,
-                on_complete,
-                csv_path,
-            )
-        else:
-            stats = _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
-
-        # Add deferred count to stats
-        queue = get_deferred_queue()
-        deferred_count = len(queue.get_pending())
-        stats["deferred"] = deferred_count
-
-        if deferred_count > 0:
-            logger.info(
-                "%d download(s) deferred due to quota limits. "
-                "Background scheduler will retry when quotas reset.",
-                deferred_count,
-            )
-
-        return stats
-    finally:
-        # Don't stop the background scheduler here - let it continue running
-        # It will be stopped by the main downloader when appropriate
-        pass
+    return stats
 
 
 def process_direct_iiif(
@@ -245,18 +232,66 @@ def process_direct_iiif(
         file_stem=file_stem,
     )
 
+    pages_expected = dl_result.get("pages_expected")
+    pages_downloaded = dl_result.get("pages_downloaded")
+
     if dl_result["success"]:
+        # A work is only "completed" when every expected page arrived; a
+        # gap yields "partial" so it is not counted as retrievable and can
+        # be re-downloaded (completeness contract).
+        status = dl_result.get("status") or "completed"
+        _record_direct_iiif_completeness(work_dir, status, dl_result)
         return {
-            "status": "completed",
+            "status": status,
             "item_url": manifest_url,
             "provider": dl_result["provider"],
+            "pages_expected": pages_expected,
+            "pages_downloaded": pages_downloaded,
         }
     return {
         "status": "failed",
         "item_url": manifest_url,
         "provider": dl_result["provider"],
         "error": dl_result.get("error", "unknown"),
+        "pages_expected": pages_expected,
+        "pages_downloaded": pages_downloaded,
     }
+
+
+def _record_direct_iiif_completeness(
+    work_dir: str,
+    status: str,
+    dl_result: dict[str, Any],
+) -> None:
+    """Persist a direct-IIIF completeness marker into the work directory.
+
+    Best-effort: only writes when the work directory already exists (i.e. a
+    real download happened), so heavily-mocked unit tests are unaffected.
+    Records the status and page counts into ``work.json`` so ``--verify`` and
+    resume logic can distinguish complete from partial works.
+    """
+    if not work_dir or not os.path.isdir(work_dir):
+        return
+    import json
+
+    from api.core.atomic import atomic_write_json
+
+    work_json_path = os.path.join(work_dir, "work.json")
+    try:
+        meta: dict[str, Any] = {}
+        if os.path.exists(work_json_path):
+            with open(work_json_path, encoding="utf-8") as f:
+                meta = json.load(f)
+        meta["status"] = status
+        meta["pages_expected"] = dl_result.get("pages_expected")
+        meta["pages_downloaded"] = dl_result.get("pages_downloaded")
+        meta.setdefault("source", "direct_iiif")
+        meta["item_url"] = dl_result.get("item_url")
+        atomic_write_json(work_json_path, meta)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Failed to record completeness for %s", work_dir, exc_info=True
+        )
 
 
 def _get_direct_link(row: pd.Series) -> str | None:
@@ -332,6 +367,32 @@ def _parse_work_row(
     return title, creator, entry_id, direct_link, title_missing
 
 
+def _mark_no_match_failed(
+    csv_path: str,
+    output_dir: str,
+    entry_id: str,
+    title: str,
+    logger: logging.Logger,
+) -> None:
+    """Mark a parallel-mode no-match work failed, unless it was resume-skipped.
+
+    ``search_and_select`` returns None both for resume-skips (work already
+    complete) and for genuine no-matches. Only the latter should be marked
+    failed in the works CSV; a resume-skip must keep its completed status.
+    """
+    from main.data.work import check_work_status, compute_work_dir
+
+    try:
+        work_dir, _ = compute_work_dir(output_dir, entry_id, title)
+        should_skip, _reason = check_work_status(work_dir)
+        if should_skip:
+            return
+        mark_failed(csv_path, entry_id)
+        logger.debug("Marked entry %s as failed (no match) in source CSV", entry_id)
+    except Exception:
+        logger.exception("Failed to mark no-match entry %s in source CSV", entry_id)
+
+
 def _run_sequential(
     works_df: pd.DataFrame,
     output_dir: str,
@@ -393,38 +454,32 @@ def _run_sequential(
             )
 
         # Update CSV status if path provided
-        if csv_path and not dry_run:
-            if result and isinstance(result, dict):
-                status = result.get("status", "")
-                if status == "completed":
-                    # Success - result contains item_url and provider
-                    item_url = result.get("item_url", "")
-                    provider = result.get("provider", "")
-                    if mark_success(csv_path, str(entry_id), item_url, provider):
-                        logger.debug(
-                            "Marked entry %s as success in source CSV", entry_id
-                        )
-                    else:
-                        logger.warning(
-                            "Failed to mark entry %s as success in source CSV", entry_id
-                        )
-                    succeeded += 1
-                elif status == "failed":
-                    # Explicit failure
-                    if mark_failed(csv_path, str(entry_id)):
-                        logger.debug(
-                            "Marked entry %s as failed in source CSV", entry_id
-                        )
-                    else:
-                        logger.warning(
-                            "Failed to mark entry %s as failed in source CSV", entry_id
-                        )
-                    failed += 1
-                # Other statuses (dry_run, no_match) - don't update CSV
-            # result is None means deferred/skipped - don't update CSV
+        if csv_path and not dry_run and result and isinstance(result, dict):
+            status = result.get("status", "")
+            if status == "completed":
+                # Success - result contains item_url and provider
+                item_url = result.get("item_url", "")
+                provider = result.get("provider", "")
+                if mark_success(csv_path, str(entry_id), item_url, provider):
+                    logger.debug("Marked entry %s as success in source CSV", entry_id)
+                else:
+                    logger.warning(
+                        "Failed to mark entry %s as success in source CSV", entry_id
+                    )
+                succeeded += 1
+            elif status == "failed":
+                # Explicit failure
+                if mark_failed(csv_path, str(entry_id)):
+                    logger.debug("Marked entry %s as failed in source CSV", entry_id)
+                else:
+                    logger.warning(
+                        "Failed to mark entry %s as failed in source CSV", entry_id
+                    )
+                failed += 1
+            # Other statuses (dry_run, no_match) - don't update CSV
+        # result is None means deferred/skipped - don't update CSV
 
         processed += 1
-        logger.info("%s", "-" * 50)
 
         # Stop early if the global download budget has been exhausted
         try:
@@ -479,7 +534,11 @@ def _run_parallel(
         dl_config.get("max_parallel_downloads", 4) or 4
     )
     provider_concurrency = dict(dl_config.get("provider_concurrency", {}) or {})
-    worker_timeout = float(dl_config.get("worker_timeout_s", 600) or 600)
+    # worker_timeout_s semantics: 0 (or omitted) = wait indefinitely for the
+    # whole batch; a positive value is a TOTAL ceiling for the batch wait
+    # (not per task).
+    raw_timeout = float(dl_config.get("worker_timeout_s", 0) or 0)
+    worker_timeout: float | None = raw_timeout if raw_timeout > 0 else None
 
     # Track statistics
     submitted_count = 0
@@ -508,31 +567,25 @@ def _run_parallel(
     def wrapped_complete(
         task: DownloadTask, success: bool, error: Exception | None
     ) -> None:
-        # Always perform CSV sync (critical for resume functionality)
+        # Always perform CSV sync (critical for resume functionality). The
+        # task's status (set in pipeline.execute_download) distinguishes a
+        # quota deferral from an outright failure: a deferred task must be
+        # marked "deferred" (retriable) rather than "failed" so --pending-mode
+        # new does not permanently drop it.
         if csv_path and task.entry_id:
+            task_status = getattr(task, "status", None)
             try:
                 if success:
                     item_url = getattr(task, "item_url", "") or ""
                     provider = getattr(task, "provider", "") or ""
-                    if mark_success(csv_path, task.entry_id, item_url, provider):
-                        logger.debug(
-                            "Marked entry %s as success in source CSV", task.entry_id
-                        )
-                    else:
-                        logger.warning(
-                            "Failed to mark entry %s as success in source CSV",
-                            task.entry_id,
-                        )
+                    mark_success(csv_path, task.entry_id, item_url, provider)
+                elif task_status == "deferred":
+                    mark_deferred(csv_path, task.entry_id)
+                    logger.debug(
+                        "Marked entry %s as deferred in source CSV", task.entry_id
+                    )
                 else:
-                    if mark_failed(csv_path, task.entry_id):
-                        logger.debug(
-                            "Marked entry %s as failed in source CSV", task.entry_id
-                        )
-                    else:
-                        logger.warning(
-                            "Failed to mark entry %s as failed in source CSV",
-                            task.entry_id,
-                        )
+                    mark_failed(csv_path, task.entry_id)
             except Exception as csv_err:
                 logger.error(
                     "Exception updating source CSV for entry %s: %s",
@@ -637,8 +690,14 @@ def _run_parallel(
                 if task:
                     # Submit download to worker pool
                     scheduler.submit(task, pipeline.execute_download)
-
-            logger.info("%s", "-" * 50)
+                elif csv_path and entry_id:
+                    # No task means either a resume-skip or a genuine no-match.
+                    # Mirror sequential mode: mark genuine no-matches failed in
+                    # the CSV, but never overwrite a resume-skipped (already
+                    # completed) work.
+                    _mark_no_match_failed(
+                        csv_path, output_dir, str(entry_id), str(title), logger
+                    )
 
         # Phase 2: Wait for all downloads to complete
         pending = scheduler.pending_count
@@ -648,12 +707,14 @@ def _run_parallel(
             )
 
             try:
-                results = scheduler.wait_all(timeout=worker_timeout)
+                scheduler.wait_all(timeout=worker_timeout)
             except TimeoutError as te:
-                # Some futures didn't complete within timeout, but downloads may have finished
-                # The scheduler tracks completed/succeeded/failed counts independently
+                # Some futures didn't complete within timeout, but downloads may
+                # have finished. The scheduler tracks completed/succeeded/failed
+                # counts independently
                 logger.warning(
-                    "Timeout waiting for all futures: %s. Some downloads may still be in progress.",
+                    "Timeout waiting for all futures: %s. Some downloads may "
+                    "still be in progress.",
                     te,
                 )
 

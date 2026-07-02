@@ -3,9 +3,10 @@
 Implements the ``--quota-status`` display and ``--cleanup-deferred``
 maintenance command.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from main.state.background import get_background_scheduler
 from main.state.deferred import get_deferred_queue
@@ -58,7 +59,7 @@ def show_quota_status() -> None:
     if pending > 0:
         next_ready = queue.get_next_ready_time()
         if next_ready:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             delta = (next_ready - now).total_seconds()
             if delta > 0:
                 hours = delta / 3600
@@ -90,9 +91,6 @@ def show_quota_status() -> None:
 def cleanup_deferred_queue() -> None:
     """Remove completed items from the deferred queue."""
     queue = get_deferred_queue()
-
-    counts_before = queue.count_by_status()
-    completed_before = counts_before.get("completed", 0)
 
     removed = queue.clear_completed()
 

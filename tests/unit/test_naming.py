@@ -1,7 +1,6 @@
 """Unit tests for api.core.naming module."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from api.core.naming import (
     PROVIDER_ABBREV,
@@ -16,50 +15,50 @@ from api.core.naming import (
 
 class TestToSnakeCase:
     """Tests for to_snake_case function."""
-    
+
     def test_simple_string(self) -> None:
         """Test conversion of simple string."""
         # Note: to_snake_case doesn't split camelCase, only replaces non-alnum
         assert to_snake_case("HelloWorld") == "helloworld"
-    
+
     def test_with_spaces(self) -> None:
         """Test conversion of string with spaces."""
         assert to_snake_case("Hello World") == "hello_world"
-    
+
     def test_with_punctuation(self) -> None:
         """Test conversion of string with punctuation."""
         assert to_snake_case("Hello, World!") == "hello_world"
-    
+
     def test_with_numbers(self) -> None:
         """Test conversion of string with numbers."""
         assert to_snake_case("Entry0001") == "entry_0001"
         assert to_snake_case("E0001Test") == "e_0001_test"
-    
+
     def test_mixed_case(self) -> None:
         """Test conversion of mixed case string."""
         # Note: to_snake_case doesn't split camelCase, only lowercases
         assert to_snake_case("TheArtOfCooking") == "theartofcooking"
-    
+
     def test_already_snake_case(self) -> None:
         """Test that already snake_case string is preserved."""
         assert to_snake_case("already_snake_case") == "already_snake_case"
-    
+
     def test_empty_string(self) -> None:
         """Test conversion of empty string."""
         assert to_snake_case("") == ""
-    
+
     def test_none_value(self) -> None:
         """Test conversion of None value."""
         assert to_snake_case(None) == ""
-    
+
     def test_special_characters(self) -> None:
         """Test conversion with special characters."""
         assert to_snake_case("foo@bar#baz") == "foo_bar_baz"
-    
+
     def test_multiple_underscores_collapsed(self) -> None:
         """Test that multiple underscores are collapsed."""
         assert to_snake_case("foo___bar") == "foo_bar"
-    
+
     def test_leading_trailing_underscores_removed(self) -> None:
         """Test that leading/trailing underscores are removed."""
         assert to_snake_case("_foo_bar_") == "foo_bar"
@@ -67,21 +66,21 @@ class TestToSnakeCase:
 
 class TestSanitizeFilename:
     """Tests for sanitize_filename function."""
-    
+
     def test_simple_filename(self) -> None:
         """Test sanitization of simple filename."""
         assert sanitize_filename("document.pdf") == "document.pdf"
-    
+
     def test_preserves_extension(self) -> None:
         """Test that extension is preserved."""
         result = sanitize_filename("my_document.pdf")
         assert result.endswith(".pdf")
-    
+
     def test_multi_extension(self) -> None:
         """Test preservation of multi-part extension."""
         result = sanitize_filename("archive.tar.gz")
         assert result.endswith(".tar.gz")
-    
+
     def test_removes_illegal_characters(self) -> None:
         """Test removal of illegal filesystem characters."""
         result = sanitize_filename('file<>:"/\\|?*.txt')
@@ -94,30 +93,30 @@ class TestSanitizeFilename:
         assert "|" not in result
         assert "?" not in result
         assert "*" not in result
-    
+
     def test_collapses_separators(self) -> None:
         """Test that multiple separators are collapsed."""
         result = sanitize_filename("foo...bar___baz.txt")
         # sanitize_filename collapses whitespace/separators to underscore
         # but the current implementation may not collapse all
         assert result.endswith(".txt")
-    
+
     def test_max_length(self) -> None:
         """Test that base name is truncated to max length."""
         long_name = "a" * 200 + ".pdf"
         result = sanitize_filename(long_name, max_base_len=50)
         # Should be truncated base + extension
         assert len(result) <= 50 + 4  # 50 chars + ".pdf"
-    
+
     def test_empty_string(self) -> None:
         """Test sanitization of empty string."""
         assert sanitize_filename("") == "_untitled_"
-    
+
     def test_only_illegal_characters(self) -> None:
         """Test sanitization when only illegal characters remain."""
         result = sanitize_filename('<>:"/\\|?*')
         assert result == "_untitled_"
-    
+
     def test_whitespace_handling(self) -> None:
         """Test proper handling of whitespace."""
         result = sanitize_filename("foo  bar   baz.txt")
@@ -126,26 +125,26 @@ class TestSanitizeFilename:
 
 class TestGetProviderSlug:
     """Tests for get_provider_slug function."""
-    
+
     def test_known_provider(self) -> None:
         """Test slug for known provider."""
         assert get_provider_slug("internet_archive", None) == "ia"
         assert get_provider_slug("bnf_gallica", None) == "gallica"
         assert get_provider_slug("mdz", None) == "mdz"
-    
+
     def test_url_provider_fallback(self) -> None:
         """Test fallback to URL provider when pref_key is None."""
         assert get_provider_slug(None, "internet_archive") == "ia"
-    
+
     def test_unknown_provider(self) -> None:
         """Test slug for unknown provider."""
         result = get_provider_slug("custom_provider", None)
         assert result == "custom_provider"
-    
+
     def test_none_values(self) -> None:
         """Test with both values None."""
         assert get_provider_slug(None, None) == "unknown"
-    
+
     def test_all_known_slugs(self) -> None:
         """Test that all known slugs are mapped correctly."""
         for key, expected_slug in PROVIDER_SLUGS.items():
@@ -154,17 +153,17 @@ class TestGetProviderSlug:
 
 class TestGetProviderAbbrev:
     """Tests for get_provider_abbrev function."""
-    
+
     def test_known_provider(self) -> None:
         """Test abbreviation for known provider."""
         assert get_provider_abbrev("internet_archive") == "IA"
         assert get_provider_abbrev("bnf_gallica") == "GAL"
         assert get_provider_abbrev("loc") == "LOC"
-    
+
     def test_unknown_provider(self) -> None:
         """Test abbreviation for unknown provider."""
         assert get_provider_abbrev("custom") == "CUSTOM"
-    
+
     def test_all_known_abbrevs(self) -> None:
         """Test that all known abbreviations are correct."""
         for key, expected_abbrev in PROVIDER_ABBREV.items():
@@ -173,17 +172,17 @@ class TestGetProviderAbbrev:
 
 class TestBuildWorkDirectoryName:
     """Tests for build_work_directory_name function."""
-    
+
     def test_with_entry_id_and_title(self) -> None:
         """Test directory name with both entry_id and title."""
         result = build_work_directory_name("E0001", "The Art of Cooking")
         assert result == "e_0001_the_art_of_cooking"
-    
+
     def test_without_entry_id(self) -> None:
         """Test directory name without entry_id."""
         result = build_work_directory_name(None, "The Art of Cooking")
         assert result == "the_art_of_cooking"
-    
+
     def test_long_title_truncated(self) -> None:
         """Test that long titles are truncated."""
         long_title = "A" * 100
@@ -191,12 +190,12 @@ class TestBuildWorkDirectoryName:
         # Title component should be truncated
         # The result format is: entry_slug_title_slug
         assert len(result) < len("e_0001_" + "a" * 100)
-    
+
     def test_empty_title(self) -> None:
         """Test with empty title."""
         result = build_work_directory_name("E0001", "")
         assert "untitled" in result
-    
+
     def test_none_title(self) -> None:
         """Test with None title."""
         result = build_work_directory_name("E0001", None)  # type: ignore[arg-type]
@@ -206,9 +205,32 @@ class TestBuildWorkDirectoryName:
         """Test with both values None."""
         result = build_work_directory_name(None, None)  # type: ignore[arg-type]
         assert result == "untitled"
-    
+
     def test_special_characters_in_title(self) -> None:
         """Test with special characters in title."""
         result = build_work_directory_name("E0001", "L'Art de la Cuisine!")
         assert "'" not in result
         assert "!" not in result
+
+
+class TestWindowsReservedNames:
+    """Windows reserved device names must be guarded (os.makedirs('con') fails)."""
+
+    def test_reserved_directory_name_guarded(self) -> None:
+        result = build_work_directory_name(None, "CON")
+        assert result.lower() != "con"
+
+    def test_reserved_filename_guarded(self) -> None:
+        from api.core.naming import sanitize_filename
+
+        for reserved in ("con", "nul", "com1", "lpt3"):
+            sanitized = sanitize_filename(reserved)
+            base = sanitized.split(".")[0]
+            assert base.lower() not in {"con", "nul", "com1", "lpt3"}
+
+    def test_reserved_name_with_extension_guarded(self) -> None:
+        from api.core.naming import sanitize_filename
+
+        sanitized = sanitize_filename("con.pdf")
+        assert sanitized.endswith(".pdf")
+        assert sanitized.split(".")[0].lower() != "con"

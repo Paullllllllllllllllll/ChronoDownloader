@@ -3,13 +3,14 @@
 This module encapsulates work directory creation, status checking,
 work.json file management, and naming utilities extracted from pipeline.py.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from api.core.config import get_config, get_resume_mode
@@ -19,28 +20,30 @@ from api.model import SearchResult
 
 logger = logging.getLogger(__name__)
 
+
 def get_naming_config() -> dict[str, Any]:
     """Get naming configuration with defaults.
-    
+
     Returns:
         Dictionary with naming preferences for work directories and files
     """
     cfg = get_config()
     nm = dict(cfg.get("naming", {}) or {})
-    
+
     nm.setdefault("include_creator_in_work_dir", True)
     nm.setdefault("include_year_in_work_dir", True)
     nm.setdefault("title_slug_max_len", 80)
-    
+
     return nm
+
 
 def compute_work_id(title: str, creator: str | None) -> str:
     """Generate a stable hash-based work ID from title and creator.
-    
+
     Args:
         title: Work title
         creator: Optional creator name
-        
+
     Returns:
         10-character hex hash identifier
     """
@@ -48,73 +51,80 @@ def compute_work_id(title: str, creator: str | None) -> str:
     h = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:10]
     return h
 
+
 def compute_work_dir(
     base_output_dir: str,
     entry_id: str | None,
     title: str,
 ) -> tuple[str, str]:
     """Compute the work directory path and name.
-    
+
     Args:
         base_output_dir: Base directory for downloaded works
         entry_id: Optional entry identifier
         title: Work title
-        
+
     Returns:
         Tuple of (work_dir_path, work_dir_name)
     """
     naming_cfg = get_naming_config()
     work_dir_name = build_work_directory_name(
-        entry_id,
-        title,
-        max_len=int(naming_cfg.get("title_slug_max_len", 80))
+        entry_id, title, max_len=int(naming_cfg.get("title_slug_max_len", 80))
     )
     work_dir = os.path.join(base_output_dir, work_dir_name)
     return work_dir, work_dir_name
 
-def check_work_status(work_dir: str, resume_mode: str | None = None) -> tuple[bool, str]:
+
+def check_work_status(
+    work_dir: str, resume_mode: str | None = None
+) -> tuple[bool, str]:
     """Check if a work should be skipped based on resume mode and existing state.
-    
+
     Args:
         work_dir: Path to the work directory
         resume_mode: Resume mode from config. If None, reads from config.
-        
+
     Returns:
-        Tuple of (should_skip, reason). If should_skip is True, the work should be skipped.
+        Tuple of (should_skip, reason). If should_skip is True, the work should
+        be skipped.
     """
     if resume_mode is None:
         resume_mode = get_resume_mode()
-    
+
     if resume_mode == "reprocess_all":
         return False, ""
-    
+
     if not os.path.isdir(work_dir):
         return False, ""
-    
+
     work_json_path = os.path.join(work_dir, "work.json")
     objects_dir = os.path.join(work_dir, "objects")
-    
+
     if resume_mode == "skip_completed":
         if os.path.exists(work_json_path):
             try:
-                with open(work_json_path, "r", encoding="utf-8") as f:
+                with open(work_json_path, encoding="utf-8") as f:
                     work_meta = json.load(f)
                 status = work_meta.get("status", "")
                 if status == "completed":
                     return True, "status=completed in work.json"
             except Exception:
                 pass
-    
-    elif resume_mode == "skip_if_has_objects":
-        if os.path.isdir(objects_dir):
-            try:
-                files = [f for f in os.listdir(objects_dir) if os.path.isfile(os.path.join(objects_dir, f))]
-                if files:
-                    return True, f"objects/ contains {len(files)} file(s)"
-            except Exception:
-                pass
-    
+
+    elif resume_mode == "skip_if_has_objects" and os.path.isdir(objects_dir):
+        try:
+            files = [
+                f
+                for f in os.listdir(objects_dir)
+                if os.path.isfile(os.path.join(objects_dir, f))
+            ]
+            if files:
+                return True, f"objects/ contains {len(files)} file(s)"
+        except Exception:
+            pass
+
     return False, ""
+
 
 def update_work_status(
     work_json_path: str,
@@ -122,7 +132,7 @@ def update_work_status(
     download_info: dict[str, Any] | None = None,
 ) -> None:
     """Update the status field in work.json.
-    
+
     Args:
         work_json_path: Path to work.json file
         status: New status ("completed", "partial", "failed", "deferred", "no_match")
@@ -130,21 +140,22 @@ def update_work_status(
     """
     if not os.path.exists(work_json_path):
         return
-    
+
     try:
-        with open(work_json_path, "r", encoding="utf-8") as f:
+        with open(work_json_path, encoding="utf-8") as f:
             work_meta = json.load(f)
-        
+
         work_meta["status"] = status
-        work_meta["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
+        work_meta["updated_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
         if download_info:
             work_meta["download"] = download_info
-        
+
         with open(work_json_path, "w", encoding="utf-8") as f:
             json.dump(work_meta, f, indent=2, ensure_ascii=False)
     except Exception as e:
         logger.warning("Failed to update work.json status: %s", e)
+
 
 def create_work_json(
     work_json_path: str,
@@ -157,7 +168,7 @@ def create_work_json(
     status: str = "pending",
 ) -> None:
     """Create the initial work.json file.
-    
+
     Args:
         work_json_path: Path to work.json file
         title: Work title
@@ -170,7 +181,7 @@ def create_work_json(
     """
     work_meta: dict[str, Any] = {
         "input": {"title": title, "creator": creator, "entry_id": entry_id},
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "status": status,
         "selection": selection_config,
         "candidates": candidates,
@@ -182,12 +193,13 @@ def create_work_json(
     except Exception:
         logger.exception("Failed to write work.json to %s", work_json_path)
 
+
 def format_candidates_for_json(candidates: list[Any]) -> list[Any]:
     """Format SearchResult candidates for work.json storage.
-    
+
     Args:
         candidates: List of SearchResult objects
-        
+
     Returns:
         List of dictionaries suitable for JSON serialization
     """
@@ -206,13 +218,16 @@ def format_candidates_for_json(candidates: list[Any]) -> list[Any]:
         for sr in candidates
     ]
 
-def format_selected_for_json(selected: SearchResult | None, source_id: str | None) -> dict[str, Any] | None:
+
+def format_selected_for_json(
+    selected: SearchResult | None, source_id: str | None
+) -> dict[str, Any] | None:
     """Format selected SearchResult for work.json storage.
-    
+
     Args:
         selected: SearchResult or None
         source_id: Pre-computed source ID
-        
+
     Returns:
         Dictionary or None
     """
@@ -224,6 +239,7 @@ def format_selected_for_json(selected: SearchResult | None, source_id: str | Non
         "source_id": source_id,
         "title": selected.title,
     }
+
 
 __all__ = [
     "get_naming_config",

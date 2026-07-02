@@ -8,7 +8,8 @@ This module encapsulates the reusable logic for:
 
 The pipeline supports both sequential and parallel download modes:
 - Sequential (default): process_work() handles search and download in one call
-- Parallel: search_and_select() returns a DownloadTask, execute_download() runs in workers
+- Parallel: search_and_select() returns a DownloadTask, execute_download() runs in
+  workers
 
 Quota Handling:
 - QUOTA_LIMITED_PROVIDERS is the authoritative list of providers whose
@@ -29,6 +30,7 @@ Adjacent packages consumed by this module:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import logging
@@ -157,9 +159,24 @@ def _quota_preflight(pkey: str) -> None:
 
 
 def _quota_record(pkey: str) -> None:
-    """Record a consumed quota unit after a successful fast-download."""
+    """Record a consumed quota unit after a successful fast-download.
+
+    Only records when the provider actually consumed a quota-gated API unit:
+    a download that succeeded via a non-quota fallback path (e.g. Anna's
+    Archive public scraping) does not burn a quota unit locally.
+    """
     if not _provider_uses_quota_backed_api(pkey):
         return
+
+    if pkey == "annas_archive":
+        from api.providers.annas_archive import consume_fast_api_used
+
+        if not consume_fast_api_used():
+            logger.debug(
+                "annas_archive download succeeded via non-quota path; "
+                "not recording quota consumption."
+            )
+            return
 
     from main.state.quota import get_quota_manager
 
@@ -298,6 +315,37 @@ def _prepare_work(
     )
 
 
+@contextlib.contextmanager
+def _provider_slot(prov_key: str, held_key: str) -> Any:
+    """Honor the concurrency limit of the provider actually downloaded from.
+
+    The parallel scheduler's worker holds the PRIMARY provider's semaphore;
+    fallback downloads may hit a different provider. This context manager
+    acquires that provider's slot from the active scheduler (bounded wait to
+    avoid nested-acquire deadlocks) and yields whether the slot was obtained.
+    In sequential mode (no active scheduler) it always yields True.
+    """
+    from main.orchestration.scheduler import get_active_semaphore_manager
+
+    mgr = get_active_semaphore_manager()
+    if mgr is None or prov_key == held_key:
+        yield True
+        return
+
+    acquired = mgr.try_acquire(prov_key, timeout=60.0)
+    if not acquired:
+        logger.warning(
+            "Could not acquire a %s download slot within 60s; skipping this "
+            "fallback candidate.",
+            prov_key,
+        )
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            mgr.release(prov_key)
+
+
 def _run_download_with_fallback(
     selected: SearchResult,
     pkey: str,
@@ -333,10 +381,8 @@ def _run_download_with_fallback(
             set_current_provider(pkey)
             ok = download_func(selected, work_dir)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 clear_current_provider()
-            except Exception:
-                pass
 
         if ok:
             download_succeeded = True
@@ -377,12 +423,17 @@ def _run_download_with_fallback(
                     logger.info("Attempting fallback download from %s", _pname)
                     try:
                         _quota_preflight(prov_key)
-                        set_current_provider(prov_key)
-                        if dfunc(sr, work_dir):
-                            logger.info("Fallback download from %s succeeded.", _pname)
-                            download_succeeded = True
-                            _quota_record(prov_key)
-                            break
+                        with _provider_slot(prov_key, pkey) as slot_ok:
+                            if not slot_ok:
+                                continue
+                            set_current_provider(prov_key)
+                            if dfunc(sr, work_dir):
+                                logger.info(
+                                    "Fallback download from %s succeeded.", _pname
+                                )
+                                download_succeeded = True
+                                _quota_record(prov_key)
+                                break
                     except QuotaDeferredException as qde:
                         logger.info(
                             "Fallback provider %s quota exhausted: %s",
@@ -395,10 +446,8 @@ def _run_download_with_fallback(
                             "Fallback download error for %s:%s", prov_key, sr.source_id
                         )
                     finally:
-                        try:
+                        with contextlib.suppress(Exception):
                             clear_current_provider()
-                        except Exception:
-                            pass
             except Exception:
                 logger.exception("Error while attempting fallback download candidates.")
     except QuotaDeferredException as qde:
@@ -437,9 +486,12 @@ def _run_download_with_fallback(
                     )
                     try:
                         _quota_preflight(prov_key)
-                        set_current_provider(prov_key)
-                        if dfunc(sr, work_dir):
-                            _quota_record(prov_key)
+                        with _provider_slot(prov_key, pkey) as slot_ok:
+                            if not slot_ok:
+                                continue
+                            set_current_provider(prov_key)
+                            if dfunc(sr, work_dir):
+                                _quota_record(prov_key)
                     except QuotaDeferredException as qde:
                         logger.info(
                             "Additional candidate from %s deferred: %s",
@@ -448,10 +500,8 @@ def _run_download_with_fallback(
                         )
                         continue
                     finally:
-                        try:
+                        with contextlib.suppress(Exception):
                             clear_current_provider()
-                        except Exception:
-                            pass
             except Exception:
                 logger.exception(
                     "Failed to download additional candidate %s:%s",
@@ -511,7 +561,8 @@ def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
         config_path: Path to configuration JSON file
 
     Returns:
-        List of tuples: (provider_key, search_func, download_func, provider_friendly_name)
+        List of tuples:
+        (provider_key, search_func, download_func, provider_friendly_name)
 
     Config format:
         {
@@ -531,7 +582,8 @@ def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
             cfg = json.load(f)
     except Exception as e:
         logger.error(
-            "Failed to read config file %s: %s; using default providers (Internet Archive only)",
+            "Failed to read config file %s: %s; using default providers "
+            "(Internet Archive only)",
             config_path,
             e,
         )
@@ -546,7 +598,8 @@ def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
 
     if not enabled:
         logger.warning(
-            "No providers enabled in config; nothing to do. Enable providers in %s under 'providers'.",
+            "No providers enabled in config; nothing to do. Enable providers "
+            "in %s under 'providers'.",
             config_path,
         )
 
@@ -560,9 +613,10 @@ ENABLED_APIS: list[ProviderTuple] = [
 
 
 def _required_provider_envvars() -> dict[str, str]:
-    """Return mapping of provider_key -> required environment variable name for API keys.
+    """Return mapping of provider_key -> required environment variable name.
 
-    Only providers listed here will be treated as requiring keys; others work without keys.
+    Only providers listed here will be treated as requiring keys; others work
+    without keys.
     Each name is resolved through ``get_api_key_envvar`` so a remapping in
     ``api_keys.json`` is honored; the built-in defaults below apply when no
     mapping is present.
@@ -604,7 +658,8 @@ def filter_enabled_providers_for_keys(
     if missing:
         for _pkey, pname, envvar in missing:
             logger.warning(
-                "Provider '%s' requires environment variable %s; it is not set. Skipping this provider for this run.",
+                "Provider '%s' requires environment variable %s; it is not set. "
+                "Skipping this provider for this run.",
                 pname,
                 envvar,
             )
@@ -867,10 +922,8 @@ def process_work(
 
     if not prep.all_candidates:
         logger.info("No items found for '%s' across all enabled APIs.", title)
-        try:
+        with contextlib.suppress(Exception):
             clear_current_work()
-        except Exception:
-            pass
         return {
             "status": "failed",
             "item_url": "",
@@ -878,15 +931,31 @@ def process_work(
             "reason": "no_candidates",
         }
 
+    # Dry-run has NO side effects: no work directory, no work.json, no
+    # candidate metadata, and no index row. It reports the discovery/matching
+    # outcome only.
+    if dry_run:
+        logger.info(
+            "Dry-run: '%s' -> %d candidate(s), %s",
+            title,
+            len(prep.all_candidates),
+            "match" if prep.selected else "no match",
+        )
+        with contextlib.suppress(Exception):
+            clear_current_work()
+        return {
+            "status": "dry_run",
+            "item_url": prep.selected.item_url if prep.selected else "",
+            "provider": prep.selected.provider if prep.selected else "",
+        }
+
     os.makedirs(prep.work_dir, exist_ok=True)
 
     set_current_work(prep.work_id)
     set_current_entry(entry_id)
     set_current_name_stem(prep.work_stem)
-    try:
+    with contextlib.suppress(Exception):
         reset_counters()
-    except Exception:
-        pass
 
     selected = prep.selected
     _persist_work_json(prep, status="pending")
@@ -895,7 +964,7 @@ def process_work(
 
     download_deferred = False
     download_succeeded = False
-    if not dry_run and prep.selected and prep.selected_provider_tuple:
+    if prep.selected and prep.selected_provider_tuple:
         pkey, _search_func, download_func, pname = prep.selected_provider_tuple
         download_succeeded, download_deferred = _run_download_with_fallback(
             selected=prep.selected,
@@ -913,39 +982,34 @@ def process_work(
             base_output_dir=base_output_dir,
             selected_source_id=prep.selected_source_id,
         )
-    elif dry_run:
-        logger.info("Dry-run: skipping download for selected item.")
 
     # Update work.json status based on outcome
-    if not dry_run:
-        if download_succeeded:
-            update_work_status(
-                prep.work_json_path,
-                "completed",
-                {
-                    "provider": selected.provider if selected else None,
-                    "provider_key": selected.provider_key if selected else None,
-                    "source_id": prep.selected_source_id,
-                },
-            )
-        elif download_deferred:
-            update_work_status(prep.work_json_path, "deferred")
-        elif selected:
-            update_work_status(prep.work_json_path, "failed")
-        else:
-            update_work_status(prep.work_json_path, "no_match")
+    if download_succeeded:
+        update_work_status(
+            prep.work_json_path,
+            "completed",
+            {
+                "provider": selected.provider if selected else None,
+                "provider_key": selected.provider_key if selected else None,
+                "source_id": prep.selected_source_id,
+            },
+        )
+    elif download_deferred:
+        update_work_status(prep.work_json_path, "deferred")
+    elif selected:
+        update_work_status(prep.work_json_path, "failed")
+    else:
+        update_work_status(prep.work_json_path, "no_match")
 
     # Update index.csv summary (thread-safe)
-    final_status = None
-    if not dry_run:
-        if download_succeeded:
-            final_status = "completed"
-        elif download_deferred:
-            final_status = "deferred"
-        elif selected:
-            final_status = "failed"
-        else:
-            final_status = "no_match"
+    if download_succeeded:
+        final_status = "completed"
+    elif download_deferred:
+        final_status = "deferred"
+    elif selected:
+        final_status = "failed"
+    else:
+        final_status = "no_match"
     row = build_index_row(
         work_id=prep.work_id,
         entry_id=entry_id,
@@ -968,12 +1032,6 @@ def process_work(
     )
 
     # Return result for unified CSV updates
-    if dry_run:
-        return {
-            "status": "dry_run",
-            "item_url": selected.item_url if selected else "",
-            "provider": selected.provider if selected else "",
-        }
     if download_succeeded:
         return {
             "status": "completed",

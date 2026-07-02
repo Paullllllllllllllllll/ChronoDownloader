@@ -1,12 +1,12 @@
 """Tests for main/downloader.py - CLI entry point."""
+
 from __future__ import annotations
 
 import argparse
 import sys
 from collections.abc import Generator
-from io import StringIO
 from typing import Any
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -109,11 +109,16 @@ class TestCreateCliParser:
         from main.cli import create_cli_parser
 
         parser = create_cli_parser()
-        args = parser.parse_args([
-            "--providers", "mdz,bnf_gallica",
-            "--enable-provider", "internet_archive",
-            "--disable-provider", "bnf_gallica",
-        ])
+        args = parser.parse_args(
+            [
+                "--providers",
+                "mdz,bnf_gallica",
+                "--enable-provider",
+                "internet_archive",
+                "--disable-provider",
+                "bnf_gallica",
+            ]
+        )
 
         assert args.providers == ["mdz,bnf_gallica"]
         assert args.enable_provider == ["internet_archive"]
@@ -124,12 +129,18 @@ class TestCreateCliParser:
         from main.cli import create_cli_parser
 
         parser = create_cli_parser()
-        args = parser.parse_args([
-            "--pending-mode", "failed",
-            "--entry-ids", "E001,E002",
-            "--entry-ids", "E003",
-            "--limit", "2",
-        ])
+        args = parser.parse_args(
+            [
+                "--pending-mode",
+                "failed",
+                "--entry-ids",
+                "E001,E002",
+                "--entry-ids",
+                "E003",
+                "--limit",
+                "2",
+            ]
+        )
 
         assert args.pending_mode == "failed"
         assert args.entry_ids == ["E001,E002", "E003"]
@@ -140,21 +151,31 @@ class TestCreateCliParser:
         from main.cli import create_cli_parser
 
         parser = create_cli_parser()
-        args = parser.parse_args([
-            "--resume-mode", "reprocess_all",
-            "--selection-strategy", "sequential_first_hit",
-            "--min-title-score", "42.5",
-            "--creator-weight", "0.3",
-            "--max-candidates-per-provider", "7",
-            "--download-strategy", "all",
-            "--no-keep-non-selected-metadata",
-            "--no-prefer-pdf-over-images",
-            "--no-download-manifest-renderings",
-            "--max-renderings-per-manifest", "3",
-            "--rendering-mime-whitelist", "application/pdf,application/epub+zip",
-            "--overwrite-existing",
-            "--no-include-metadata",
-        ])
+        args = parser.parse_args(
+            [
+                "--resume-mode",
+                "reprocess_all",
+                "--selection-strategy",
+                "sequential_first_hit",
+                "--min-title-score",
+                "42.5",
+                "--creator-weight",
+                "0.3",
+                "--max-candidates-per-provider",
+                "7",
+                "--download-strategy",
+                "all",
+                "--no-keep-non-selected-metadata",
+                "--no-prefer-pdf-over-images",
+                "--no-download-manifest-renderings",
+                "--max-renderings-per-manifest",
+                "3",
+                "--rendering-mime-whitelist",
+                "application/pdf,application/epub+zip",
+                "--overwrite-existing",
+                "--no-include-metadata",
+            ]
+        )
 
         assert args.resume_mode == "reprocess_all"
         assert args.selection_strategy == "sequential_first_hit"
@@ -210,7 +231,10 @@ class TestCliHelpers:
         assert merged["download"]["prefer_pdf_over_images"] is False
         assert merged["download"]["download_manifest_renderings"] is False
         assert merged["download"]["max_renderings_per_manifest"] == 9
-        assert merged["download"]["rendering_mime_whitelist"] == ["application/pdf", "application/epub+zip"]
+        assert merged["download"]["rendering_mime_whitelist"] == [
+            "application/pdf",
+            "application/epub+zip",
+        ]
         assert merged["download"]["overwrite_existing"] is True
         assert merged["download"]["include_metadata"] is False
         assert merged["selection"]["strategy"] == "sequential_first_hit"
@@ -243,17 +267,23 @@ class TestCliHelpers:
         """Pending row filters support mode, entry_id filter, and limit."""
         from main.cli.overrides import _filter_pending_rows
 
-        works_df = pd.DataFrame({
-            "entry_id": ["E001", "E002", "E003", "E004"],
-            "short_title": ["A", "B", "C", "D"],
-            "retrievable": [pd.NA, False, True, "no"],
-        })
+        works_df = pd.DataFrame(
+            {
+                "entry_id": ["E001", "E002", "E003", "E004"],
+                "short_title": ["A", "B", "C", "D"],
+                "retrievable": [pd.NA, False, True, "no"],
+            }
+        )
 
-        failed_args = argparse.Namespace(pending_mode="failed", entry_ids=None, limit=None)
+        failed_args = argparse.Namespace(
+            pending_mode="failed", entry_ids=None, limit=None
+        )
         failed_df = _filter_pending_rows(works_df, failed_args)
         assert set(failed_df["entry_id"].tolist()) == {"E002", "E004"}
 
-        new_args = argparse.Namespace(pending_mode="new", entry_ids=["E001,E003"], limit=1)
+        new_args = argparse.Namespace(
+            pending_mode="new", entry_ids=["E001,E003"], limit=1
+        )
         new_df = _filter_pending_rows(works_df, new_args)
         assert new_df["entry_id"].tolist() == ["E001"]
 
@@ -290,12 +320,14 @@ class TestRunCli:
     @pytest.fixture
     def sample_df(self) -> pd.DataFrame:
         """Create sample DataFrame."""
-        return pd.DataFrame({
-            "entry_id": ["E001", "E002"],
-            "short_title": ["Test Work 1", "Test Work 2"],
-            "main_author": ["Author 1", "Author 2"],
-            "earliest_year": [1900, 1920],
-        })
+        return pd.DataFrame(
+            {
+                "entry_id": ["E001", "E002"],
+                "short_title": ["Test Work 1", "Test Work 2"],
+                "main_author": ["Author 1", "Author 2"],
+                "earliest_year": [1900, 1920],
+            }
+        )
 
     def test_run_cli_exits_without_csv_file(
         self,
@@ -314,7 +346,6 @@ class TestRunCli:
 
             run_cli(mock_args, mock_config)
 
-        captured = capsys.readouterr()
         # Should log error about missing CSV file
 
     def test_run_cli_exits_without_providers(
@@ -383,7 +414,6 @@ class TestRunCli:
     ) -> None:
         """run_cli handles deferred downloads appropriately."""
         from main.cli.dispatch import run_cli
-        from main.state.deferred import DeferredItem
 
         mock_args.csv_file = sample_csv_file
 
@@ -392,19 +422,18 @@ class TestRunCli:
             mock_pipeline.filter_enabled_providers_for_keys.return_value = ["provider1"]
 
             with patch("main.cli.commands.batch.run_batch_downloads") as mock_batch:
-                mock_batch.return_value = {"processed": 2, "succeeded": 1, "deferred": 1}
+                mock_batch.return_value = {
+                    "processed": 2,
+                    "succeeded": 1,
+                    "deferred": 1,
+                }
 
                 with patch("main.cli.commands.batch.get_deferred_queue") as mock_queue:
                     mock_deferred = MagicMock()
                     mock_deferred.get_pending.return_value = [MagicMock()]
                     mock_queue.return_value = mock_deferred
 
-                    with patch(
-                        "main.cli.commands.batch.get_background_scheduler"
-                    ) as mock_sched:
-                        mock_sched.return_value.is_running.return_value = True
-
-                        run_cli(mock_args, mock_config)
+                    run_cli(mock_args, mock_config)
 
     def test_run_cli_lists_providers_and_exits_early(
         self,
@@ -433,10 +462,10 @@ class TestShowQuotaStatus:
         self, mock_config: dict[str, Any]
     ) -> Generator[None, None, None]:
         """Reset singletons."""
-        from main.state.quota import QuotaManager
-        from main.state.deferred import DeferredQueue
-        from main.state.store import StateManager
         from main.state.background import BackgroundRetryScheduler
+        from main.state.deferred import DeferredQueue
+        from main.state.quota import QuotaManager
+        from main.state.store import StateManager
 
         QuotaManager._instance = None
         DeferredQueue._instance = None
@@ -582,10 +611,10 @@ class TestMain:
         self, mock_config: dict[str, Any]
     ) -> Generator[None, None, None]:
         """Reset singletons."""
-        from main.state.quota import QuotaManager
-        from main.state.deferred import DeferredQueue
-        from main.state.store import StateManager
         from main.state.background import BackgroundRetryScheduler
+        from main.state.deferred import DeferredQueue
+        from main.state.quota import QuotaManager
+        from main.state.store import StateManager
 
         QuotaManager._instance = None
         DeferredQueue._instance = None
@@ -601,57 +630,90 @@ class TestMain:
         """main handles --quota-status flag."""
         from main.cli.entry import main
 
-        with patch.object(sys, "argv", ["downloader.py", "--quota-status"]):
-            with patch("main.cli.entry.show_quota_status") as mock_show:
-                main()
-                mock_show.assert_called_once()
+        with (
+            patch.object(sys, "argv", ["downloader.py", "--quota-status"]),
+            patch("main.cli.entry.show_quota_status") as mock_show,
+        ):
+            main()
+            mock_show.assert_called_once()
 
     def test_main_handles_cleanup_deferred_flag(self) -> None:
         """main handles --cleanup-deferred flag."""
         from main.cli.entry import main
 
-        with patch.object(sys, "argv", ["downloader.py", "--cleanup-deferred"]):
-            with patch("main.cli.entry.cleanup_deferred_queue") as mock_cleanup:
-                main()
-                mock_cleanup.assert_called_once()
+        with (
+            patch.object(sys, "argv", ["downloader.py", "--cleanup-deferred"]),
+            patch("main.cli.entry.cleanup_deferred_queue") as mock_cleanup,
+        ):
+            main()
+            mock_cleanup.assert_called_once()
 
     def test_main_handles_keyboard_interrupt(self) -> None:
-        """main handles KeyboardInterrupt gracefully."""
+        """main handles KeyboardInterrupt with exit code 130 (CLI contract)."""
         from main.cli.entry import main
 
-        with patch.object(sys, "argv", ["downloader.py", "test.csv"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.side_effect = KeyboardInterrupt()
+        with (
+            patch.object(sys, "argv", ["downloader.py", "test.csv"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.side_effect = KeyboardInterrupt()
 
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
+            with pytest.raises(SystemExit) as exc_info:
+                main()
 
-                assert exc_info.value.code == 0
+            assert exc_info.value.code == 130
 
     def test_main_handles_unexpected_error(self) -> None:
         """main handles unexpected errors."""
         from main.cli.entry import main
 
-        with patch.object(sys, "argv", ["downloader.py", "test.csv"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.side_effect = RuntimeError("Unexpected error")
+        with (
+            patch.object(sys, "argv", ["downloader.py", "test.csv"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.side_effect = RuntimeError("Unexpected error")
 
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
+            with pytest.raises(SystemExit) as exc_info:
+                main()
 
-                assert exc_info.value.code == 1
+            assert exc_info.value.code == 1
 
     def test_main_runs_interactive_mode(self) -> None:
-        """main runs interactive mode when configured."""
+        """main runs interactive mode when configured (TTY present)."""
         from main.cli.entry import main
 
-        with patch.object(sys, "argv", ["downloader.py"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.return_value = ({}, True, None)
+        with (
+            patch.object(sys, "argv", ["downloader.py"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.return_value = ({}, True, None)
 
-                with patch("main.cli.entry.run_interactive") as mock_interactive:
-                    main()
-                    mock_interactive.assert_called_once()
+            with (
+                patch("main.cli.entry.run_interactive") as mock_interactive,
+                patch("sys.stdin.isatty", return_value=True),
+            ):
+                main()
+                mock_interactive.assert_called_once()
+
+    def test_main_interactive_non_tty_exits_usage(self) -> None:
+        """Interactive mode without a TTY exits with usage code 2 (CLI contract)."""
+        from main.cli.entry import main
+
+        with (
+            patch.object(sys, "argv", ["downloader.py"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.return_value = ({}, True, None)
+
+            with (
+                patch("main.cli.entry.run_interactive") as mock_interactive,
+                patch("sys.stdin.isatty", return_value=False),
+                pytest.raises(SystemExit) as exc_info,
+            ):
+                main()
+
+            assert exc_info.value.code == 2
+            mock_interactive.assert_not_called()
 
     def test_main_runs_cli_mode(self) -> None:
         """main runs CLI mode when configured."""
@@ -660,14 +722,18 @@ class TestMain:
         mock_args = MagicMock()
         mock_args.interactive = False
         mock_args.cli = True
+        mock_args.non_interactive = False
+        mock_args.verify = False
 
-        with patch.object(sys, "argv", ["downloader.py", "test.csv"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.return_value = ({}, False, mock_args)
+        with (
+            patch.object(sys, "argv", ["downloader.py", "test.csv"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.return_value = ({}, False, mock_args)
 
-                with patch("main.cli.entry.run_cli") as mock_cli:
-                    main()
-                    mock_cli.assert_called_once()
+            with patch("main.cli.entry.run_cli", return_value=0) as mock_cli:
+                main()
+                mock_cli.assert_called_once()
 
     def test_main_auto_injects_cli_for_positional_args(self) -> None:
         """main auto-injects --cli when argv indicates CLI usage."""
@@ -676,15 +742,19 @@ class TestMain:
         mock_args = MagicMock()
         mock_args.interactive = False
         mock_args.cli = True
+        mock_args.non_interactive = False
+        mock_args.verify = False
 
-        with patch.object(sys, "argv", ["downloader.py", "sample.csv"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.return_value = ({}, False, mock_args)
+        with (
+            patch.object(sys, "argv", ["downloader.py", "sample.csv"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.return_value = ({}, False, mock_args)
 
-                with patch("main.cli.entry.run_cli") as mock_cli:
-                    main()
-                    assert sys.argv[1] == "--cli"
-                    mock_cli.assert_called_once()
+            with patch("main.cli.entry.run_cli", return_value=0) as mock_cli:
+                main()
+                assert sys.argv[1] == "--cli"
+                mock_cli.assert_called_once()
 
     def test_main_does_not_inject_cli_when_interactive_flag_present(self) -> None:
         """main does not auto-inject --cli when --interactive is present."""
@@ -693,15 +763,22 @@ class TestMain:
         mock_args = MagicMock()
         mock_args.interactive = True
         mock_args.cli = False
+        mock_args.non_interactive = False
+        mock_args.verify = False
 
-        with patch.object(sys, "argv", ["downloader.py", "--interactive", "sample.csv"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.return_value = ({}, True, mock_args)
+        with (
+            patch.object(sys, "argv", ["downloader.py", "--interactive", "sample.csv"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.return_value = ({}, True, mock_args)
 
-                with patch("main.cli.entry.run_interactive") as mock_interactive:
-                    main()
-                    assert "--cli" not in sys.argv
-                    mock_interactive.assert_called_once()
+            with (
+                patch("main.cli.entry.run_interactive") as mock_interactive,
+                patch("sys.stdin.isatty", return_value=True),
+            ):
+                main()
+                assert "--cli" not in sys.argv
+                mock_interactive.assert_called_once()
 
     def test_main_overrides_to_interactive_with_flag(self) -> None:
         """main overrides to interactive mode with --interactive flag."""
@@ -710,14 +787,21 @@ class TestMain:
         mock_args = MagicMock()
         mock_args.interactive = True
         mock_args.cli = False
+        mock_args.non_interactive = False
+        mock_args.verify = False
 
-        with patch.object(sys, "argv", ["downloader.py", "--interactive"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.return_value = ({}, False, mock_args)  # Config says CLI
+        with (
+            patch.object(sys, "argv", ["downloader.py", "--interactive"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.return_value = ({}, False, mock_args)  # Config says CLI
 
-                with patch("main.cli.entry.run_interactive") as mock_interactive:
-                    main()
-                    mock_interactive.assert_called_once()
+            with (
+                patch("main.cli.entry.run_interactive") as mock_interactive,
+                patch("sys.stdin.isatty", return_value=True),
+            ):
+                main()
+                mock_interactive.assert_called_once()
 
     def test_main_overrides_to_cli_with_flag(self) -> None:
         """main overrides to CLI mode with --cli flag."""
@@ -726,14 +810,18 @@ class TestMain:
         mock_args = MagicMock()
         mock_args.interactive = False
         mock_args.cli = True
+        mock_args.non_interactive = False
+        mock_args.verify = False
 
-        with patch.object(sys, "argv", ["downloader.py", "--cli", "test.csv"]):
-            with patch("main.cli.entry.run_with_mode_detection") as mock_run:
-                mock_run.return_value = ({}, True, mock_args)  # Config says interactive
+        with (
+            patch.object(sys, "argv", ["downloader.py", "--cli", "test.csv"]),
+            patch("main.cli.entry.run_with_mode_detection") as mock_run,
+        ):
+            mock_run.return_value = ({}, True, mock_args)  # Config says interactive
 
-                with patch("main.cli.entry.run_cli") as mock_cli:
-                    main()
-                    mock_cli.assert_called_once()
+            with patch("main.cli.entry.run_cli", return_value=0) as mock_cli:
+                main()
+                mock_cli.assert_called_once()
 
 
 class TestRunCliEdgeCases:
@@ -758,8 +846,9 @@ class TestRunCliEdgeCases:
         self, mock_args: argparse.Namespace, mock_config: dict[str, Any], temp_dir: str
     ) -> None:
         """run_cli handles CSV validation errors."""
-        from main.cli.dispatch import run_cli
         import os
+
+        from main.cli.dispatch import run_cli
 
         # Create invalid CSV
         csv_path = os.path.join(temp_dir, "invalid.csv")
@@ -779,18 +868,21 @@ class TestRunCliEdgeCases:
         self, mock_args: argparse.Namespace, mock_config: dict[str, Any], temp_dir: str
     ) -> None:
         """run_cli skips processing if all works already completed."""
-        from main.cli.dispatch import run_cli
         import os
+
+        from main.cli.dispatch import run_cli
 
         # Create CSV with completed status
         csv_path = os.path.join(temp_dir, "completed.csv")
-        df = pd.DataFrame({
-            "entry_id": ["E001"],
-            "short_title": ["Test"],
-            "main_author": ["Author"],
-            "earliest_year": [1900],
-            "retrievable": [True],  # Marked as completed
-        })
+        df = pd.DataFrame(
+            {
+                "entry_id": ["E001"],
+                "short_title": ["Test"],
+                "main_author": ["Author"],
+                "earliest_year": [1900],
+                "retrievable": [True],  # Marked as completed
+            }
+        )
         df.to_csv(csv_path, index=False)
 
         mock_args.csv_file = csv_path
@@ -799,7 +891,7 @@ class TestRunCliEdgeCases:
             mock_pipeline.load_enabled_apis.return_value = ["p1"]
             mock_pipeline.filter_enabled_providers_for_keys.return_value = ["p1"]
 
-            with patch("main.cli.commands.batch.run_batch_downloads") as mock_batch:
+            with patch("main.cli.commands.batch.run_batch_downloads"):
                 run_cli(mock_args, mock_config)
 
                 # Should not call batch downloads since all completed

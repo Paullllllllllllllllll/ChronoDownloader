@@ -1,34 +1,32 @@
 """Unit tests for work_manager module."""
+
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-
 from main.data.work import (
-    get_naming_config,
-    compute_work_id,
-    compute_work_dir,
     check_work_status,
-    update_work_status,
+    compute_work_dir,
+    compute_work_id,
     create_work_json,
     format_candidates_for_json,
     format_selected_for_json,
+    get_naming_config,
+    update_work_status,
 )
 
 
 class TestGetNamingConfig:
     """Tests for get_naming_config function."""
-    
+
     def test_returns_naming_section(self, sample_config: dict[str, Any]) -> None:
         """Test returns naming section from config."""
         sample_config["naming"] = {
             "include_creator_in_work_dir": False,
-            "title_slug_max_len": 100
+            "title_slug_max_len": 100,
         }
 
         with patch("main.data.work.get_config", return_value=sample_config):
@@ -60,7 +58,7 @@ class TestGetNamingConfig:
 
 class TestComputeWorkId:
     """Tests for compute_work_id function."""
-    
+
     def test_generates_consistent_id(self) -> None:
         """Test generates consistent ID for same inputs."""
         id1 = compute_work_id("The Art of Cooking", "John Smith")
@@ -100,7 +98,7 @@ class TestComputeWorkId:
 
 class TestComputeWorkDir:
     """Tests for compute_work_dir function."""
-    
+
     def test_creates_work_dir_path(
         self, temp_dir: str, sample_config: dict[str, Any]
     ) -> None:
@@ -128,7 +126,7 @@ class TestComputeWorkDir:
 
 class TestCheckWorkStatus:
     """Tests for check_work_status function."""
-    
+
     def test_skip_completed_with_work_json(self, temp_dir: str) -> None:
         """Test skip_completed mode with completed work.json."""
         work_dir = os.path.join(temp_dir, "test_work")
@@ -211,7 +209,7 @@ class TestCheckWorkStatus:
 
 class TestUpdateWorkStatus:
     """Tests for update_work_status function."""
-    
+
     def test_updates_status_field(self, temp_dir: str) -> None:
         """Test updates status field in work.json."""
         work_json_path = os.path.join(temp_dir, "work.json")
@@ -220,7 +218,7 @@ class TestUpdateWorkStatus:
 
         update_work_status(work_json_path, "completed")
 
-        with open(work_json_path, "r") as f:
+        with open(work_json_path) as f:
             data = json.load(f)
 
         assert data["status"] == "completed"
@@ -236,7 +234,7 @@ class TestUpdateWorkStatus:
         download_info = {"provider": "Internet Archive", "files": 10}
         update_work_status(work_json_path, "completed", download_info)
 
-        with open(work_json_path, "r") as f:
+        with open(work_json_path) as f:
             data = json.load(f)
 
         assert data["download"] == download_info
@@ -258,7 +256,7 @@ class TestUpdateWorkStatus:
 
 class TestCreateWorkJson:
     """Tests for create_work_json function."""
-    
+
     def test_creates_work_json(self, temp_dir: str) -> None:
         """Test creates work.json file."""
         work_json_path = os.path.join(temp_dir, "work.json")
@@ -270,12 +268,12 @@ class TestCreateWorkJson:
             "E0001",
             {"strategy": "collect_and_select"},
             [],
-            None
+            None,
         )
 
         assert os.path.exists(work_json_path)
 
-        with open(work_json_path, "r") as f:
+        with open(work_json_path) as f:
             data = json.load(f)
 
         assert data["input"]["title"] == "Test Title"
@@ -289,17 +287,10 @@ class TestCreateWorkJson:
         work_json_path = os.path.join(temp_dir, "work.json")
 
         create_work_json(
-            work_json_path,
-            "Test Title",
-            None,
-            None,
-            {},
-            [],
-            None,
-            status="no_match"
+            work_json_path, "Test Title", None, None, {}, [], None, status="no_match"
         )
 
-        with open(work_json_path, "r") as f:
+        with open(work_json_path) as f:
             data = json.load(f)
 
         assert data["status"] == "no_match"
@@ -307,7 +298,7 @@ class TestCreateWorkJson:
 
 class TestFormatCandidatesForJson:
     """Tests for format_candidates_for_json function."""
-    
+
     def test_formats_search_results(self, sample_search_results: list[Any]) -> None:
         """Test formats SearchResult objects."""
         formatted = format_candidates_for_json(sample_search_results)
@@ -326,7 +317,7 @@ class TestFormatCandidatesForJson:
 
 class TestFormatSelectedForJson:
     """Tests for format_selected_for_json function."""
-    
+
     def test_formats_selected_result(self, sample_search_result: Any) -> None:
         """Test formats selected SearchResult."""
         formatted = format_selected_for_json(sample_search_result, "test_id")

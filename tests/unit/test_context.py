@@ -1,10 +1,8 @@
 """Unit tests for api.core.context module."""
+
 from __future__ import annotations
 
-import threading
 from concurrent.futures import ThreadPoolExecutor
-
-import pytest
 
 from api.core.context import (
     clear_all_context,
@@ -30,7 +28,7 @@ from api.core.context import (
 
 class TestWorkContext:
     """Tests for work ID context management."""
-    
+
     def test_set_and_get_work_id(self) -> None:
         """Test setting and getting work ID."""
         set_current_work("work_123")
@@ -56,7 +54,7 @@ class TestWorkContext:
 
 class TestEntryContext:
     """Tests for entry ID context management."""
-    
+
     def test_set_and_get_entry_id(self) -> None:
         """Test setting and getting entry ID."""
         set_current_entry("E0001")
@@ -71,7 +69,7 @@ class TestEntryContext:
 
 class TestProviderContext:
     """Tests for provider key context management."""
-    
+
     def test_set_and_get_provider(self) -> None:
         """Test setting and getting provider key."""
         set_current_provider("internet_archive")
@@ -86,7 +84,7 @@ class TestProviderContext:
 
 class TestNameStemContext:
     """Tests for name stem context management."""
-    
+
     def test_set_and_get_name_stem(self) -> None:
         """Test setting and getting name stem."""
         set_current_name_stem("my_work")
@@ -101,7 +99,7 @@ class TestNameStemContext:
 
 class TestCounters:
     """Tests for file sequencing counters."""
-    
+
     def test_get_counters_returns_dict(self) -> None:
         """Test that get_counters returns a dictionary."""
         counters = get_counters()
@@ -135,7 +133,7 @@ class TestCounters:
 
 class TestClearAllContext:
     """Tests for clear_all_context function."""
-    
+
     def test_clears_all_values(self) -> None:
         """Test that all context values are cleared."""
         set_current_work("work_123")
@@ -153,14 +151,14 @@ class TestClearAllContext:
 
 class TestWorkContextManager:
     """Tests for work_context context manager."""
-    
+
     def test_sets_context_on_enter(self) -> None:
         """Test that context is set when entering context manager."""
         with work_context(
             work_id="work_123",
             entry_id="E0001",
             provider_key="internet_archive",
-            name_stem="my_work"
+            name_stem="my_work",
         ):
             assert get_current_work() == "work_123"
             assert get_current_entry() == "E0001"
@@ -201,7 +199,7 @@ class TestWorkContextManager:
 
 class TestProviderContextManager:
     """Tests for provider_context context manager."""
-    
+
     def test_sets_provider_on_enter(self) -> None:
         """Test that provider is set when entering context."""
         with provider_context("internet_archive"):
@@ -225,7 +223,7 @@ class TestProviderContextManager:
 
 class TestThreadIsolation:
     """Tests for thread-local storage isolation."""
-    
+
     def test_different_threads_have_separate_context(self) -> None:
         """Test that different threads have isolated context."""
         results: dict[str, str | None] = {}
@@ -234,14 +232,12 @@ class TestThreadIsolation:
             set_current_work(thread_id)
             # Small delay to ensure threads overlap
             import time
+
             time.sleep(0.01)
             results[thread_id] = get_current_work()
 
         with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [
-                executor.submit(thread_task, f"thread_{i}")
-                for i in range(3)
-            ]
+            futures = [executor.submit(thread_task, f"thread_{i}") for i in range(3)]
             for f in futures:
                 f.result()
 
@@ -262,10 +258,7 @@ class TestThreadIsolation:
             results[thread_id] = get_counters().get(key, 0)
 
         with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [
-                executor.submit(thread_task, f"thread_{i}")
-                for i in range(3)
-            ]
+            futures = [executor.submit(thread_task, f"thread_{i}") for i in range(3)]
             for f in futures:
                 f.result()
 

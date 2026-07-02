@@ -1,10 +1,9 @@
 """Integration tests for selection module."""
+
 from __future__ import annotations
 
 from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from api.model import SearchResult
 
@@ -28,16 +27,21 @@ class TestCollectCandidatesSequential:
             ("provider2", mock_search_2, lambda x, y: True, "Provider 2"),
         ]
 
-        with patch("main.orchestration.selection.get_max_results_for_provider", return_value=5):
-            with patch("main.orchestration.selection.get_min_title_score", return_value=0):
-                all_candidates, selected, selected_tuple = collect_candidates_sequential(
+        with patch(
+            "main.orchestration.selection.get_max_results_for_provider", return_value=5
+        ), patch(
+            "main.orchestration.selection.get_min_title_score", return_value=0
+        ):
+            all_candidates, selected, selected_tuple = (
+                collect_candidates_sequential(
                     providers,
                     "Test Title",
                     None,
                     min_title_score=0,
                     creator_weight=0.2,
-                    max_candidates_per_provider=5
+                    max_candidates_per_provider=5,
                 )
+            )
 
         # Should have collected candidates from first provider that matches
         assert len(all_candidates) >= 1
@@ -61,16 +65,19 @@ class TestCollectCandidatesSequential:
             ("provider2", mock_search_2, lambda x, y: True, "Provider 2"),
         ]
 
-        with patch("main.orchestration.selection.get_max_results_for_provider", return_value=5):
-            with patch("main.orchestration.selection.get_min_title_score", return_value=80):
-                collect_candidates_sequential(
-                    providers,
-                    "Test Title",
-                    None,
-                    min_title_score=80,
-                    creator_weight=0.2,
-                    max_candidates_per_provider=5
-                )
+        with patch(
+            "main.orchestration.selection.get_max_results_for_provider", return_value=5
+        ), patch(
+            "main.orchestration.selection.get_min_title_score", return_value=80
+        ):
+            collect_candidates_sequential(
+                providers,
+                "Test Title",
+                None,
+                min_title_score=80,
+                creator_weight=0.2,
+                max_candidates_per_provider=5,
+            )
 
         # Should stop after first provider since it has an exact match
         assert search_call_count["count"] == 1
@@ -89,13 +96,13 @@ class TestSelectBestCandidate:
                 provider="Provider 1",
                 title="First Provider",
                 provider_key="p1",
-                raw={"__matching__": {"score": 90, "total": 90}}
+                raw={"__matching__": {"score": 90, "total": 90}},
             ),
             SearchResult(
                 provider="Provider 2",
                 title="Second Provider",
                 provider_key="p2",
-                raw={"__matching__": {"score": 95, "total": 95}}
+                raw={"__matching__": {"score": 95, "total": 95}},
             ),
         ]
 
@@ -124,13 +131,13 @@ class TestSelectBestCandidate:
                 provider="Low Priority",
                 title="Same Score",
                 provider_key="p2",
-                raw={"__matching__": {"score": 90, "total": 90}}
+                raw={"__matching__": {"score": 90, "total": 90}},
             ),
             SearchResult(
                 provider="High Priority",
                 title="Same Score",
                 provider_key="p1",
-                raw={"__matching__": {"score": 90, "total": 90}}
+                raw={"__matching__": {"score": 90, "total": 90}},
             ),
         ]
 
@@ -158,7 +165,7 @@ class TestSelectBestCandidate:
                 provider="Provider",
                 title="Low Score",
                 provider_key="p1",
-                raw={"__matching__": {"score": 50, "total": 50}}
+                raw={"__matching__": {"score": 50, "total": 50}},
             ),
         ]
 
@@ -194,7 +201,7 @@ class TestAttachScores:
             title="The Art of Cooking",
             creators=["John Smith"],
             provider_key="test",
-            raw={}
+            raw={},
         )
 
         attach_scores(sr, "The Art of Cooking", "John Smith", creator_weight=0.2)
@@ -213,7 +220,7 @@ class TestAttachScores:
             title="Exact Title",
             creators=["Same Creator"],
             provider_key="test",
-            raw={}
+            raw={},
         )
 
         attach_scores(sr, "Exact Title", "Same Creator", creator_weight=0.2)
@@ -232,7 +239,7 @@ class TestPrepareSearchResult:
         raw_data: dict[str, Any] = {
             "title": "Test Title",
             "id": "test123",
-            "creator": "Test Author"
+            "creator": "Test Author",
         }
 
         sr = prepare_search_result("test_provider", "Test Provider", raw_data)

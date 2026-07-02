@@ -6,6 +6,7 @@ Gallica digital library using SRU (Search/Retrieve via URL) and IIIF APIs.
 Gallica hosts millions of digitized documents including books, manuscripts,
 maps, periodicals, and more from the BnF collections.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,10 +16,13 @@ from typing import Any
 
 from ..core.budget import budget_exhausted
 from ..core.config import get_max_pages, prefer_pdf_over_images
-from ..core.network import make_request
 from ..core.download import save_json
-from ..iiif import download_iiif_renderings
-from ..iiif import extract_image_service_bases, download_one_from_service
+from ..core.network import make_request
+from ..iiif import (
+    download_iiif_renderings,
+    download_one_from_service,
+    extract_image_service_bases,
+)
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 from ..query_helpers import escape_sru_literal
 
@@ -28,14 +32,17 @@ logger = logging.getLogger(__name__)
 SRU_BASE_URL = "https://gallica.bnf.fr/SRU"
 IIIF_MANIFEST_BASE_URL = "https://gallica.bnf.fr/iiif/ark:/12148/{ark_id}/manifest.json"
 
-def search_gallica(title: str, creator: str | None = None, max_results: int = 3) -> list[SearchResult]:
+
+def search_gallica(
+    title: str, creator: str | None = None, max_results: int = 3
+) -> list[SearchResult]:
     """Search Gallica using its SRU API.
-    
+
     Args:
         title: Work title to search for
         creator: Optional creator/author name
         max_results: Maximum number of results to return
-        
+
     Returns:
         List of SearchResult objects
     """
@@ -60,20 +67,20 @@ def search_gallica(title: str, creator: str | None = None, max_results: int = 3)
     results: list[SearchResult] = []
     try:
         namespaces = {
-            'sru': 'http://www.loc.gov/zing/srw/',
-            'dc': 'http://purl.org/dc/elements/1.1/',
-            'oai_dc': 'http://www.openarchives.org/OAI/2.0/oai_dc/'
+            "sru": "http://www.loc.gov/zing/srw/",
+            "dc": "http://purl.org/dc/elements/1.1/",
+            "oai_dc": "http://www.openarchives.org/OAI/2.0/oai_dc/",
         }
         root = ET.fromstring(response_text)
-        for record in root.findall('.//sru:recordData/oai_dc:dc', namespaces):
-            title_elements = record.findall('dc:title', namespaces)
+        for record in root.findall(".//sru:recordData/oai_dc:dc", namespaces):
+            title_elements = record.findall("dc:title", namespaces)
             item_title = title_elements[0].text if title_elements else "N/A"
-            creator_elements = record.findall('dc:creator', namespaces)
+            creator_elements = record.findall("dc:creator", namespaces)
             item_creator = creator_elements[0].text if creator_elements else "N/A"
             ark_id = None
-            for identifier_el in record.findall('dc:identifier', namespaces):
+            for identifier_el in record.findall("dc:identifier", namespaces):
                 if identifier_el.text and "ark:/" in identifier_el.text:
-                    match = re.search(r'ark:/12148/([^/]+)', identifier_el.text)
+                    match = re.search(r"ark:/12148/([^/]+)", identifier_el.text)
                     if match:
                         ark_id = match.group(1)
                         break
@@ -91,12 +98,16 @@ def search_gallica(title: str, creator: str | None = None, max_results: int = 3)
         logger.exception("Unexpected error during Gallica XML parsing: %s", e)
     return results
 
-def download_gallica_work(item_data: SearchResult | dict[str, Any], output_folder: str) -> bool:
+
+def download_gallica_work(
+    item_data: SearchResult | dict[str, Any], output_folder: str
+) -> bool:
     """Download Gallica IIIF manifest and full-size page images.
 
     - Fetches IIIF manifest (usually v2; handle v3 structures too).
     - Extracts IIIF Image API service base per canvas.
-    - Downloads images with a small set of quality/size fallbacks to ensure compatibility.
+    - Downloads images with a small set of quality/size fallbacks to ensure
+      compatibility.
 
     Args:
         item_data: SearchResult or dict with ark_id
@@ -120,12 +131,20 @@ def download_gallica_work(item_data: SearchResult | dict[str, Any], output_folde
 
     # Prefer manifest-level PDF/EPUB renderings when available
     try:
-        renders = download_iiif_renderings(manifest, output_folder, filename_prefix=f"gallica_{ark_id}_")
+        renders = download_iiif_renderings(
+            manifest, output_folder, filename_prefix=f"gallica_{ark_id}_"
+        )
         if renders > 0 and prefer_pdf_over_images():
-            logger.info("Gallica: downloaded %d rendering(s); skipping image downloads per config.", renders)
+            logger.info(
+                "Gallica: downloaded %d rendering(s); skipping image downloads "
+                "per config.",
+                renders,
+            )
             return True
     except Exception:
-        logger.exception("Gallica: error while downloading manifest renderings for %s", ark_id)
+        logger.exception(
+            "Gallica: error while downloading manifest renderings for %s", ark_id
+        )
 
     # Extract image service bases from IIIF v2 or v3
     image_service_bases = extract_image_service_bases(manifest)
@@ -138,13 +157,20 @@ def download_gallica_work(item_data: SearchResult | dict[str, Any], output_folde
 
     max_pages = get_max_pages("gallica")
     total = len(image_service_bases)
-    to_download = image_service_bases[:max_pages] if max_pages and max_pages > 0 else image_service_bases
-    logger.info("Gallica: downloading %d/%d page images for %s", len(to_download), total, ark_id)
+    to_download = (
+        image_service_bases[:max_pages]
+        if max_pages and max_pages > 0
+        else image_service_bases
+    )
+    logger.info(
+        "Gallica: downloading %d/%d page images for %s", len(to_download), total, ark_id
+    )
     success_any = False
     for idx, svc in enumerate(to_download, start=1):
         if budget_exhausted():
             logger.warning(
-                "Download budget exhausted; stopping Gallica downloads at %d/%d pages for %s",
+                "Download budget exhausted; stopping Gallica downloads at "
+                "%d/%d pages for %s",
                 idx - 1,
                 len(to_download),
                 ark_id,
@@ -157,6 +183,8 @@ def download_gallica_work(item_data: SearchResult | dict[str, Any], output_folde
             else:
                 logger.warning("Failed to download Gallica image from service %s", svc)
         except Exception:
-            logger.exception("Error downloading Gallica image for %s from %s", ark_id, svc)
+            logger.exception(
+                "Error downloading Gallica image for %s from %s", ark_id, svc
+            )
 
     return success_any

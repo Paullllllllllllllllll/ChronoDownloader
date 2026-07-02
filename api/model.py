@@ -3,24 +3,26 @@
 Provides the SearchResult dataclass for unified provider responses
 and conversion utilities for legacy dict-based results.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
+
 class QuotaDeferredException(Exception):
     """Raised when a provider's quota is exhausted and download should be deferred.
-    
+
     This exception signals that the download should be retried later when the quota
     resets, rather than blocking the entire pipeline or failing permanently.
-    
+
     Attributes:
         provider: Name of the provider with exhausted quota
         reset_time: UTC datetime when the quota is expected to reset
         message: Human-readable description
     """
-    
+
     def __init__(
         self,
         provider: str,
@@ -31,10 +33,14 @@ class QuotaDeferredException(Exception):
         self.reset_time = reset_time
         self.message = message or f"{provider}: Quota exhausted, download deferred"
         super().__init__(self.message)
-    
+
     def __repr__(self) -> str:
         reset_str = self.reset_time.isoformat() if self.reset_time else "unknown"
-        return f"QuotaDeferredException(provider={self.provider!r}, reset_time={reset_str})"
+        return (
+            f"QuotaDeferredException(provider={self.provider!r}, "
+            f"reset_time={reset_str})"
+        )
+
 
 @dataclass
 class SearchResult:
@@ -45,12 +51,15 @@ class SearchResult:
         title: Work title
         creators: List of author/creator strings
         date: Date string or year if available
-        source_id: Best available identifier for the provider (id, identifier, ark, etc.)
+        source_id: Best available identifier for the provider (id, identifier,
+            ark, etc.)
         iiif_manifest: If a manifest URL is directly known from the search
         item_url: Landing URL for the item, if available
         thumbnail_url: Thumbnail or cover URL if available
-        provider_key: Machine-friendly provider key (e.g., "internet_archive", "bnf_gallica")
-        raw: Original provider result payload (for backward compatibility with download_* functions)
+        provider_key: Machine-friendly provider key (e.g., "internet_archive",
+            "bnf_gallica")
+        raw: Original provider result payload (for backward compatibility with
+            download_* functions)
     """
 
     provider: str
@@ -78,6 +87,7 @@ class SearchResult:
             d.pop("raw", None)
         return d
 
+
 def _as_list(value: Any) -> list[str]:
     """Convert various input types to a list of strings.
 
@@ -91,17 +101,18 @@ def _as_list(value: Any) -> list[str]:
     """
     if value is None:
         return []
-    
+
     if isinstance(value, list):
         return [str(v) for v in value if v is not None]
-    
+
     if isinstance(value, str):
         # Split on comma if it's a single string with commas
         if "," in value:
             return [v.strip() for v in value.split(",") if v.strip()]
         return [value]
-    
+
     return [str(value)]
+
 
 def resolve_item_field(
     item_data: SearchResult | dict[str, Any],
@@ -138,6 +149,7 @@ def resolve_item_field(
         return item_data.get(raw_key, default)
     return default
 
+
 def resolve_item_id(
     item_data: SearchResult | dict[str, Any],
     *raw_keys: str,
@@ -171,6 +183,7 @@ def resolve_item_id(
             if val:
                 return str(val)
     return None
+
 
 def convert_to_searchresult(provider: str, data: dict[str, Any]) -> SearchResult:
     """Convert a provider-specific search result dict into a SearchResult.
@@ -213,7 +226,9 @@ def convert_to_searchresult(provider: str, data: dict[str, Any]) -> SearchResult
     # Extract URLs
     iiif_manifest = data.get("iiif_manifest") or data.get("manifest")
     item_url = data.get("item_url") or data.get("url") or data.get("guid")
-    thumbnail_url = data.get("thumbnail") or data.get("thumbnail_url") or data.get("image")
+    thumbnail_url = (
+        data.get("thumbnail") or data.get("thumbnail_url") or data.get("image")
+    )
 
     return SearchResult(
         provider=provider,

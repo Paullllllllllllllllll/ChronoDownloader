@@ -1,18 +1,17 @@
 """Extended tests for main.console_ui module — console UI utilities."""
+
 from __future__ import annotations
 
-import io
-import sys
 from unittest.mock import patch
 
 import pytest
 
 from main.ui.console import ConsoleUI, DownloadConfiguration
 
-
 # ============================================================================
 # DownloadConfiguration
 # ============================================================================
+
 
 class TestDownloadConfiguration:
     """Tests for DownloadConfiguration dataclass."""
@@ -45,7 +44,10 @@ class TestDownloadConfiguration:
     def test_iiif_mode(self) -> None:
         config = DownloadConfiguration(
             mode="direct_iiif",
-            iiif_urls=["https://example.org/manifest1", "https://example.org/manifest2"],
+            iiif_urls=[
+                "https://example.org/manifest1",
+                "https://example.org/manifest2",
+            ],
             iiif_name="test_collection",
         )
         assert config.mode == "direct_iiif"
@@ -56,6 +58,7 @@ class TestDownloadConfiguration:
 # ============================================================================
 # ConsoleUI static methods
 # ============================================================================
+
 
 class TestConsoleUIPrintMethods:
     """Tests for ConsoleUI print methods."""
@@ -112,7 +115,9 @@ class TestConsoleUIPrintMethods:
         assert "key1" in output
         assert "value1" in output
 
-    def test_print_session_summary_basic(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_print_session_summary_basic(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         ConsoleUI.print_session_summary(
             processed=10,
             succeeded=8,
@@ -126,7 +131,9 @@ class TestConsoleUIPrintMethods:
         assert "8" in output
         assert "/output" in output
 
-    def test_print_session_summary_dry_run(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_print_session_summary_dry_run(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         ConsoleUI.print_session_summary(
             processed=5,
             succeeded=0,
@@ -142,8 +149,12 @@ class TestConsoleUIPrintMethods:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         ConsoleUI.print_session_summary(
-            processed=5, succeeded=5, failed=0, deferred=0,
-            output_dir="/output", duration_seconds=30.5,
+            processed=5,
+            succeeded=5,
+            failed=0,
+            deferred=0,
+            output_dir="/output",
+            duration_seconds=30.5,
         )
         output = capsys.readouterr().out
         assert "30.5 seconds" in output
@@ -152,8 +163,12 @@ class TestConsoleUIPrintMethods:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         ConsoleUI.print_session_summary(
-            processed=5, succeeded=5, failed=0, deferred=0,
-            output_dir="/output", duration_seconds=120.0,
+            processed=5,
+            succeeded=5,
+            failed=0,
+            deferred=0,
+            output_dir="/output",
+            duration_seconds=120.0,
         )
         output = capsys.readouterr().out
         assert "minutes" in output
@@ -162,8 +177,12 @@ class TestConsoleUIPrintMethods:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         ConsoleUI.print_session_summary(
-            processed=5, succeeded=5, failed=0, deferred=0,
-            output_dir="/output", duration_seconds=7200.0,
+            processed=5,
+            succeeded=5,
+            failed=0,
+            deferred=0,
+            output_dir="/output",
+            duration_seconds=7200.0,
         )
         output = capsys.readouterr().out
         assert "hours" in output
@@ -172,7 +191,10 @@ class TestConsoleUIPrintMethods:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         ConsoleUI.print_session_summary(
-            processed=5, succeeded=5, failed=0, deferred=0,
+            processed=5,
+            succeeded=5,
+            failed=0,
+            deferred=0,
             output_dir="/output",
             providers_used=["Internet Archive", "Gallica"],
         )
@@ -184,7 +206,10 @@ class TestConsoleUIPrintMethods:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         ConsoleUI.print_session_summary(
-            processed=5, succeeded=3, failed=0, deferred=2,
+            processed=5,
+            succeeded=3,
+            failed=0,
+            deferred=2,
             output_dir="/output",
         )
         output = capsys.readouterr().out
@@ -209,15 +234,19 @@ class TestConsoleUIPromptMethods:
 
     def test_prompt_select_quit(self) -> None:
         options = [("csv", "CSV mode")]
-        with patch("builtins.input", return_value="q"):
-            with pytest.raises(KeyboardInterrupt):
-                ConsoleUI.prompt_select("Choose:", options)
+        with (
+            patch("builtins.input", return_value="q"),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            ConsoleUI.prompt_select("Choose:", options)
 
     def test_prompt_select_eof(self) -> None:
         options = [("csv", "CSV mode")]
-        with patch("builtins.input", side_effect=EOFError):
-            with pytest.raises(KeyboardInterrupt):
-                ConsoleUI.prompt_select("Choose:", options)
+        with (
+            patch("builtins.input", side_effect=EOFError),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            ConsoleUI.prompt_select("Choose:", options)
 
     def test_prompt_input_with_value(self) -> None:
         with patch("builtins.input", return_value="test_value"):
@@ -230,9 +259,11 @@ class TestConsoleUIPromptMethods:
         assert result == "default_val"
 
     def test_prompt_input_eof(self) -> None:
-        with patch("builtins.input", side_effect=EOFError):
-            with pytest.raises(KeyboardInterrupt):
-                ConsoleUI.prompt_input("Enter value:")
+        with (
+            patch("builtins.input", side_effect=EOFError),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            ConsoleUI.prompt_input("Enter value:")
 
     def test_prompt_yes_no_default_yes(self) -> None:
         with patch("builtins.input", return_value=""):
@@ -251,9 +282,11 @@ class TestConsoleUIPromptMethods:
             assert ConsoleUI.prompt_yes_no("Continue?") is False
 
     def test_prompt_yes_no_eof(self) -> None:
-        with patch("builtins.input", side_effect=EOFError):
-            with pytest.raises(KeyboardInterrupt):
-                ConsoleUI.prompt_yes_no("Continue?")
+        with (
+            patch("builtins.input", side_effect=EOFError),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            ConsoleUI.prompt_yes_no("Continue?")
 
 
 class TestConsoleUIEnableAnsi:

@@ -1,14 +1,13 @@
 """Tests for main/state_manager.py - Unified state management."""
+
 from __future__ import annotations
 
 import json
 import os
-import tempfile
 import threading
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,6 +21,7 @@ class TestStateManagerSingleton:
         """Multiple instantiations return the same instance."""
         # Reset singleton for testing
         from main.state.store import StateManager
+
         StateManager._instance = None
 
         state_file = os.path.join(temp_dir, "test_state.json")
@@ -38,6 +38,7 @@ class TestStateManagerSingleton:
     ) -> None:
         """Singleton creation is thread-safe."""
         from main.state.store import StateManager
+
         StateManager._instance = None
 
         state_file = os.path.join(temp_dir, "test_state.json")
@@ -66,6 +67,7 @@ class TestStateManagerInit:
     def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before and after each test."""
         from main.state.store import StateManager
+
         StateManager._instance = None
         yield
         StateManager._instance = None
@@ -105,7 +107,7 @@ class TestStateManagerInit:
         existing_state = {
             "quotas": {"test_provider": {"downloads_used": 5}},
             "deferred_items": [{"id": "item1", "title": "Test"}],
-            "version": "2.0"
+            "version": "2.0",
         }
         with open(state_file, "w", encoding="utf-8") as f:
             json.dump(existing_state, f)
@@ -123,6 +125,7 @@ class TestStateManagerMigration:
     def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before and after each test."""
         from main.state.store import StateManager
+
         StateManager._instance = None
         yield
         StateManager._instance = None
@@ -168,7 +171,9 @@ class TestStateManagerMigration:
             state_file = os.path.join(temp_dir, "new_state.json")
             manager = StateManager(state_file=state_file)
 
-            assert manager.get_deferred_items() == [{"id": "def1", "title": "Deferred Work"}]
+            assert manager.get_deferred_items() == [
+                {"id": "def1", "title": "Deferred Work"}
+            ]
         finally:
             os.chdir(original_cwd)
 
@@ -180,6 +185,7 @@ class TestStateManagerQuotas:
     def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before and after each test."""
         from main.state.store import StateManager
+
         StateManager._instance = None
         yield
         StateManager._instance = None
@@ -188,6 +194,7 @@ class TestStateManagerQuotas:
     def manager(self, temp_dir: str, mock_config: dict[str, Any]) -> Any:
         """Create a fresh StateManager for each test."""
         from main.state.store import StateManager
+
         state_file = os.path.join(temp_dir, "test_state.json")
         return StateManager(state_file=state_file)
 
@@ -209,7 +216,7 @@ class TestStateManagerQuotas:
 
         # Read file directly
         state_file = manager.get_state_file_path()
-        with open(state_file, "r", encoding="utf-8") as f:
+        with open(state_file, encoding="utf-8") as f:
             data = json.load(f)
 
         assert data["quotas"]["test_provider"] == quota_data
@@ -218,7 +225,7 @@ class TestStateManagerQuotas:
         """update_quotas updates multiple providers at once."""
         quotas = {
             "provider1": {"downloads_used": 10},
-            "provider2": {"downloads_used": 20}
+            "provider2": {"downloads_used": 20},
         }
         manager.update_quotas(quotas)
 
@@ -244,6 +251,7 @@ class TestStateManagerDeferredItems:
     def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before and after each test."""
         from main.state.store import StateManager
+
         StateManager._instance = None
         yield
         StateManager._instance = None
@@ -252,6 +260,7 @@ class TestStateManagerDeferredItems:
     def manager(self, temp_dir: str, mock_config: dict[str, Any]) -> Any:
         """Create a fresh StateManager for each test."""
         from main.state.store import StateManager
+
         state_file = os.path.join(temp_dir, "test_state.json")
         return StateManager(state_file=state_file)
 
@@ -309,6 +318,7 @@ class TestStateManagerPersistence:
     def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before and after each test."""
         from main.state.store import StateManager
+
         StateManager._instance = None
         yield
         StateManager._instance = None
@@ -327,7 +337,7 @@ class TestStateManagerPersistence:
         manager.force_save()
 
         # Read file to verify
-        with open(state_file, "r", encoding="utf-8") as f:
+        with open(state_file, encoding="utf-8") as f:
             data = json.load(f)
 
         assert data["quotas"]["manual"]["test"] is True
@@ -342,7 +352,7 @@ class TestStateManagerPersistence:
         manager = StateManager(state_file=state_file)
         manager.set_quota("test", {})
 
-        with open(state_file, "r", encoding="utf-8") as f:
+        with open(state_file, encoding="utf-8") as f:
             data = json.load(f)
 
         assert "last_updated" in data
@@ -370,6 +380,7 @@ class TestGetStateManager:
     def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before and after each test."""
         from main.state.store import StateManager
+
         StateManager._instance = None
         yield
         StateManager._instance = None
@@ -393,6 +404,7 @@ class TestStateManagerThreadSafety:
     def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before and after each test."""
         from main.state.store import StateManager
+
         StateManager._instance = None
         yield
         StateManager._instance = None
@@ -410,10 +422,7 @@ class TestStateManagerThreadSafety:
             for i in range(10):
                 manager.set_quota(f"provider_{provider_id}", {"count": i})
 
-        threads = [
-            threading.Thread(target=update_quota, args=(i,))
-            for i in range(5)
-        ]
+        threads = [threading.Thread(target=update_quota, args=(i,)) for i in range(5)]
         for t in threads:
             t.start()
         for t in threads:
@@ -436,10 +445,7 @@ class TestStateManagerThreadSafety:
             for i in range(5):
                 manager.add_deferred_item({"id": f"t{thread_id}_i{i}"})
 
-        threads = [
-            threading.Thread(target=add_items, args=(i,))
-            for i in range(4)
-        ]
+        threads = [threading.Thread(target=add_items, args=(i,)) for i in range(4)]
         for t in threads:
             t.start()
         for t in threads:
