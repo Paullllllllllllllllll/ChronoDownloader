@@ -30,7 +30,8 @@ def run_identifier_cli(
 
     identifier = args.id
     provider_key = getattr(args, "provider", None)
-    name_stem = getattr(args, "name", None)
+    names = getattr(args, "names", None) or []
+    name_stem = names[0] if names else None
     dry_run = getattr(args, "dry_run", False)
     output_dir = getattr(args, "output_dir", "downloaded_works")
 

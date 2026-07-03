@@ -55,7 +55,7 @@ class TestCLIParserIdArgs:
             ]
         )
         assert args.id == "bpt6k1511262r"
-        assert args.name == "Taillevent"
+        assert args.names[0] == "Taillevent"
 
     def test_id_with_dry_run(self) -> None:
         parser = create_cli_parser()
@@ -112,7 +112,7 @@ class TestRunIdentifierCLI:
         defaults: dict[str, bool | str | None] = {
             "id": "bsb11280551",
             "provider": "mdz",
-            "name": None,
+            "names": None,
             "dry_run": False,
             "output_dir": self._output_dir,
             "config": "config.json",
@@ -152,7 +152,7 @@ class TestRunIdentifierCLI:
     )
     def test_name_passed_through(self, mock_process: MagicMock) -> None:
         mock_process.return_value = {"status": "completed"}
-        args = self._make_args(name="Kochbuch")
+        args = self._make_args(names=["Kochbuch"])
         logger = logging.getLogger("test")
 
         _run_identifier_cli(args, {}, logger)

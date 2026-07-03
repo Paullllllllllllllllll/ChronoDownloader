@@ -38,7 +38,8 @@ class TestBuildManifestUrl:
     def test_internet_archive(self) -> None:
         urls = build_manifest_url("internet_archive", "ThreeBooksOfCookery1575")
         assert urls == [
-            "https://iiif.archivelab.org/iiif/ThreeBooksOfCookery1575/manifest.json"
+            "https://iiif.archive.org/iiif/ThreeBooksOfCookery1575/manifest.json",
+            "https://iiif.archivelab.org/iiif/ThreeBooksOfCookery1575/manifest.json",
         ]
 
     def test_e_rara(self) -> None:

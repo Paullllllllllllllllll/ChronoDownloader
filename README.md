@@ -1,4 +1,4 @@
-# ChronoDownloader v1.7.0
+# ChronoDownloader v1.7.1
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1078,6 +1078,16 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.7.1** (3 July 2026) -- CLI bug-fix release. `--non-interactive`
+    without `--cli` no longer falls through to the interactive
+    config-selection wizard (the flag now implies CLI mode at entry).
+    Repeated `--iiif URL --name NAME` pairs are zipped positionally, so
+    each manifest receives its own name instead of the last name winning
+    for all; a mismatched count of names and URLs exits with a usage
+    error. The Internet Archive identifier path resolves manifests via
+    the live `iiif.archive.org` endpoint first, keeping the deprecated
+    `iiif.archivelab.org` (broken TLS certificate) only as a fallback.
 
 - **v1.7.0** (2 July 2026) -- Hardening release closing the data-integrity
     defects found in a full production audit. Downloads now stream to a

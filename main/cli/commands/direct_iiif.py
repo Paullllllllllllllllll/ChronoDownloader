@@ -26,16 +26,31 @@ def run_direct_iiif_cli(
         logger.error("No IIIF manifest URLs provided.")
         return EXIT_USAGE
 
-    name_stem = getattr(args, "name", None)
+    names = getattr(args, "names", None) or []
     dry_run = getattr(args, "dry_run", False)
     output_dir = getattr(args, "output_dir", "downloaded_works")
+
+    if len(names) > 1 and len(names) != len(urls):
+        logger.error(
+            "Got %d --name values for %d --iiif URLs; provide either one "
+            "shared name, one name per URL, or none.",
+            len(names),
+            len(urls),
+        )
+        return EXIT_USAGE
 
     succeeded = 0
     failed = 0
     partial = 0
 
     for i, url in enumerate(urls, start=1):
-        if len(urls) == 1 and name_stem:
+        # Pair the Nth --name with the Nth --iiif URL; a single --name for
+        # multiple URLs acts as a shared stem with a counter suffix.
+        if len(names) == len(urls):
+            name_stem = names[i - 1]
+        else:
+            name_stem = names[0] if names else None
+        if name_stem and (len(urls) == 1 or len(names) == len(urls)):
             entry_id = f"IIIF_{name_stem}"
             title = name_stem
             file_stem = name_stem

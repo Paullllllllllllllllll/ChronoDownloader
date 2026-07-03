@@ -216,8 +216,8 @@ def download_ia_work(
 
         if not iiif_manifest_url:
             candidates = [
-                f"https://iiif.archivelab.org/iiif/{identifier}/manifest.json",
                 f"https://iiif.archive.org/iiif/{identifier}/manifest.json",
+                f"https://iiif.archivelab.org/iiif/{identifier}/manifest.json",
             ]
         else:
             candidates = [iiif_manifest_url]

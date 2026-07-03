@@ -26,7 +26,12 @@ logger = logging.getLogger(__name__)
 MANIFEST_TEMPLATES: dict[str, str | list[str]] = {
     "mdz": "https://api.digitale-sammlungen.de/iiif/presentation/v2/{id}/manifest",
     "bnf_gallica": "https://gallica.bnf.fr/iiif/ark:/12148/{id}/manifest.json",
-    "internet_archive": "https://iiif.archivelab.org/iiif/{id}/manifest.json",
+    # iiif.archive.org is the live endpoint; iiif.archivelab.org is the
+    # deprecated predecessor (broken TLS cert) kept only as a fallback.
+    "internet_archive": [
+        "https://iiif.archive.org/iiif/{id}/manifest.json",
+        "https://iiif.archivelab.org/iiif/{id}/manifest.json",
+    ],
     "e_rara": "https://www.e-rara.ch/i3f/v20/{id}/manifest",
     "slub": "https://iiif.slub-dresden.de/iiif/2/{id}/manifest.json",
     "loc": "https://www.loc.gov/item/{id}/manifest.json",

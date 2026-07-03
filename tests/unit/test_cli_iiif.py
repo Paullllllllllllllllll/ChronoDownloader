@@ -46,7 +46,7 @@ class TestCLIParserIIIFArgs:
                 "Taillevent",
             ]
         )
-        assert args.name == "Taillevent"
+        assert args.names == ["Taillevent"]
 
     def test_parser_iiif_defaults_to_none(self) -> None:
         """Test that iiif_urls is None when not provided."""
@@ -58,7 +58,7 @@ class TestCLIParserIIIFArgs:
         """Test that name is None when not provided."""
         parser = create_cli_parser()
         args = parser.parse_args(["sample.csv"])
-        assert args.name is None
+        assert args.names is None
 
     def test_iiif_with_dry_run(self) -> None:
         """Test --iiif combined with --dry-run."""
@@ -101,7 +101,7 @@ class TestRunDirectIIIFCLI:
 
         args = argparse.Namespace(
             iiif_urls=["https://example.org/manifest.json"],
-            name="TestWork",
+            names=["TestWork"],
             dry_run=False,
             output_dir="downloads",
         )
@@ -118,6 +118,39 @@ class TestRunDirectIIIFCLI:
         assert call_kwargs.kwargs["entry_id"] == "IIIF_TestWork"
 
     @patch("main.cli.commands.direct_iiif.process_direct_iiif")
+    def test_multiple_urls_with_paired_names(self, mock_process: MagicMock) -> None:
+        """The Nth --name pairs with the Nth --iiif URL (regression: last
+        name used to win for every manifest)."""
+        mock_process.return_value = {
+            "status": "completed",
+            "item_url": "url",
+            "provider": "Test",
+        }
+
+        args = argparse.Namespace(
+            iiif_urls=[
+                "https://example.org/a/manifest.json",
+                "https://example.org/b/manifest.json",
+            ],
+            names=["work_a", "work_b"],
+            dry_run=False,
+            output_dir="downloads",
+        )
+        logger = MagicMock()
+        config: dict[str, Any] = {}
+
+        _run_direct_iiif_cli(args, config, logger)
+
+        assert mock_process.call_count == 2
+        first, second = mock_process.call_args_list
+        assert first.kwargs["manifest_url"] == "https://example.org/a/manifest.json"
+        assert first.kwargs["file_stem"] == "work_a"
+        assert first.kwargs["entry_id"] == "IIIF_work_a"
+        assert second.kwargs["manifest_url"] == "https://example.org/b/manifest.json"
+        assert second.kwargs["file_stem"] == "work_b"
+        assert second.kwargs["entry_id"] == "IIIF_work_b"
+
+    @patch("main.cli.commands.direct_iiif.process_direct_iiif")
     def test_multiple_urls_without_name(self, mock_process: MagicMock) -> None:
         """Test processing multiple URLs without a name stem."""
         mock_process.return_value = {
@@ -128,7 +161,7 @@ class TestRunDirectIIIFCLI:
 
         args = argparse.Namespace(
             iiif_urls=["https://example.org/m1.json", "https://example.org/m2.json"],
-            name=None,
+            names=None,
             dry_run=False,
             output_dir="downloads",
         )
@@ -160,7 +193,7 @@ class TestRunDirectIIIFCLI:
 
         args = argparse.Namespace(
             iiif_urls=["https://example.org/manifest.json"],
-            name=None,
+            names=None,
             dry_run=True,
             output_dir="downloads",
         )
@@ -184,7 +217,7 @@ class TestRunDirectIIIFCLI:
 
         args = argparse.Namespace(
             iiif_urls=["https://example.org/manifest.json"],
-            name=None,
+            names=None,
             dry_run=False,
             output_dir="downloads",
         )

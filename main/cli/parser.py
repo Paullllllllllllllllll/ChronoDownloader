@@ -88,9 +88,12 @@ Examples:
 
     parser.add_argument(
         "--name",
+        action="append",
+        dest="names",
         default=None,
         help="Output name stem for IIIF and identifier downloads (e.g. "
-        "'Taillevent_Viandier'). Used for folder and file naming.",
+        "'Taillevent_Viandier'). Used for folder and file naming. Repeatable: "
+        "with multiple --iiif URLs, the Nth --name pairs with the Nth URL.",
     )
 
     parser.add_argument(

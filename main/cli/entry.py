@@ -91,8 +91,14 @@ def main() -> None:
             cleanup_deferred_queue()
             return
 
-        forces_cli = "--cli" in sys.argv or "--non-interactive" in sys.argv
-        if not forces_cli and _looks_like_cli_invocation(sys.argv[1:]):
+        # Mode detection downstream (main/ui/mode.py) only recognizes the
+        # literal --cli flag, so --non-interactive must be translated into an
+        # inserted --cli here or it would paradoxically land in the
+        # interactive wizard.
+        if "--cli" not in sys.argv and (
+            "--non-interactive" in sys.argv
+            or _looks_like_cli_invocation(sys.argv[1:])
+        ):
             sys.argv.insert(1, "--cli")
 
         config, interactive_mode, args = run_with_mode_detection(
