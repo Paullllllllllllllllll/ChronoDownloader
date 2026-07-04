@@ -1,4 +1,4 @@
-# ChronoDownloader v1.7.1
+# ChronoDownloader v1.8.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1079,6 +1079,9 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.8.0** (4 July 2026) -- Dependency sweep: raise the urllib3 floor to >=2.7 and
+  refresh the locked toolchain (6 packages upgraded). Full test suite green (1,065
+  tests).
 - **v1.7.1** (3 July 2026) -- CLI bug-fix release. `--non-interactive`
     without `--cli` no longer falls through to the interactive
     config-selection wizard (the flag now implies CLI mode at entry).
