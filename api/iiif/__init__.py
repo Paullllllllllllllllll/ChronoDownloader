@@ -26,6 +26,7 @@ from ._direct import (
     download_from_iiif_manifest,
     extract_item_id_from_url,
     extract_manifest_metadata,
+    get_check_link_column,
     get_direct_link_column,
     get_naming_template,
     is_direct_download_enabled,
@@ -67,6 +68,7 @@ __all__ = [
     "download_from_iiif_manifest",
     "is_direct_download_enabled",
     "get_direct_link_column",
+    "get_check_link_column",
     "get_naming_template",
     "resolve_file_stem",
     # Re-exported constants (tests and tools look them up)

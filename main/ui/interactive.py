@@ -28,6 +28,7 @@ from api.core.config import get_config, get_download_config
 from api.iiif import is_iiif_manifest_url
 from api.providers import PROVIDERS
 from main.data.works_csv import (
+    DIRECT_LINK_COL,
     TITLE_COL,
     get_pending_works,
     get_stats,
@@ -709,7 +710,7 @@ def process_single_work(
         "Processing single work: '%s'%s", title, f" by '{creator}'" if creator else ""
     )
 
-    pipeline.process_work(
+    result = pipeline.process_work(
         title,
         creator,
         entry_id,
@@ -717,7 +718,11 @@ def process_single_work(
         dry_run=dry_run,
     )
 
-    return True
+    # A dry run (or a deferral, which returns None) is not a completed download;
+    # report honest success so the session summary reflects reality.
+    if dry_run:
+        return True
+    return result is not None and result.get("status") == "completed"
 
 
 def run_interactive_session(
@@ -916,10 +921,14 @@ def process_csv_batch_with_stats(
         log.error("Error reading CSV file: %s", e)
         return stats
 
-    # Validate required column
-    if TITLE_COL not in works_df.columns:
+    # Validate required column: a title column drives search, but a
+    # direct_link-only CSV (IIIF manifest URLs) is also acceptable, matching
+    # the CLI batch handler.
+    if TITLE_COL not in works_df.columns and DIRECT_LINK_COL not in works_df.columns:
         log.error(
-            "CSV file must contain a '%s' column (sampling notebook format).", TITLE_COL
+            "CSV file must contain a '%s' or '%s' column (sampling notebook format).",
+            TITLE_COL,
+            DIRECT_LINK_COL,
         )
         return stats
 

@@ -220,10 +220,9 @@ def download_ddb_work(
     save_json(manifest, output_folder, f"ddb_{item_id}_iiif_manifest")
 
     # Prefer manifest-level renderings (PDF/EPUB) when available
+    renders = 0
     try:
-        renders = download_iiif_renderings(
-            manifest, output_folder, filename_prefix=f"ddb_{item_id}_"
-        )
+        renders = download_iiif_renderings(manifest, output_folder)
         if renders > 0 and prefer_pdf_over_images():
             logger.info(
                 "DDB: downloaded %d rendering(s); skipping image downloads per config.",
@@ -240,7 +239,7 @@ def download_ddb_work(
 
     if not image_service_bases:
         logger.info("No IIIF image services found in DDB manifest for %s", item_id)
-        return True
+        return renders > 0
 
     # Use shared helper to attempt per-canvas image downloads
 

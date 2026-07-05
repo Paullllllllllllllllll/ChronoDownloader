@@ -20,16 +20,12 @@ logger = logging.getLogger(__name__)
 __all__ = ["download_iiif_renderings"]
 
 
-def download_iiif_renderings(
-    manifest: dict[str, Any], folder_path: str, filename_prefix: str = ""
-) -> int:
+def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     """Download files referenced in IIIF manifest-level 'rendering' entries.
 
     Args:
         manifest: IIIF manifest dictionary
         folder_path: Target directory for downloads
-        filename_prefix: Prefix for downloaded filenames (currently unused;
-            download_file builds standardized names from context)
 
     Returns:
         Number of files successfully downloaded

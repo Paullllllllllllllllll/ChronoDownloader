@@ -53,6 +53,20 @@ def _gb_max_files() -> int:
         return 2
 
 
+def _gb_max_pages() -> int:
+    """Get maximum number of page images to extract per work.
+
+    Distinct from ``max_files`` (the direct-download file cap); this bounds the
+    page-by-page image extraction fallback. Defaults to the extractor's own
+    sane default of 50.
+    """
+    val = get_provider_setting("google_books", "max_pages", 50)
+    try:
+        return int(val)
+    except Exception:
+        return 50
+
+
 def search_google_books(
     title: str, creator: str | None = None, max_results: int = 3
 ) -> list[SearchResult]:
@@ -281,9 +295,10 @@ def download_google_books_work(
             "image extraction",
             volume_id,
         )
-        any_ok = _download_page_images(volume_id, output_folder, max_files)
+        any_ok = _download_page_images(volume_id, output_folder, _gb_max_pages())
 
-    # Fallback: Save cover images (at least get something)
+    # Fallback: Save cover images as a bonus object. A cover alone is NOT real
+    # content, so it does not mark the work as successfully retrieved.
     if not any_ok:
         logger.info("Google Books: Falling back to cover images for %s", volume_id)
         image_links = volume_data.get("volumeInfo", {}).get("imageLinks", {})
@@ -309,8 +324,7 @@ def download_google_books_work(
             used.add(url)
             filename = f"google_{volume_id}_{label}.jpg"
             if download_file(url, output_folder, filename):
-                any_ok = True
-                break  # One cover is enough
+                break  # One cover is enough (bonus object, not counted)
 
     return any_ok
 

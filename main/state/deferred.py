@@ -280,7 +280,7 @@ class DeferredQueue:
                 if (
                     existing.entry_id == entry_id
                     and existing.provider_key == provider_key
-                    and existing.status == "pending"
+                    and existing.status in ("pending", "retrying")
                 ):
                     logger.debug(
                         "Item already in queue: %s from %s", title, provider_name

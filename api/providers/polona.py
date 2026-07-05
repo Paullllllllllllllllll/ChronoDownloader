@@ -94,10 +94,9 @@ def download_polona_work(
     save_json(manifest, output_folder, f"polona_{item_id}_manifest")
 
     # Prefer manifest-level PDF/EPUB renderings when available
+    renders = 0
     try:
-        renders = download_iiif_renderings(
-            manifest, output_folder, filename_prefix=f"polona_{item_id}_"
-        )
+        renders = download_iiif_renderings(manifest, output_folder)
         if renders > 0 and prefer_pdf_over_images():
             logger.info(
                 "Polona: downloaded %d rendering(s); skipping image downloads "
@@ -115,7 +114,7 @@ def download_polona_work(
 
     if not service_bases:
         logger.info("No IIIF image services found in Polona manifest for %s", item_id)
-        return True
+        return renders > 0
 
     # Use shared helper to attempt per-canvas downloads
 

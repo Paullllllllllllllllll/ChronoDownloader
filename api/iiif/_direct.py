@@ -43,6 +43,7 @@ __all__ = [
     "download_from_iiif_manifest",
     "is_direct_download_enabled",
     "get_direct_link_column",
+    "get_check_link_column",
     "get_naming_template",
     "resolve_file_stem",
 ]
@@ -304,11 +305,7 @@ def download_from_iiif_manifest(
     any_downloaded = False
 
     try:
-        renders = download_iiif_renderings(
-            manifest,
-            output_folder,
-            filename_prefix=f"{prefix}_",
-        )
+        renders = download_iiif_renderings(manifest, output_folder)
         if renders > 0:
             any_downloaded = True
             logger.info("Downloaded %d rendering(s) from manifest", renders)
@@ -434,3 +431,10 @@ def get_direct_link_column() -> str:
     config = get_config()
     direct_iiif_cfg = config.get("direct_iiif", {})
     return cast(str, direct_iiif_cfg.get("link_column", "direct_link"))
+
+
+def get_check_link_column() -> bool:
+    """Whether the generic ``link`` column is also scanned for IIIF manifests."""
+    config = get_config()
+    direct_iiif_cfg = config.get("direct_iiif", {})
+    return cast(bool, direct_iiif_cfg.get("check_link_column", True))

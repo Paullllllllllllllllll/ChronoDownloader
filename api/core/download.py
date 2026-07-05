@@ -89,6 +89,20 @@ def _safe_remove(path: str) -> None:
         os.remove(path)
 
 
+def _parse_content_length(cl_header: str | None) -> int | None:
+    """Parse a Content-Length header, returning None on absence or malformation.
+
+    A malformed header (e.g. non-numeric) must not raise; the download simply
+    proceeds without a declared length.
+    """
+    if not cl_header:
+        return None
+    try:
+        return int(cl_header)
+    except ValueError:
+        return None
+
+
 def _infer_extension_from_content_type(content_type: str) -> str:
     ct_lower = content_type.lower()
     for mime, ext in _CONTENT_TYPE_EXT_MAP.items():
@@ -364,8 +378,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     ) -> str | None:
         content_type = response.headers.get("Content-Type", "")
 
-        cl_header = response.headers.get("Content-Length")
-        content_len = int(cl_header) if cl_header else None
+        content_len = _parse_content_length(response.headers.get("Content-Length"))
         should_reject, reject_reason = _should_reject_html_response(
             content_type, url, content_len
         )
@@ -430,7 +443,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         else:
             budget_type = "images"
 
-        content_len_int = int(cl_header) if cl_header else 0
+        content_len_int = content_len or 0
         if content_len_int and not _BUDGET.allow_bytes(
             provider, work_id, content_len_int, content_type=budget_type
         ):

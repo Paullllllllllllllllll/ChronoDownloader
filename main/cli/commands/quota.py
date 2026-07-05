@@ -75,15 +75,11 @@ def show_quota_status() -> None:
             print(f"    ... and {pending - 10} more")
 
     scheduler = get_background_scheduler()
-    print("\n[BACKGROUND SCHEDULER]")
-    if scheduler.is_running():
-        stats = scheduler.get_stats()
-        print("  * Status: RUNNING")
-        print(f"  * Checks: {stats.get('checks', 0)}")
-        print(f"  * Retries attempted: {stats.get('retries_attempted', 0)}")
-        print(f"  * Retries succeeded: {stats.get('retries_succeeded', 0)}")
-    else:
-        print("  * Status: STOPPED")
+    stats = scheduler.get_stats()
+    print("\n[DEFERRED RETRY]")
+    print("  * Mode: eager (ready items retried at the start of each run)")
+    print(f"  * Retries attempted: {stats.get('retries_attempted', 0)}")
+    print(f"  * Retries succeeded: {stats.get('retries_succeeded', 0)}")
 
     print("\n" + "=" * 60 + "\n")
 

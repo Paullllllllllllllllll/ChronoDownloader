@@ -228,10 +228,9 @@ def download_british_library_work(
     save_json(manifest, output_folder, f"bl_{identifier}_manifest")
 
     # Prefer manifest-level PDF/EPUB renderings if available
+    renders = 0
     try:
-        renders = download_iiif_renderings(
-            manifest, output_folder, filename_prefix=f"bl_{identifier}_"
-        )
+        renders = download_iiif_renderings(manifest, output_folder)
         if renders > 0 and prefer_pdf_over_images():
             logger.info(
                 "British Library: downloaded %d rendering(s); skipping image "
@@ -249,7 +248,7 @@ def download_british_library_work(
 
     if not service_bases:
         logger.info("No IIIF image services found in BL manifest for %s", identifier)
-        return True
+        return renders > 0
 
     # Use shared helper to attempt per-canvas image downloads
 

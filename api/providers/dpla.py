@@ -184,9 +184,7 @@ def download_dpla_work(
 
             # Prefer manifest-level renderings (PDF/EPUB) when available
             try:
-                renders = download_iiif_renderings(
-                    manifest, output_folder, filename_prefix=f"dpla_{item_id}_"
-                )
+                renders = download_iiif_renderings(manifest, output_folder)
                 if renders > 0 and prefer_pdf_over_images():
                     logger.info(
                         "DPLA: downloaded %d rendering(s); skipping image "

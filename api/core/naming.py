@@ -7,8 +7,16 @@ slugs and sequence numbers.
 
 from __future__ import annotations
 
+import logging
 import re
+import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Windows applications default to a 260-character MAX_PATH limit. Warn a little
+# below it so there is headroom for the objects/ subdirectory and filename.
+_WINDOWS_MAX_PATH_WARN = 250
 
 # Provider slug mappings for abbreviated provider keys
 PROVIDER_SLUGS = {
@@ -184,17 +192,29 @@ def get_provider_abbrev(provider_key: str) -> str:
 
 
 def build_work_directory_name(
-    entry_id: str | None, title: str, max_len: int = 80
+    entry_id: str | None,
+    title: str,
+    max_len: int = 80,
+    creator: str | None = None,
+    year: str | int | None = None,
+    include_creator: bool = True,
+    include_year: bool = True,
 ) -> str:
     """Build a standardized work directory name.
 
     Combines entry_id and title into a snake_case directory name following
-    the pattern: <entry_id>_<title_slug> or just <title_slug> if no entry_id.
+    the pattern: <entry_id>_<title_slug>, optionally suffixed with a creator
+    slug and/or year when the corresponding naming options are enabled and the
+    values are available.
 
     Args:
         entry_id: Optional entry identifier
         title: Work title
         max_len: Maximum length for title component
+        creator: Optional creator/author name
+        year: Optional publication year
+        include_creator: When True and ``creator`` is set, append a creator slug
+        include_year: When True and ``year`` is set, append the year
 
     Returns:
         Directory name in snake_case format
@@ -202,6 +222,36 @@ def build_work_directory_name(
     entry_slug = to_snake_case(str(entry_id)) if entry_id else None
     title_slug = to_snake_case(str(title))[:max_len] if title else "untitled"
 
-    parts = [p for p in [entry_slug, title_slug] if p]
+    creator_slug = None
+    if include_creator and creator:
+        creator_slug = to_snake_case(str(creator))[:max_len] or None
+
+    year_slug = None
+    if include_year and year:
+        year_slug = to_snake_case(str(year)) or None
+
+    parts = [p for p in [entry_slug, title_slug, creator_slug, year_slug] if p]
     name = "_".join(parts) if parts else "untitled"
     return _guard_reserved_name(name)
+
+
+def warn_if_path_too_long(path: str, work_label: str) -> None:
+    """Log a warning when a path risks the Windows MAX_PATH limit.
+
+    Advisory only: no path rewriting or long-path-prefix magic is attempted.
+    Overlong paths can make file operations fail on default Windows setups, so
+    surfacing the risk (naming the work) lets the user shorten their output
+    directory or title slug.
+
+    Args:
+        path: The full path whose length is being checked.
+        work_label: Human-readable identifier for the work (title or entry_id).
+    """
+    if sys.platform == "win32" and len(path) > _WINDOWS_MAX_PATH_WARN:
+        logger.warning(
+            "Path for '%s' is %d characters and may exceed the Windows MAX_PATH "
+            "limit, which can cause file operations to fail: %s",
+            work_label,
+            len(path),
+            path,
+        )

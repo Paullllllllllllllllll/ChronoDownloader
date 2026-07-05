@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from api.core.config import get_config, get_resume_mode
-from api.core.naming import build_work_directory_name
+from api.core.naming import build_work_directory_name, warn_if_path_too_long
 from api.matching import normalize_text
 from api.model import SearchResult
 
@@ -56,22 +56,37 @@ def compute_work_dir(
     base_output_dir: str,
     entry_id: str | None,
     title: str,
+    creator: str | None = None,
+    year: str | int | None = None,
 ) -> tuple[str, str]:
     """Compute the work directory path and name.
+
+    Honors the ``naming.include_creator_in_work_dir`` and
+    ``naming.include_year_in_work_dir`` options: when enabled and the value is
+    supplied, the creator and/or year are folded into the directory name.
 
     Args:
         base_output_dir: Base directory for downloaded works
         entry_id: Optional entry identifier
         title: Work title
+        creator: Optional creator/author name
+        year: Optional publication year
 
     Returns:
         Tuple of (work_dir_path, work_dir_name)
     """
     naming_cfg = get_naming_config()
     work_dir_name = build_work_directory_name(
-        entry_id, title, max_len=int(naming_cfg.get("title_slug_max_len", 80))
+        entry_id,
+        title,
+        max_len=int(naming_cfg.get("title_slug_max_len", 80)),
+        creator=creator,
+        year=year,
+        include_creator=bool(naming_cfg.get("include_creator_in_work_dir", True)),
+        include_year=bool(naming_cfg.get("include_year_in_work_dir", True)),
     )
     work_dir = os.path.join(base_output_dir, work_dir_name)
+    warn_if_path_too_long(os.path.abspath(work_dir), entry_id or title)
     return work_dir, work_dir_name
 
 
@@ -93,6 +108,10 @@ def check_work_status(
 
     if resume_mode == "reprocess_all":
         return False, ""
+
+    # "resume_from_csv" is resolved at the CSV-filtering layer (pending rows are
+    # selected from the source CSV's retrievable column), so there is no
+    # work.json-based skip decision to make here; fall through to "don't skip".
 
     if not os.path.isdir(work_dir):
         return False, ""

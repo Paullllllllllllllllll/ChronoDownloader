@@ -265,7 +265,9 @@ def _prepare_work(
     entry_id: str | None,
     base_output_dir: str,
 ) -> _PreparedWork | None:
-    work_dir, work_stem = compute_work_dir(base_output_dir, entry_id, title)
+    work_dir, work_stem = compute_work_dir(
+        base_output_dir, entry_id, title, creator=creator
+    )
 
     resume_mode = get_resume_mode()
     should_skip, skip_reason = check_work_status(work_dir, resume_mode)
@@ -346,6 +348,72 @@ def _provider_slot(prov_key: str, held_key: str) -> Any:
             mgr.release(prov_key)
 
 
+def _try_ranked_fallbacks(
+    selected: SearchResult,
+    pkey: str,
+    work_dir: str,
+    all_candidates: list[SearchResult],
+    provider_list: list[ProviderTuple],
+    provider_map: dict[str, tuple[Any, Any, str]],
+    sel_cfg: dict[str, Any],
+) -> bool:
+    """Attempt scored alternate candidates after the primary download failed.
+
+    Ranks non-selected candidates that clear ``min_title_score`` by provider
+    hierarchy then match total, and tries each until one succeeds. Providers
+    whose quota is exhausted are skipped (not deferred here). Returns True on the
+    first successful fallback download.
+    """
+    try:
+        prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
+        ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
+        for sr in all_candidates:
+            try:
+                if sr.provider_key == pkey and sr.source_id == selected.source_id:
+                    continue
+                sc = sr.raw.get("__matching__", {})
+                if float(sc.get("score", 0.0)) < float(
+                    sel_cfg.get("min_title_score", 85)
+                ):
+                    continue
+                pprio = prov_priority.get(sr.provider_key or "", 9999)
+                ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))
+            except Exception:
+                continue
+        ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
+        for _pprio, _tot, sr in ranked_fallbacks:
+            prov_key = sr.provider_key or "unknown"
+            if prov_key not in provider_map:
+                continue
+            _s, dfunc, _pname = provider_map[prov_key]
+            logger.info("Attempting fallback download from %s", _pname)
+            try:
+                _quota_preflight(prov_key)
+                with _provider_slot(prov_key, pkey) as slot_ok:
+                    if not slot_ok:
+                        continue
+                    set_current_provider(prov_key)
+                    if dfunc(sr, work_dir):
+                        logger.info("Fallback download from %s succeeded.", _pname)
+                        _quota_record(prov_key)
+                        return True
+            except QuotaDeferredException as qde:
+                logger.info(
+                    "Fallback provider %s quota exhausted: %s", _pname, qde.message
+                )
+                continue
+            except Exception:
+                logger.exception(
+                    "Fallback download error for %s:%s", prov_key, sr.source_id
+                )
+            finally:
+                with contextlib.suppress(Exception):
+                    clear_current_provider()
+    except Exception:
+        logger.exception("Error while attempting fallback download candidates.")
+    return False
+
+
 def _run_download_with_fallback(
     selected: SearchResult,
     pkey: str,
@@ -387,86 +455,51 @@ def _run_download_with_fallback(
         if ok:
             download_succeeded = True
             _quota_record(pkey)
-        elif not ok:
+        else:
             logger.warning(
                 "Download function reported failure for %s:%s",
                 pkey,
                 selected.source_id,
             )
-            try:
-                prov_priority = {k: idx for idx, (k, *_r) in enumerate(provider_list)}
-                ranked_fallbacks: list[tuple[int, float, SearchResult]] = []
-                for sr in all_candidates:
-                    try:
-                        if (
-                            sr.provider_key == pkey
-                            and sr.source_id == selected.source_id
-                        ):
-                            continue
-                        sc = sr.raw.get("__matching__", {})
-                        if float(sc.get("score", 0.0)) < float(
-                            sel_cfg.get("min_title_score", 85)
-                        ):
-                            continue
-                        pprio = prov_priority.get(sr.provider_key or "", 9999)
-                        ranked_fallbacks.append(
-                            (pprio, float(sc.get("total", 0.0)), sr)
-                        )
-                    except Exception:
-                        continue
-                ranked_fallbacks.sort(key=lambda x: (x[0], -x[1]))
-                for _pprio, _tot, sr in ranked_fallbacks:
-                    prov_key = sr.provider_key or "unknown"
-                    if prov_key not in provider_map:
-                        continue
-                    _s, dfunc, _pname = provider_map[prov_key]
-                    logger.info("Attempting fallback download from %s", _pname)
-                    try:
-                        _quota_preflight(prov_key)
-                        with _provider_slot(prov_key, pkey) as slot_ok:
-                            if not slot_ok:
-                                continue
-                            set_current_provider(prov_key)
-                            if dfunc(sr, work_dir):
-                                logger.info(
-                                    "Fallback download from %s succeeded.", _pname
-                                )
-                                download_succeeded = True
-                                _quota_record(prov_key)
-                                break
-                    except QuotaDeferredException as qde:
-                        logger.info(
-                            "Fallback provider %s quota exhausted: %s",
-                            _pname,
-                            qde.message,
-                        )
-                        continue
-                    except Exception:
-                        logger.exception(
-                            "Fallback download error for %s:%s", prov_key, sr.source_id
-                        )
-                    finally:
-                        with contextlib.suppress(Exception):
-                            clear_current_provider()
-            except Exception:
-                logger.exception("Error while attempting fallback download candidates.")
+            download_succeeded = _try_ranked_fallbacks(
+                selected,
+                pkey,
+                work_dir,
+                all_candidates,
+                provider_list,
+                provider_map,
+                sel_cfg,
+            )
     except QuotaDeferredException as qde:
-        download_deferred = True
-        logger.info("Download deferred for '%s': %s", title, qde.message)
-        queue = get_deferred_queue()
-        queue.add(
-            title=title,
-            creator=creator,
-            entry_id=entry_id,
-            provider_key=pkey,
-            provider_name=pname,
-            source_id=selected_source_id,
-            work_dir=work_dir,
-            base_output_dir=base_output_dir,
-            item_url=selected.item_url,
-            reset_time=qde.reset_time,
-            raw_data=selected.raw,
+        # The primary provider's quota is exhausted. Before deferring the whole
+        # work, try viable non-quota fallback candidates: a successful fallback
+        # means we do not need to defer at all.
+        download_succeeded = _try_ranked_fallbacks(
+            selected,
+            pkey,
+            work_dir,
+            all_candidates,
+            provider_list,
+            provider_map,
+            sel_cfg,
         )
+        if not download_succeeded:
+            download_deferred = True
+            logger.info("Download deferred for '%s': %s", title, qde.message)
+            queue = get_deferred_queue()
+            queue.add(
+                title=title,
+                creator=creator,
+                entry_id=entry_id,
+                provider_key=pkey,
+                provider_name=pname,
+                source_id=selected_source_id,
+                work_dir=work_dir,
+                base_output_dir=base_output_dir,
+                item_url=selected.item_url,
+                reset_time=qde.reset_time,
+                raw_data=selected.raw,
+            )
     except Exception:
         logger.exception("Error during download for %s:%s", pkey, selected.source_id)
 
@@ -570,12 +603,26 @@ def load_enabled_apis(config_path: str) -> list[ProviderTuple]:
         }
     """
     if not os.path.exists(config_path):
-        logger.info(
-            "Config file %s not found; using default providers: Internet Archive only",
-            config_path,
-        )
-        s, d, n = PROVIDERS["internet_archive"]
-        return [("internet_archive", s, d, n)]
+        # Mirror get_config()'s fallback: prefer the bundled config.example.json
+        # in the same directory before dropping to the Internet-Archive-only
+        # default, so provider selection matches the rest of the config system.
+        config_dir = os.path.dirname(os.path.abspath(config_path))
+        example_path = os.path.join(config_dir, "config.example.json")
+        if os.path.exists(example_path):
+            logger.info(
+                "Config file %s not found; using providers from bundled "
+                "config.example.json.",
+                config_path,
+            )
+            config_path = example_path
+        else:
+            logger.info(
+                "Config file %s not found; using default providers: "
+                "Internet Archive only",
+                config_path,
+            )
+            s, d, n = PROVIDERS["internet_archive"]
+            return [("internet_archive", s, d, n)]
 
     try:
         with open(config_path, encoding="utf-8") as f:
@@ -688,7 +735,6 @@ def _get_selection_config() -> dict[str, Any]:
     sel.setdefault("provider_hierarchy", [])
     sel.setdefault("min_title_score", 85)
     sel.setdefault("creator_weight", 0.2)
-    sel.setdefault("year_tolerance", 2)
     sel.setdefault("max_candidates_per_provider", 5)
     sel.setdefault("download_strategy", "selected_only")
     sel.setdefault("keep_non_selected_metadata", True)
@@ -779,6 +825,7 @@ def search_and_select(
         work_json_path=prep.work_json_path,
         all_candidates=prep.all_candidates,
         provider_map=prep.provider_map,
+        provider_list=prep.provider_list,
         selection_config=prep.sel_cfg,
         base_output_dir=base_output_dir,
     )
@@ -823,7 +870,7 @@ def execute_download(task: DownloadTask, dry_run: bool = False) -> bool:
         download_func=download_func,
         work_dir=work_dir,
         all_candidates=task.all_candidates,
-        provider_list=ENABLED_APIS,
+        provider_list=task.provider_list or ENABLED_APIS,
         provider_map=task.provider_map,
         sel_cfg=task.selection_config,
         title=task.title,
@@ -911,8 +958,9 @@ def process_work(
         dry_run: If True, skip actual downloads
 
     Returns:
-        Dict with 'status', 'item_url', 'provider' on success/failure,
-        None if skipped or deferred
+        Dict with 'status' ('completed', 'failed', 'deferred', or 'dry_run'),
+        'item_url', and 'provider'; None only when the work was skipped
+        (resume) or produced no candidates path that returns early.
     """
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
 
@@ -1039,7 +1087,13 @@ def process_work(
             "provider": selected.provider if selected else "",
         }
     elif download_deferred:
-        return None  # Deferred - don't update CSV yet
+        # Report the deferral explicitly so callers can mark the CSV row
+        # "deferred" (retriable) rather than leaving it silently pending.
+        return {
+            "status": "deferred",
+            "item_url": selected.item_url if selected else "",
+            "provider": selected.provider if selected else "",
+        }
     elif selected:
         return {
             "status": "failed",

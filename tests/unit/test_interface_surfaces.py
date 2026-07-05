@@ -54,6 +54,7 @@ def test_api_iiif_package_surface() -> None:
             "download_from_iiif_manifest",
             "is_direct_download_enabled",
             "get_direct_link_column",
+            "get_check_link_column",
             "get_naming_template",
             "resolve_file_stem",
             "IIIF_MANIFEST_PATTERNS",
@@ -157,8 +158,6 @@ def test_main_state_package_surface() -> None:
             "get_deferred_queue",
             "BackgroundRetryScheduler",
             "get_background_scheduler",
-            "start_background_scheduler",
-            "stop_background_scheduler",
         ],
     )
 

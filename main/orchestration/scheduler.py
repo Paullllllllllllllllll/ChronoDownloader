@@ -71,6 +71,11 @@ class DownloadTask:
     provider_map: dict[str, tuple[Callable[..., Any], Callable[..., Any], str]] = field(
         default_factory=dict
     )
+    # Hierarchy-ordered provider list (matches sequential mode's ordering) used
+    # by fallback selection; defaults empty for backward compatibility.
+    provider_list: list[tuple[str, Callable[..., Any], Callable[..., Any], str]] = (
+        field(default_factory=list)
+    )
     selection_config: dict[str, Any] = field(default_factory=dict)
     base_output_dir: str = "downloaded_works"
     status: str | None = None
@@ -204,7 +209,6 @@ def get_parallel_download_config() -> dict[str, Any]:
             "google_books": 1,  # Rate limited
         },
     )
-    dl.setdefault("queue_size", 100)
     # 0 (or omitted) = wait indefinitely for downloads to finish; set a
     # positive value to enforce a hard ceiling per batch wait.
     dl.setdefault("worker_timeout_s", 0)

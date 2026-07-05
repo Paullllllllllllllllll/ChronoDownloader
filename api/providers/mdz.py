@@ -143,10 +143,9 @@ def download_mdz_work(
     save_json(manifest, output_folder, f"mdz_{object_id}_manifest")
 
     # Try to download manifest-level PDF/EPUB renderings first
+    renderings_downloaded = 0
     try:
-        renderings_downloaded = download_iiif_renderings(
-            manifest, output_folder, filename_prefix=f"mdz_{object_id}_"
-        )
+        renderings_downloaded = download_iiif_renderings(manifest, output_folder)
         if renderings_downloaded > 0 and prefer_pdf_over_images():
             logger.info(
                 "MDZ: downloaded %d manifest rendering(s); skipping image "
@@ -164,6 +163,6 @@ def download_mdz_work(
 
     if not image_service_bases:
         logger.info("No IIIF image services found in MDZ manifest for %s", object_id)
-        return True
+        return renderings_downloaded > 0
 
     return download_page_images(image_service_bases, output_folder, "mdz", object_id)

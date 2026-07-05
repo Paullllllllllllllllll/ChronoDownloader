@@ -126,6 +126,7 @@
       "prefer": "pdf",
       "allow_drm": false,
       "max_files": 1000,
+      "max_pages": 50,
       "min_title_score": 50,
       "network": {
         "delay_ms": 2000,
@@ -242,7 +243,6 @@
       "e_rara": 1,
       "sbb_digital": 1
     },
-    "queue_size": 100,
     "worker_timeout_s": 0,
     "_worker_timeout_note": "TOTAL ceiling in seconds for waiting on a parallel batch; 0 = wait indefinitely (recommended)."
   },
@@ -268,7 +268,6 @@
     ],
     "min_title_score": 35,
     "creator_weight": 0.2,
-    "year_tolerance": 2,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",
     "keep_non_selected_metadata": false

@@ -184,9 +184,7 @@ def download_europeana_work(
 
     # Try manifest-level renderings (PDF/EPUB) first
     try:
-        renders = download_iiif_renderings(
-            manifest_data, output_folder, filename_prefix=f"europeana_{item_id}_"
-        )
+        renders = download_iiif_renderings(manifest_data, output_folder)
         if renders > 0 and prefer_pdf_over_images():
             logger.info(
                 "Europeana: downloaded %d rendering(s); skipping image downloads "

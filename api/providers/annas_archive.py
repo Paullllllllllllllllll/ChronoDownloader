@@ -56,14 +56,6 @@ SEARCH_URL = "https://annas-archive.gl/search"
 MD5_PAGE_URL = "https://annas-archive.gl/md5/{md5}"
 FAST_DOWNLOAD_API_URL = "https://annas-archive.gl/dyn/api/fast_download.json"
 
-# Mirror list for fallback (updated Mar 2026: .gl is the active domain)
-MIRRORS = [
-    "https://annas-archive.gl",  # primary (active as of Mar 2026)
-    "https://annas-archive.li",
-    "https://annas-archive.pm",
-    "https://annas-archive.in",
-]
-
 
 def is_api_backed() -> bool:
     """Return True when a member API key is configured for fast downloads.
@@ -257,7 +249,7 @@ def _build_annas_result(
         "creators": creators,
         "md5": md5,
         "id": md5,
-        "item_url": f"https://annas-archive.org/md5/{md5}",
+        "item_url": MD5_PAGE_URL.format(md5=md5),
         "title_candidates": title_candidates,
         "title_scores": title_scores,
     }

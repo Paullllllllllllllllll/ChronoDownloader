@@ -159,9 +159,7 @@ def download_loc_work(
 
             # Prefer manifest-level renderings (PDF/EPUB) when available
             try:
-                renders = download_iiif_renderings(
-                    iiif_manifest_data, output_folder, filename_prefix=f"loc_{item_id}_"
-                )
+                renders = download_iiif_renderings(iiif_manifest_data, output_folder)
                 if renders > 0 and prefer_pdf_over_images():
                     logger.info(
                         "LOC: downloaded %d rendering(s); skipping image "
@@ -229,6 +227,7 @@ def download_loc_work(
             image_url = "https:" + image_url
         elif not image_url.startswith("http"):
             image_url = "https://www.loc.gov" + image_url
-        download_file(image_url, output_folder, f"loc_{item_id}_sample_image.jpg")
-        return True
+        return bool(
+            download_file(image_url, output_folder, f"loc_{item_id}_sample_image.jpg")
+        )
     return False

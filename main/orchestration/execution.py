@@ -297,8 +297,9 @@ def _record_direct_iiif_completeness(
 def _get_direct_link(row: pd.Series) -> str | None:
     """Extract a direct IIIF link from a CSV row if present and valid.
 
-    Checks both the 'direct_link' column (preferred) and the 'link' column
-    for IIIF manifest URLs.
+    Checks the configured ``direct_iiif.link_column`` first (falling back to the
+    default ``direct_link`` column), then, when ``direct_iiif.check_link_column``
+    is enabled, the generic ``link`` column for IIIF manifest URLs.
 
     Args:
         row: DataFrame row
@@ -306,21 +307,27 @@ def _get_direct_link(row: pd.Series) -> str | None:
     Returns:
         IIIF manifest URL if found and valid, None otherwise
     """
-    # Check direct_link column first (explicit IIIF manifest URL)
-    if DIRECT_LINK_COL in row.index:
-        direct_link: object = row[DIRECT_LINK_COL]
-        if isinstance(direct_link, str) and direct_link.strip():
-            url = direct_link.strip()
-            if is_iiif_manifest_url(url):
-                return url
+    from api.iiif import get_check_link_column, get_direct_link_column
 
-    # Also check link column for IIIF URLs (backward compatibility)
-    if LINK_COL in row.index:
-        link: object = row[LINK_COL]
-        if isinstance(link, str) and link.strip():
-            url = link.strip()
+    def _valid_url(col: str) -> str | None:
+        if col not in row.index:
+            return None
+        value: object = row[col]
+        if isinstance(value, str) and value.strip():
+            url = value.strip()
             if is_iiif_manifest_url(url):
                 return url
+        return None
+
+    # Configured direct-link column first, falling back to the default column.
+    for col in dict.fromkeys([get_direct_link_column(), DIRECT_LINK_COL]):
+        found = _valid_url(col)
+        if found:
+            return found
+
+    # Optionally also check the generic 'link' column (backward compatibility).
+    if get_check_link_column():
+        return _valid_url(LINK_COL)
 
     return None
 
@@ -373,17 +380,21 @@ def _mark_no_match_failed(
     entry_id: str,
     title: str,
     logger: logging.Logger,
+    creator: str | None = None,
 ) -> None:
     """Mark a parallel-mode no-match work failed, unless it was resume-skipped.
 
     ``search_and_select`` returns None both for resume-skips (work already
     complete) and for genuine no-matches. Only the latter should be marked
     failed in the works CSV; a resume-skip must keep its completed status.
+
+    ``creator`` must match the value ``_prepare_work`` used so the computed work
+    directory (which may fold in the creator per naming config) is identical.
     """
     from main.data.work import check_work_status, compute_work_dir
 
     try:
-        work_dir, _ = compute_work_dir(output_dir, entry_id, title)
+        work_dir, _ = compute_work_dir(output_dir, entry_id, title, creator=creator)
         should_skip, _reason = check_work_status(work_dir)
         if should_skip:
             return
@@ -476,8 +487,13 @@ def _run_sequential(
                         "Failed to mark entry %s as failed in source CSV", entry_id
                     )
                 failed += 1
+            elif status == "deferred":
+                # Quota deferral: mark retriable (mirrors parallel mode) rather
+                # than leaving the row silently pending.
+                if mark_deferred(csv_path, str(entry_id)):
+                    logger.debug("Marked entry %s as deferred in source CSV", entry_id)
             # Other statuses (dry_run, no_match) - don't update CSV
-        # result is None means deferred/skipped - don't update CSV
+        # result is None means skipped (resume) - don't update CSV
 
         processed += 1
 
@@ -572,8 +588,8 @@ def _run_parallel(
         # quota deferral from an outright failure: a deferred task must be
         # marked "deferred" (retriable) rather than "failed" so --pending-mode
         # new does not permanently drop it.
+        task_status = getattr(task, "status", None)
         if csv_path and task.entry_id:
-            task_status = getattr(task, "status", None)
             try:
                 if success:
                     item_url = getattr(task, "item_url", "") or ""
@@ -597,7 +613,12 @@ def _run_parallel(
         if complete_callback:
             complete_callback(task, success, error)
         else:
-            status = "completed" if success else "failed"
+            if success:
+                status = "completed"
+            elif task_status == "deferred":
+                status = "deferred"
+            else:
+                status = "failed"
             if error:
                 logger.warning("Download %s for '%s': %s", status, task.title, error)
             else:
@@ -652,10 +673,13 @@ def _run_parallel(
                     creator=None if pd.isna(creator) else str(creator),
                 )
 
-                # Update CSV for direct downloads
+                # Update CSV for direct downloads. Mirror sequential mode: only
+                # an explicit "completed"/"failed" writes the CSV; a "partial"
+                # (incomplete page set) is left pending so it can be retried.
                 if csv_path and entry_id:
                     try:
-                        if dl_result.get("status") == "completed":
+                        status = dl_result.get("status")
+                        if status == "completed":
                             if mark_success(
                                 csv_path,
                                 str(entry_id),
@@ -665,11 +689,12 @@ def _run_parallel(
                                 logger.debug(
                                     "Marked entry %s as success (direct IIIF)", entry_id
                                 )
-                        else:
-                            if mark_failed(csv_path, str(entry_id)):
-                                logger.debug(
-                                    "Marked entry %s as failed (direct IIIF)", entry_id
-                                )
+                        elif status == "failed" and mark_failed(
+                            csv_path, str(entry_id)
+                        ):
+                            logger.debug(
+                                "Marked entry %s as failed (direct IIIF)", entry_id
+                            )
                     except Exception as csv_err:
                         logger.error(
                             "Exception updating CSV for direct IIIF entry %s: %s",
@@ -696,7 +721,12 @@ def _run_parallel(
                     # the CSV, but never overwrite a resume-skipped (already
                     # completed) work.
                     _mark_no_match_failed(
-                        csv_path, output_dir, str(entry_id), str(title), logger
+                        csv_path,
+                        output_dir,
+                        str(entry_id),
+                        str(title),
+                        logger,
+                        creator=None if pd.isna(creator) else str(creator),
                     )
 
         # Phase 2: Wait for all downloads to complete

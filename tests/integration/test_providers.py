@@ -270,6 +270,134 @@ class TestDownloadFunctions:
             # With empty files list, should return False
             assert result is False
 
+    def test_ia_search_handles_string_creator(self) -> None:
+        """BUG-2: a single-string creator must not be split into characters."""
+        resp = {
+            "response": {
+                "docs": [
+                    {
+                        "identifier": "x1",
+                        "title": "T",
+                        "creator": "Jane Doe",
+                        "year": "1900",
+                    }
+                ]
+            }
+        }
+        with patch("api.providers.internet_archive.make_request", return_value=resp):
+            from api.providers.internet_archive import search_internet_archive
+
+            results = search_internet_archive("T")
+
+            assert results[0].raw["creator"] == "Jane Doe"
+
+    def test_ia_search_handles_list_creator(self) -> None:
+        """A list creator is still joined with commas."""
+        resp = {
+            "response": {
+                "docs": [
+                    {
+                        "identifier": "x2",
+                        "title": "T",
+                        "creator": ["A", "B"],
+                        "year": "1900",
+                    }
+                ]
+            }
+        }
+        with patch("api.providers.internet_archive.make_request", return_value=resp):
+            from api.providers.internet_archive import search_internet_archive
+
+            results = search_internet_archive("T")
+
+            assert results[0].raw["creator"] == "A, B"
+
+    def test_ia_download_thumbnail_only_returns_false(
+        self, temp_output_dir: str
+    ) -> None:
+        """BUG-8: a thumbnail alone must not count as a completed download."""
+        metadata = {"files": [{"name": "cover_thumb.jpg", "format": "Thumbnail"}]}
+        with (
+            patch("api.providers.internet_archive.make_request", return_value=metadata),
+            patch("api.providers.internet_archive.save_json", return_value=None),
+            patch(
+                "api.providers.internet_archive.download_file",
+                return_value="/x/thumb.jpg",
+            ),
+            patch(
+                "api.providers.internet_archive.download_iiif_renderings",
+                return_value=0,
+            ),
+            patch(
+                "api.providers.internet_archive.extract_image_service_bases",
+                return_value=[],
+            ),
+        ):
+            from api.providers.internet_archive import download_ia_work
+
+            result = download_ia_work({"identifier": "id1"}, temp_output_dir)
+
+            assert result is False
+
+    def test_gallica_download_no_content_returns_false(
+        self, temp_output_dir: str
+    ) -> None:
+        """BUG-1: a manifest with no renderings and no image services is not success."""
+        manifest = {"@id": "m"}
+        with (
+            patch("api.providers.bnf_gallica.make_request", return_value=manifest),
+            patch("api.providers.bnf_gallica.save_json", return_value=None),
+            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.bnf_gallica.extract_image_service_bases",
+                return_value=[],
+            ),
+        ):
+            from api.providers.bnf_gallica import download_gallica_work
+
+            result = download_gallica_work({"ark_id": "bpt6k123"}, temp_output_dir)
+
+            assert result is False
+
+    def test_gallica_download_renderings_only_returns_true(
+        self, temp_output_dir: str
+    ) -> None:
+        """A downloaded rendering with no image services still counts as success."""
+        manifest = {"@id": "m"}
+        with (
+            patch("api.providers.bnf_gallica.make_request", return_value=manifest),
+            patch("api.providers.bnf_gallica.save_json", return_value=None),
+            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=1),
+            patch(
+                "api.providers.bnf_gallica.extract_image_service_bases",
+                return_value=[],
+            ),
+            patch(
+                "api.providers.bnf_gallica.prefer_pdf_over_images", return_value=False
+            ),
+        ):
+            from api.providers.bnf_gallica import download_gallica_work
+
+            result = download_gallica_work({"ark_id": "bpt6k123"}, temp_output_dir)
+
+            assert result is True
+
+    def test_hathitrust_download_without_api_key_returns_false(
+        self, temp_output_dir: str
+    ) -> None:
+        """BUG-1: no page image downloaded (no API key) is not a completed work."""
+        with (
+            patch("api.providers.hathitrust._api_key", return_value=None),
+            patch("api.providers.hathitrust.save_json", return_value=None),
+        ):
+            from api.providers.hathitrust import download_hathitrust_work
+
+            result = download_hathitrust_work(
+                {"htid": "abc", "bib": {"x": 1}}, temp_output_dir
+            )
+
+            assert result is False
+
 
 class TestSearchResultScoring:
     """Tests for search result scoring integration."""

@@ -246,7 +246,6 @@ class TestGetParallelDownloadConfig:
 
         assert config["max_parallel_downloads"] == 1
         assert "provider_concurrency" in config
-        assert config["queue_size"] == 100
 
     def test_merges_with_config(self) -> None:
         """Test that config values are used."""
@@ -255,7 +254,6 @@ class TestGetParallelDownloadConfig:
         mock_config = {
             "download": {
                 "max_parallel_downloads": 4,
-                "queue_size": 200,
             }
         }
 
@@ -263,4 +261,3 @@ class TestGetParallelDownloadConfig:
             config = get_parallel_download_config()
 
         assert config["max_parallel_downloads"] == 4
-        assert config["queue_size"] == 200

@@ -94,7 +94,6 @@ class TestGetSelectionConfigExtended:
         assert sel["max_candidates_per_provider"] == 5
         assert sel["download_strategy"] == "selected_only"
         assert sel["keep_non_selected_metadata"] is True
-        assert sel["year_tolerance"] == 2
         assert sel["max_parallel_searches"] == 1
 
     @patch(
@@ -429,3 +428,16 @@ class TestLoadEnabledApisExtended:
         config_file.write_text(json.dumps({"providers": {"internet_archive": False}}))
         result = load_enabled_apis(str(config_file))
         assert result == []
+
+    def test_missing_config_falls_back_to_example(self, tmp_path: Path) -> None:
+        """Finding 10: absent config.json falls back to config.example.json."""
+        import json
+
+        example = tmp_path / "config.example.json"
+        example.write_text(
+            json.dumps({"providers": {"mdz": True, "internet_archive": False}})
+        )
+        result = load_enabled_apis(str(tmp_path / "config.json"))
+        keys = [r[0] for r in result]
+        assert "mdz" in keys
+        assert "internet_archive" not in keys

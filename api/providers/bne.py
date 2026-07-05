@@ -107,10 +107,9 @@ def download_bne_work(
     save_json(manifest, output_folder, f"bne_{item_identifier}_manifest")
 
     # Prefer manifest-level PDF/EPUB renderings when available
+    renders = 0
     try:
-        renders = download_iiif_renderings(
-            manifest, output_folder, filename_prefix=f"bne_{item_identifier}_"
-        )
+        renders = download_iiif_renderings(manifest, output_folder)
         if renders > 0 and prefer_pdf_over_images():
             logger.info(
                 "BNE: downloaded %d rendering(s); skipping image downloads per config.",
@@ -129,7 +128,7 @@ def download_bne_work(
         logger.info(
             "No IIIF image services found in BNE manifest for %s", item_identifier
         )
-        return True
+        return renders > 0
 
     # Use shared helper for per-canvas downloads
 

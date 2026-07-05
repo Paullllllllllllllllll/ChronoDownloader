@@ -143,11 +143,7 @@ def download_iiif_manifest_and_images(
     any_downloaded = False
 
     try:
-        renders = download_iiif_renderings(
-            manifest,
-            output_folder,
-            filename_prefix=f"{provider_key}_{item_id}_",
-        )
+        renders = download_iiif_renderings(manifest, output_folder)
         if renders > 0:
             any_downloaded = True
             if skip_images_if_rendering and prefer_pdf_over_images():

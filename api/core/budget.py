@@ -216,7 +216,11 @@ class DownloadBudget:
 
     # Legacy compatibility methods
     def allow_new_file(self, provider: str | None, work_id: str | None) -> bool:
-        """Legacy method for backward compatibility. Always returns True."""
+        """Return True while the budget is not exhausted (legacy compatibility).
+
+        Returns False once a "stop" on_exceed policy has tripped the exhausted
+        flag; otherwise True.
+        """
         return not self._exhausted
 
     def allow_bytes(

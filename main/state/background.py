@@ -1,13 +1,10 @@
-"""Background scheduler for retrying deferred downloads.
+"""Eager retry helper for deferred (quota-limited) downloads.
 
-This module provides a daemon thread that monitors the deferred queue
-and automatically retries downloads when quotas reset.
-
-Features:
-- Non-blocking: Runs in background while main batch continues
-- Quota-aware: Waits for quota reset times before retrying
-- Graceful shutdown: Stops cleanly on KeyboardInterrupt or explicit stop
-- Configurable check intervals
+Instead of a background daemon thread (which exited with the process before it
+could do useful work), deferred items are retried synchronously at the start of
+each run via :meth:`BackgroundRetryScheduler.retry_ready_now`. On success the
+works CSV, work.json, and index.csv are all updated so a subsequent run does not
+re-download (and re-spend quota on) the same item.
 """
 
 from __future__ import annotations
@@ -15,15 +12,15 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from api.core.config import get_config
 from api.core.context import (
     clear_all_context,
+    reset_counters,
     set_current_entry,
+    set_current_name_stem,
     set_current_provider,
     set_current_work,
 )
@@ -34,15 +31,26 @@ from .quota import QuotaManager, get_quota_manager
 
 logger = logging.getLogger(__name__)
 
-# Default check interval (15 minutes)
-DEFAULT_CHECK_INTERVAL_MINUTES = 15
+
+def _consumed_quota_unit(provider_key: str) -> bool:
+    """Return True when a just-succeeded retry actually used a quota-gated unit.
+
+    Mirrors ``pipeline._quota_record``: only Anna's Archive's fast-download API
+    is quota-gated, and only when its thread-local marker confirms the fast
+    path (not the public-scraping fallback) was used.
+    """
+    if provider_key == "annas_archive":
+        from api.providers.annas_archive import consume_fast_api_used
+
+        return consume_fast_api_used()
+    return False
 
 
 class BackgroundRetryScheduler:
-    """Background thread for retrying deferred downloads.
+    """Eager retry helper for deferred downloads.
 
-    Monitors the deferred queue and automatically retries downloads
-    when their quota reset times have passed.
+    Retries deferred queue items whose quota reset time has passed, driven
+    synchronously from ``retry_ready_now`` at run start (no daemon thread).
     """
 
     _instance: BackgroundRetryScheduler | None = None
@@ -58,29 +66,11 @@ class BackgroundRetryScheduler:
             return cls._instance
 
     def __init__(self) -> None:
-        """Initialize the background scheduler."""
+        """Initialize the eager deferred-retry helper."""
         if getattr(self, "_initialized", False):
             return
 
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
-        self._pause_event = threading.Event()
-        self._pause_event.set()  # Not paused by default
-
-        # Configuration
-        cfg = get_config()
-        deferred_cfg = cfg.get("deferred", {})
-        self._check_interval_s = (
-            float(
-                deferred_cfg.get(
-                    "check_interval_minutes", DEFAULT_CHECK_INTERVAL_MINUTES
-                )
-            )
-            * 60
-        )
-        self._enabled = bool(deferred_cfg.get("background_enabled", True))
-
-        # Components
+        # Components (bound lazily on first retry_ready_now call)
         self._queue: DeferredQueue | None = None
         self._quota_manager: QuotaManager | None = None
 
@@ -102,12 +92,7 @@ class BackgroundRetryScheduler:
         self._on_retry_failure: Callable[[DeferredItem, str], None] | None = None
 
         self._initialized = True
-        logger.debug(
-            "BackgroundRetryScheduler initialized (check interval: %.1f min, "
-            "enabled: %s)",
-            self._check_interval_s / 60,
-            self._enabled,
-        )
+        logger.debug("BackgroundRetryScheduler initialized (eager-retry mode)")
 
     def set_provider_download_fn(
         self, provider_key: str, download_fn: Callable[[SearchResult, str], bool]
@@ -133,79 +118,6 @@ class BackgroundRetryScheduler:
         """
         self._on_retry_success = on_success
         self._on_retry_failure = on_failure
-
-    def start(self) -> bool:
-        """Start the background scheduler thread.
-
-        Returns:
-            True if started, False if already running or disabled
-        """
-        if not self._enabled:
-            logger.info("Background retry scheduler is disabled in config")
-            return False
-
-        if self._thread is not None and self._thread.is_alive():
-            logger.debug("Background scheduler already running")
-            return False
-
-        # Initialize components
-        self._queue = get_deferred_queue()
-        self._quota_manager = get_quota_manager()
-
-        # Reset stop event
-        self._stop_event.clear()
-        self._pause_event.set()
-
-        # Start daemon thread
-        self._thread = threading.Thread(
-            target=self._run_loop, name="BackgroundRetryScheduler", daemon=True
-        )
-        self._thread.start()
-
-        logger.info(
-            "Background retry scheduler started (check interval: %.1f min)",
-            self._check_interval_s / 60,
-        )
-        return True
-
-    def stop(self, wait: bool = True, timeout: float = 30.0) -> None:
-        """Stop the background scheduler.
-
-        Args:
-            wait: If True, wait for thread to finish
-            timeout: Maximum seconds to wait
-        """
-        if self._thread is None or not self._thread.is_alive():
-            return
-
-        logger.info("Stopping background retry scheduler...")
-        self._stop_event.set()
-        self._pause_event.set()  # Unpause if paused
-
-        if wait:
-            self._thread.join(timeout=timeout)
-            if self._thread.is_alive():
-                logger.warning("Background scheduler did not stop within timeout")
-
-        logger.info("Background retry scheduler stopped")
-
-    def pause(self) -> None:
-        """Pause the scheduler (stops checking but keeps thread alive)."""
-        self._pause_event.clear()
-        logger.debug("Background scheduler paused")
-
-    def resume(self) -> None:
-        """Resume the scheduler after pause."""
-        self._pause_event.set()
-        logger.debug("Background scheduler resumed")
-
-    def is_running(self) -> bool:
-        """Check if scheduler is running."""
-        return self._thread is not None and self._thread.is_alive()
-
-    def is_paused(self) -> bool:
-        """Check if scheduler is paused."""
-        return not self._pause_event.is_set()
 
     def get_stats(self) -> dict[str, int]:
         """Get scheduler statistics.
@@ -306,57 +218,6 @@ class BackgroundRetryScheduler:
             except Exception:
                 logger.exception("Failed to update works CSV for %s", item.title)
 
-    def _run_loop(self) -> None:
-        """Main scheduler loop (runs in background thread)."""
-        logger.debug("Background scheduler loop started")
-
-        while not self._stop_event.is_set():
-            try:
-                # Wait for unpause
-                self._pause_event.wait()
-
-                if self._stop_event.is_set():
-                    break
-
-                # Check for ready items
-                self._check_and_retry()
-
-                # Sleep in small chunks so we can respond to stop quickly
-                sleep_remaining = self._check_interval_s
-                while sleep_remaining > 0 and not self._stop_event.is_set():
-                    chunk = min(sleep_remaining, 10.0)  # 10s chunks
-                    time.sleep(chunk)
-                    sleep_remaining -= chunk
-
-            except Exception as e:
-                logger.exception("Error in background scheduler loop: %s", e)
-                # Sleep a bit before retrying to avoid tight error loop
-                time.sleep(30)
-
-        logger.debug("Background scheduler loop exited")
-
-    def _check_and_retry(self) -> None:
-        """Check for ready items and retry them."""
-        with self._stats_lock:
-            self._stats["checks"] += 1
-
-        if self._queue is None:
-            return
-
-        ready_items = self._queue.get_ready()
-
-        if not ready_items:
-            logger.debug("No deferred items ready for retry")
-            return
-
-        logger.info("Found %d deferred item(s) ready for retry", len(ready_items))
-
-        for item in ready_items:
-            if self._stop_event.is_set():
-                break
-
-            self._retry_item(item)
-
     def _retry_item(self, item: DeferredItem) -> bool:
         """Attempt to retry a deferred item.
 
@@ -416,11 +277,25 @@ class BackgroundRetryScheduler:
                 self._on_retry_failure(item, "Could not reconstruct search result")
             return False
 
+        # Reproduce the original run's naming context so a retried download
+        # lands in the same work directory with the same filename stem, rather
+        # than a stem derived from the entry_id/item id.
+        from main.data.work import compute_work_id
+
+        work_id = compute_work_id(item.title, item.creator)
+        name_stem = (
+            os.path.basename(item.work_dir.rstrip("/\\"))
+            if item.work_dir
+            else (item.entry_id or item.id)
+        )
+
         try:
             # Set thread-local context
-            set_current_work(item.entry_id or item.id)
+            set_current_work(work_id)
             set_current_entry(item.entry_id)
             set_current_provider(provider_key)
+            set_current_name_stem(name_stem)
+            reset_counters()
 
             try:
                 success = download_fn(search_result, item.work_dir)
@@ -428,8 +303,11 @@ class BackgroundRetryScheduler:
                 clear_all_context()
 
             if success:
-                # Record quota usage
-                if self._quota_manager:
+                # Only record a consumed quota unit when the provider actually
+                # used its quota-gated fast-download path (mirrors
+                # pipeline._quota_record); a non-quota fallback (e.g. public
+                # scraping) must not burn a quota unit.
+                if self._quota_manager and _consumed_quota_unit(provider_key):
                     self._quota_manager.record_download(provider_key)
 
                 if self._queue:
@@ -512,29 +390,7 @@ def get_background_scheduler() -> BackgroundRetryScheduler:
     return BackgroundRetryScheduler()
 
 
-def start_background_scheduler() -> bool:
-    """Convenience function to start the background scheduler.
-
-    Returns:
-        True if started successfully
-    """
-    scheduler = get_background_scheduler()
-    return scheduler.start()
-
-
-def stop_background_scheduler(wait: bool = True) -> None:
-    """Convenience function to stop the background scheduler.
-
-    Args:
-        wait: If True, wait for scheduler to stop
-    """
-    scheduler = get_background_scheduler()
-    scheduler.stop(wait=wait)
-
-
 __all__ = [
     "BackgroundRetryScheduler",
     "get_background_scheduler",
-    "start_background_scheduler",
-    "stop_background_scheduler",
 ]

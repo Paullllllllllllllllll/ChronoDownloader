@@ -277,6 +277,9 @@ def get_resume_mode() -> str:
     - "skip_completed": Skip works with status="completed" in work.json (default)
     - "reprocess_all": Reprocess all works regardless of status
     - "skip_if_has_objects": Skip works that have files in objects/ directory
+    - "resume_from_csv": Resume purely from the source CSV's retrievable column;
+      handled by CSV-level pending filtering (see main.cli.overrides), not by
+      per-work.json checks, so ``check_work_status`` treats it as a no-op.
 
     Returns:
         Resume mode string

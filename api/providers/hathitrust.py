@@ -204,7 +204,10 @@ def download_hathitrust_work(
     if isinstance(bib, dict):
         save_json(bib, output_folder, f"hathi_{(rec_id or htid or 'item')}_metadata")
 
-    # Fetch first page image if possible
+    # Fetch first page image if possible. Only a downloaded page counts as
+    # success; saving the bibliographic metadata alone is not retrievable
+    # content, so the work must not be marked "completed" on metadata alone.
+    downloaded = False
     key = _api_key()
     if key and htid:
         params = {
@@ -215,7 +218,11 @@ def download_hathitrust_work(
             "apikey": key,
         }
         page_data = make_request(DATA_API_URL, params=params)
-        if isinstance(page_data, dict) and page_data.get("url"):
-            download_file(page_data["url"], output_folder, f"hathi_{htid}_p1")
+        if (
+            isinstance(page_data, dict)
+            and page_data.get("url")
+            and download_file(page_data["url"], output_folder, f"hathi_{htid}_p1")
+        ):
+            downloaded = True
 
-    return True
+    return downloaded

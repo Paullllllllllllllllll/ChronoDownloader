@@ -187,7 +187,8 @@ def download_wellcome_work(
                 logger.warning("Failed to download image from %s", svc)
         except Exception:
             logger.exception("Error downloading Wellcome image from %s", svc)
-    # Attempt thumbnail download as an additional/fallback object
+    # Attempt thumbnail download as a bonus object only. A thumbnail alone is
+    # not real content, so it must not mark the work as successfully retrieved.
     try:
         thumb_url = resolve_item_field(item_data, "thumbnail")
         if not thumb_url and work_id:
@@ -195,10 +196,10 @@ def download_wellcome_work(
             work = make_request(f"{CATALOGUE_WORKS_URL}/{work_id}")
             if isinstance(work, dict):
                 thumb_url = (work.get("thumbnail") or {}).get("url")
-        if thumb_url and download_file(
-            thumb_url, output_folder, f"wellcome_{work_id or 'work'}_thumbnail.jpg"
-        ):
-            ok_any = True
+        if thumb_url:
+            download_file(
+                thumb_url, output_folder, f"wellcome_{work_id or 'work'}_thumbnail.jpg"
+            )
     except Exception:
         logger.exception(
             "Wellcome: error downloading thumbnail for %s", work_id or title

@@ -295,6 +295,46 @@ class TestRunSequential:
         "main.orchestration.execution.is_direct_download_enabled", return_value=False
     )
     @patch("main.orchestration.execution.pipeline")
+    def test_marks_deferred_in_csv(
+        self, mock_pipeline: MagicMock, mock_direct: MagicMock
+    ) -> None:
+        """BUG-3: a quota-deferred work is marked deferred (not left silent)."""
+        import logging
+
+        mock_pipeline.process_work.return_value = {
+            "status": "deferred",
+            "item_url": "",
+            "provider": "IA",
+        }
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book A"],
+                "main_author": ["Author"],
+                "entry_id": ["E001"],
+            }
+        )
+        with (
+            patch(
+                "main.orchestration.execution.mark_deferred", return_value=True
+            ) as mock_def,
+            patch("main.orchestration.execution.mark_success") as mock_succ,
+            patch("main.orchestration.execution.mark_failed") as mock_fail,
+        ):
+            _run_sequential(
+                works_df,
+                "/output",
+                False,
+                logging.getLogger("test"),
+                csv_path="/path/to/csv",
+            )
+        mock_def.assert_called_once()
+        mock_succ.assert_not_called()
+        mock_fail.assert_not_called()
+
+    @patch(
+        "main.orchestration.execution.is_direct_download_enabled", return_value=False
+    )
+    @patch("main.orchestration.execution.pipeline")
     @patch("main.orchestration.execution.budget_exhausted", return_value=True)
     def test_stops_on_budget_exhausted(
         self, mock_budget: MagicMock, mock_pipeline: MagicMock, mock_direct: MagicMock

@@ -225,12 +225,26 @@ class TestDeferredQueueSingleton:
         self, mock_config: dict[str, Any]
     ) -> Generator[None, None, None]:
         """Reset singletons before and after each test."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
 
         DeferredQueue._instance = None
         StateManager._instance = None
-        yield
+        # Redirect state persistence to a throwaway file so tests never read or
+        # clobber the real ~/.chronodownloader/.downloader_state.json (these
+        # class fixtures shadow conftest's isolating reset_singletons).
+        with (
+            tempfile.TemporaryDirectory() as _state_dir,
+            patch(
+                "main.state.store.resolve_state_file_path",
+                return_value=Path(_state_dir) / "state.json",
+            ),
+        ):
+            yield
         DeferredQueue._instance = None
         StateManager._instance = None
 
@@ -269,12 +283,26 @@ class TestDeferredQueueOperations:
         self, mock_config: dict[str, Any], temp_dir: str
     ) -> Generator[None, None, None]:
         """Reset singletons before and after each test."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
 
         DeferredQueue._instance = None
         StateManager._instance = None
-        yield
+        # Redirect state persistence to a throwaway file so tests never read or
+        # clobber the real ~/.chronodownloader/.downloader_state.json (these
+        # class fixtures shadow conftest's isolating reset_singletons).
+        with (
+            tempfile.TemporaryDirectory() as _state_dir,
+            patch(
+                "main.state.store.resolve_state_file_path",
+                return_value=Path(_state_dir) / "state.json",
+            ),
+        ):
+            yield
         DeferredQueue._instance = None
         StateManager._instance = None
 
@@ -335,6 +363,39 @@ class TestDeferredQueueOperations:
         )
 
         assert item1.id == item2.id
+        assert len(queue) == 1
+
+    def test_add_dedupes_against_retrying_item(self, queue: Any) -> None:
+        """add must dedupe against a 'retrying' item, not only 'pending' ones.
+
+        An eager retry moves an item to 'retrying'; re-adding the same
+        entry_id + provider must return that item rather than a duplicate.
+        """
+        item1 = queue.add(
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+        )
+        queue.mark_retrying(item1.id)
+        assert queue.get(item1.id).status == "retrying"
+
+        item2 = queue.add(
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+        )
+
+        assert item2.id == item1.id
         assert len(queue) == 1
 
     def test_add_with_reset_time(self, queue: Any) -> None:
@@ -411,12 +472,26 @@ class TestDeferredQueueStatusOperations:
         self, mock_config: dict[str, Any]
     ) -> Generator[None, None, None]:
         """Reset singletons."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
 
         DeferredQueue._instance = None
         StateManager._instance = None
-        yield
+        # Redirect state persistence to a throwaway file so tests never read or
+        # clobber the real ~/.chronodownloader/.downloader_state.json (these
+        # class fixtures shadow conftest's isolating reset_singletons).
+        with (
+            tempfile.TemporaryDirectory() as _state_dir,
+            patch(
+                "main.state.store.resolve_state_file_path",
+                return_value=Path(_state_dir) / "state.json",
+            ),
+        ):
+            yield
         DeferredQueue._instance = None
         StateManager._instance = None
 
@@ -849,12 +924,26 @@ class TestDeferredQueueIteration:
         self, mock_config: dict[str, Any], temp_dir: str
     ) -> Generator[None, None, None]:
         """Reset singletons."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
 
         DeferredQueue._instance = None
         StateManager._instance = None
-        yield
+        # Redirect state persistence to a throwaway file so tests never read or
+        # clobber the real ~/.chronodownloader/.downloader_state.json (these
+        # class fixtures shadow conftest's isolating reset_singletons).
+        with (
+            tempfile.TemporaryDirectory() as _state_dir,
+            patch(
+                "main.state.store.resolve_state_file_path",
+                return_value=Path(_state_dir) / "state.json",
+            ),
+        ):
+            yield
         DeferredQueue._instance = None
         StateManager._instance = None
 
@@ -916,12 +1005,26 @@ class TestGetDeferredQueue:
         self, mock_config: dict[str, Any]
     ) -> Generator[None, None, None]:
         """Reset singletons."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
         from main.state.deferred import DeferredQueue
         from main.state.store import StateManager
 
         DeferredQueue._instance = None
         StateManager._instance = None
-        yield
+        # Redirect state persistence to a throwaway file so tests never read or
+        # clobber the real ~/.chronodownloader/.downloader_state.json (these
+        # class fixtures shadow conftest's isolating reset_singletons).
+        with (
+            tempfile.TemporaryDirectory() as _state_dir,
+            patch(
+                "main.state.store.resolve_state_file_path",
+                return_value=Path(_state_dir) / "state.json",
+            ),
+        ):
+            yield
         DeferredQueue._instance = None
         StateManager._instance = None
 

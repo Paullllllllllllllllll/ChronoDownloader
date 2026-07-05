@@ -61,9 +61,15 @@ def search_internet_archive(
         for item in data["response"]["docs"]:
             # Build a normalized SearchResult, keep raw for downloads
             ia_identifier = item.get("identifier")
+            # The IA API returns creator as either a single string or a list;
+            # joining a bare string would split it into individual characters.
+            creator_val = item.get("creator", ["N/A"])
+            creator_str = (
+                creator_val if isinstance(creator_val, str) else ", ".join(creator_val)
+            )
             raw = {
                 "title": item.get("title", "N/A"),
-                "creator": ", ".join(item.get("creator", ["N/A"])),
+                "creator": creator_str,
                 "identifier": ia_identifier,
                 "item_url": f"https://archive.org/details/{ia_identifier}"
                 if ia_identifier
@@ -105,8 +111,11 @@ def download_ia_work(
 
     save_json(metadata, output_folder, f"ia_{identifier}_metadata")
 
-    any_object_downloaded = False
     primary_obtained = False
+    # Real, retrievable content (primary files, manifest renderings, or IIIF
+    # page images). Thumbnails and covers are bonus objects and must NOT by
+    # themselves mark the work complete.
+    content_downloaded = False
     prefer_pdf = prefer_pdf_over_images()
 
     # We'll try IIIF as a fallback even when prefer_pdf is true
@@ -156,13 +165,12 @@ def download_ia_work(
             return ok, got_primary
 
         if isinstance(files, list):
-            ok, got_primary = _download_from_list(files)
-            if ok:
-                any_object_downloaded = True
+            _ok, got_primary = _download_from_list(files)
             if got_primary:
                 primary_obtained = True
+                content_downloaded = True
 
-            # Try thumbnails/covers as secondary content
+            # Try thumbnails/covers as secondary (bonus) content only
             if not primary_obtained:
                 thumb_got = False
                 for f in files:
@@ -173,7 +181,6 @@ def download_ia_work(
                         if download_file(
                             thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg"
                         ):
-                            any_object_downloaded = True
                             thumb_got = True
                             break
                 if not thumb_got:
@@ -188,17 +195,15 @@ def download_ia_work(
                                 output_folder,
                                 f"ia_{identifier}_thumbnail.jpg",
                             ):
-                                any_object_downloaded = True
                                 break
         elif isinstance(files, dict):
             # Backward compatibility if dict mapping name -> info
             for fname, finfo in files.items():
                 if isinstance(finfo, dict) and finfo.get("format") == "Thumbnail":
                     thumb_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(fname)}"
-                    if download_file(
+                    download_file(
                         thumb_url, output_folder, f"ia_{identifier}_thumbnail.jpg"
-                    ):
-                        any_object_downloaded = True
+                    )
                     break
     except Exception:
         logger.exception("IA: error while processing file list for %s", identifier)
@@ -236,14 +241,10 @@ def download_ia_work(
 
             # Try to download manifest-level renderings (PDF/EPUB) if present
             try:
-                renders = download_iiif_renderings(
-                    iiif_manifest_data,
-                    output_folder,
-                    filename_prefix=f"ia_{identifier}_",
-                )
+                renders = download_iiif_renderings(iiif_manifest_data, output_folder)
                 if renders > 0:
-                    any_object_downloaded = True
                     primary_obtained = True
+                    content_downloaded = True
                     logger.info(
                         "IA: Downloaded %d rendering(s) from IIIF manifest", renders
                     )
@@ -279,7 +280,7 @@ def download_ia_work(
                         break
                     fname = f"ia_{identifier}_p{idx:05d}.jpg"
                     if download_one_from_service(svc, output_folder, fname):
-                        any_object_downloaded = True
+                        content_downloaded = True
         except Exception:
             logger.exception(
                 "IA: error while downloading IIIF images for %s", identifier
@@ -291,11 +292,10 @@ def download_ia_work(
             cover_image_url = metadata["misc"]["image"]
             if not cover_image_url.startswith("http"):
                 cover_image_url = f"https://archive.org{cover_image_url}"
-            if download_file(
-                cover_image_url, output_folder, f"ia_{identifier}_cover.jpg"
-            ):
-                any_object_downloaded = True
+            download_file(cover_image_url, output_folder, f"ia_{identifier}_cover.jpg")
     except Exception:
         logger.exception("IA: error while downloading cover for %s", identifier)
 
-    return any_object_downloaded
+    # A thumbnail or cover alone (any_object_downloaded without
+    # content_downloaded) is not enough to consider the work retrieved.
+    return content_downloaded

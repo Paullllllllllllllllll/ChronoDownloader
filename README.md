@@ -1,4 +1,4 @@
-# ChronoDownloader v1.8.0
+# ChronoDownloader v1.9.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -523,6 +523,7 @@ quota management. Each provider key maps to a settings object:
       "prefer": "pdf",
       "allow_drm": false,
       "max_files": 3,
+      "max_pages": 50,
       "network": {
         "delay_ms": 200,
         "jitter_ms": 100,
@@ -572,8 +573,10 @@ breaker and set the threshold to 2--3 with a cooldown of
 **Provider-specific limits**:
 
 - `max_pages` / `max_images`: maximum page images per work
-  (0 = unlimited)
-- `max_files`: maximum files per work
+  (0 = unlimited). For Google Books, `max_pages` bounds the
+  page-by-page image extraction fallback (default 50).
+- `max_files`: maximum files per work (for Google Books, the
+  direct PDF/EPUB download cap, distinct from `max_pages`)
 - `free_only`: only download free/public domain works
 - `prefer`: preferred format (`pdf` or `images`)
 - `allow_drm`: whether to allow DRM-protected content
@@ -675,7 +678,6 @@ To adjust for slow providers, increase `delay_ms` and
     ],
     "min_title_score": 85,
     "creator_weight": 0.2,
-    "year_tolerance": 2,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",
     "keep_non_selected_metadata": true
@@ -696,7 +698,6 @@ To adjust for slow providers, increase `delay_ms` and
   modern English collections
 - `creator_weight`: weight of creator match in scoring
   (0.0--1.0)
-- `year_tolerance`: reserved for future date-based matching
 - `max_candidates_per_provider`: limit search results per
   provider
 - `download_strategy`: `selected_only` or `all`
@@ -1079,6 +1080,29 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.9.0** (5 July 2026) -- Bug-fix and quality release from a full code audit.
+  Headline fix: providers can no longer report success with zero downloaded
+  content. HathiTrust, Gallica, MDZ, British Library, BNE, DDB, Polona, and LOC
+  previously returned `True` on metadata-only or failed downloads, permanently
+  marking empty works "completed" in the ledger; success now reflects actual
+  downloads, and thumbnail/cover-only results (Internet Archive, Google Books,
+  Wellcome) no longer count as completed either. Further fixes: single-string
+  Internet Archive creators are no longer character-split in ranking; parallel
+  mode now leaves direct-IIIF "partial" results pending (matching sequential
+  mode) and sequential mode now marks deferred works in the CSV; deferred-queue
+  retries respect the fast-API quota guard and reuse the original work naming
+  context; the deferred queue dedupes against "retrying" items; malformed
+  `Content-Length` headers no longer crash downloads; Google Books page
+  extraction uses its own `max_pages` setting (default 50) instead of
+  `max_files`. Improvements: `include_creator_in_work_dir` and the
+  `direct_iiif` link-column settings are now honored; `load_enabled_apis`
+  falls back to `config.example.json` like the config loader; quota-deferred
+  primaries now try ranked fallbacks before deferring; parallel fallback uses
+  the hierarchy-ordered provider list; interactive mode accepts
+  `direct_link`-only CSVs and reports single-work failures honestly; the dead
+  background-scheduler daemon and the unused `year_tolerance`/`queue_size`
+  config keys were removed; long Windows paths trigger an advisory warning.
+  Full test suite green (1,065 tests); ruff and mypy clean.
 - **v1.8.0** (4 July 2026) -- Dependency sweep: raise the urllib3 floor to >=2.7 and
   refresh the locked toolchain (6 packages upgraded). Full test suite green (1,065
   tests).

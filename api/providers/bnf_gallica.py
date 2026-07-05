@@ -130,10 +130,9 @@ def download_gallica_work(
     save_json(manifest, output_folder, f"gallica_{ark_id}_manifest")
 
     # Prefer manifest-level PDF/EPUB renderings when available
+    renders = 0
     try:
-        renders = download_iiif_renderings(
-            manifest, output_folder, filename_prefix=f"gallica_{ark_id}_"
-        )
+        renders = download_iiif_renderings(manifest, output_folder)
         if renders > 0 and prefer_pdf_over_images():
             logger.info(
                 "Gallica: downloaded %d rendering(s); skipping image downloads "
@@ -151,7 +150,7 @@ def download_gallica_work(
 
     if not image_service_bases:
         logger.info("No IIIF image services found in Gallica manifest for %s", ark_id)
-        return True
+        return renders > 0
 
     # Use shared helper to try full-size image candidates per canvas
 
