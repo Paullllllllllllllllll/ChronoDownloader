@@ -96,8 +96,7 @@ def main() -> None:
         # inserted --cli here or it would paradoxically land in the
         # interactive wizard.
         if "--cli" not in sys.argv and (
-            "--non-interactive" in sys.argv
-            or _looks_like_cli_invocation(sys.argv[1:])
+            "--non-interactive" in sys.argv or _looks_like_cli_invocation(sys.argv[1:])
         ):
             sys.argv.insert(1, "--cli")
 
