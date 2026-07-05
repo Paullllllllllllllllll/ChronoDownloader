@@ -1,4 +1,4 @@
-# ChronoDownloader v1.9.0
+# ChronoDownloader v1.9.1
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1082,6 +1082,15 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.9.1** (5 July 2026) -- Follow-up patch to v1.9.0. The
+  `include_creator_in_work_dir` and `include_year_in_work_dir` naming options,
+  made effective in v1.9.0, are now opt-in (default `false`) across code
+  defaults, `config.example.json`, and the staging config: with the previous
+  default of `true`, fresh runs would have produced creator-/year-suffixed
+  work directories that resume and skip-existing checks could not match
+  against corpora downloaded earlier. README documents the caveat. Also
+  absorbs a pre-existing formatting reflow in `main/cli/entry.py` and syncs
+  the `uv.lock` self-version. Full test suite green (1,065 tests).
 - **v1.9.0** (5 July 2026) -- Bug-fix and quality release from a full code audit.
   Headline fix: providers can no longer report success with zero downloaded
   content. HathiTrust, Gallica, MDZ, British Library, BNE, DDB, Polona, and LOC
@@ -1097,9 +1106,7 @@ v1.0.0 do not exist.
   `Content-Length` headers no longer crash downloads; Google Books page
   extraction uses its own `max_pages` setting (default 50) instead of
   `max_files`. Improvements: `include_creator_in_work_dir` and the
-  `direct_iiif` link-column settings are now honored (the naming options are
-  opt-in, default off, to keep existing corpus directory names stable);
-  `load_enabled_apis`
+  `direct_iiif` link-column settings are now honored; `load_enabled_apis`
   falls back to `config.example.json` like the config loader; quota-deferred
   primaries now try ranked fallbacks before deferring; parallel fallback uses
   the hierarchy-ordered provider list; interactive mode accepts
