@@ -273,8 +273,8 @@
     "keep_non_selected_metadata": false
   },
   "naming": {
-    "include_creator_in_work_dir": true,
-    "include_year_in_work_dir": true,
+    "include_creator_in_work_dir": false,
+    "include_year_in_work_dir": false,
     "title_slug_max_len": 80
   },
   "download_limits": {

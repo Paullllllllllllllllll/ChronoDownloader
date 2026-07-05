@@ -30,8 +30,8 @@ def get_naming_config() -> dict[str, Any]:
     cfg = get_config()
     nm = dict(cfg.get("naming", {}) or {})
 
-    nm.setdefault("include_creator_in_work_dir", True)
-    nm.setdefault("include_year_in_work_dir", True)
+    nm.setdefault("include_creator_in_work_dir", False)
+    nm.setdefault("include_year_in_work_dir", False)
     nm.setdefault("title_slug_max_len", 80)
 
     return nm
@@ -62,8 +62,10 @@ def compute_work_dir(
     """Compute the work directory path and name.
 
     Honors the ``naming.include_creator_in_work_dir`` and
-    ``naming.include_year_in_work_dir`` options: when enabled and the value is
-    supplied, the creator and/or year are folded into the directory name.
+    ``naming.include_year_in_work_dir`` options (both opt-in, default off to
+    keep directory names stable across corpora downloaded before v1.9.0):
+    when enabled and the value is supplied, the creator and/or year are
+    folded into the directory name.
 
     Args:
         base_output_dir: Base directory for downloaded works
@@ -82,8 +84,8 @@ def compute_work_dir(
         max_len=int(naming_cfg.get("title_slug_max_len", 80)),
         creator=creator,
         year=year,
-        include_creator=bool(naming_cfg.get("include_creator_in_work_dir", True)),
-        include_year=bool(naming_cfg.get("include_year_in_work_dir", True)),
+        include_creator=bool(naming_cfg.get("include_creator_in_work_dir", False)),
+        include_year=bool(naming_cfg.get("include_year_in_work_dir", False)),
     )
     work_dir = os.path.join(base_output_dir, work_dir_name)
     warn_if_path_too_long(os.path.abspath(work_dir), entry_id or title)

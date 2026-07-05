@@ -197,8 +197,8 @@ def build_work_directory_name(
     max_len: int = 80,
     creator: str | None = None,
     year: str | int | None = None,
-    include_creator: bool = True,
-    include_year: bool = True,
+    include_creator: bool = False,
+    include_year: bool = False,
 ) -> str:
     """Build a standardized work directory name.
 

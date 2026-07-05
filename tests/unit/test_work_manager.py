@@ -42,8 +42,8 @@ class TestGetNamingConfig:
         with patch("main.data.work.get_config", return_value=config):
             naming = get_naming_config()
 
-            assert naming["include_creator_in_work_dir"] is True
-            assert naming["include_year_in_work_dir"] is True
+            assert naming["include_creator_in_work_dir"] is False
+            assert naming["include_year_in_work_dir"] is False
             assert naming["title_slug_max_len"] == 80
 
     def test_handles_missing_section(self) -> None:

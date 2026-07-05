@@ -713,15 +713,17 @@ sequentially.
 ```json
 {
   "naming": {
-    "include_creator_in_work_dir": true,
-    "include_year_in_work_dir": true,
+    "include_creator_in_work_dir": false,
+    "include_year_in_work_dir": false,
     "title_slug_max_len": 80
   }
 }
 ```
 
-- `include_creator_in_work_dir`: include creator in folder name
-- `include_year_in_work_dir`: include publication year
+- `include_creator_in_work_dir`: include creator in folder name (opt-in;
+  enabling it changes work-directory names for new runs, so directories of
+  works downloaded earlier will not be matched by resume/skip-existing)
+- `include_year_in_work_dir`: include publication year (opt-in; same caveat)
 - `title_slug_max_len`: maximum title slug length
 
 ### 8. Direct IIIF Settings
@@ -1095,7 +1097,9 @@ v1.0.0 do not exist.
   `Content-Length` headers no longer crash downloads; Google Books page
   extraction uses its own `max_pages` setting (default 50) instead of
   `max_files`. Improvements: `include_creator_in_work_dir` and the
-  `direct_iiif` link-column settings are now honored; `load_enabled_apis`
+  `direct_iiif` link-column settings are now honored (the naming options are
+  opt-in, default off, to keep existing corpus directory names stable);
+  `load_enabled_apis`
   falls back to `config.example.json` like the config loader; quota-deferred
   primaries now try ranked fallbacks before deferring; parallel fallback uses
   the hierarchy-ordered provider list; interactive mode accepts
