@@ -62,3 +62,6 @@ sampled_books.csv
 tests/staging/output/
 tests/staging/.staging_state.json
 api_keys.json
+
+# Local backup archives (bundles, snapshots; kept locally, not versioned)
+backup/
