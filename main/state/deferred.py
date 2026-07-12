@@ -275,11 +275,16 @@ class DeferredQueue:
             Created DeferredItem
         """
         with self._data_lock:
-            # Check for duplicate (same entry_id and provider)
+            # Check for duplicate (same entry_id, provider, and source item).
+            # An empty entry_id never dedupes: distinct works may share the
+            # default entry_id (None or "W0001"), so matching on it alone
+            # would silently drop the second work.
             for existing in self._items.values():
                 if (
-                    existing.entry_id == entry_id
+                    entry_id
+                    and existing.entry_id == entry_id
                     and existing.provider_key == provider_key
+                    and existing.source_id == source_id
                     and existing.status in ("pending", "retrying")
                 ):
                     logger.debug(

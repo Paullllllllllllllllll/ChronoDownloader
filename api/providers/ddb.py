@@ -83,9 +83,12 @@ def search_ddb(
         logger.warning("DDB API key not configured. Skipping DDB search.")
         return []
 
-    query_parts = [f'"{title}"']
+    # Strip embedded double quotes so they cannot terminate the quoted phrase.
+    safe_title = title.replace('"', " ")
+    query_parts = [f'"{safe_title}"']
     if creator:
-        query_parts.append(f'AND creator:"{creator}"')
+        safe_creator = creator.replace('"', " ")
+        query_parts.append(f'AND creator:"{safe_creator}"')
     query = " ".join(query_parts)
 
     params = {

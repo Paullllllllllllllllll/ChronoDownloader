@@ -59,12 +59,15 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
         list_providers()
         return EXIT_OK
 
+    # Resolve the effective config path once: an explicit --config wins,
+    # then a pre-set CHRONO_CONFIG_PATH, then the default config.json.
+    config_path = args.config or os.environ.get("CHRONO_CONFIG_PATH") or "config.json"
     with contextlib.suppress(Exception):
-        os.environ["CHRONO_CONFIG_PATH"] = args.config
+        os.environ["CHRONO_CONFIG_PATH"] = config_path
 
     config = _apply_runtime_config_overrides(args, config, logger)
 
-    providers = pipeline.load_enabled_apis(args.config)
+    providers = pipeline.load_enabled_apis(config_path)
     providers = _apply_provider_cli_overrides(args, providers, logger)
     providers = pipeline.filter_enabled_providers_for_keys(providers)
     pipeline.ENABLED_APIS = providers
@@ -72,7 +75,7 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if not providers:
         logger.warning(
             "No providers are enabled. Update %s to enable providers.",
-            args.config,
+            config_path,
         )
         return EXIT_USAGE
 

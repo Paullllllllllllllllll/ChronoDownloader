@@ -413,6 +413,32 @@ class TestQuotaManagerHasQuota:
         with patch("main.state.quota.get_provider_setting", return_value=None):
             assert manager.has_quota("test_provider") is False
 
+    def test_has_quota_true_with_legacy_daily_limit(self) -> None:
+        """has_quota honors a legacy daily_download_limit without a quota block."""
+        from main.state.quota import QuotaManager
+
+        manager = QuotaManager()
+
+        def fake_setting(provider_key: str, setting: str, default: Any = None) -> Any:
+            if setting == "daily_download_limit":
+                return 100
+            return default
+
+        with patch("main.state.quota.get_provider_setting", side_effect=fake_setting):
+            assert manager.has_quota("annas_archive") is True
+
+    def test_has_quota_false_with_empty_quota_block_and_no_legacy(self) -> None:
+        """An absent quota block without legacy limits stays quota-free."""
+        from main.state.quota import QuotaManager
+
+        manager = QuotaManager()
+
+        def fake_setting(provider_key: str, setting: str, default: Any = None) -> Any:
+            return default
+
+        with patch("main.state.quota.get_provider_setting", side_effect=fake_setting):
+            assert manager.has_quota("annas_archive") is False
+
     def test_get_quota_limited_providers(self) -> None:
         """get_quota_limited_providers returns providers with quotas."""
         from main.state.quota import QuotaManager

@@ -13,6 +13,7 @@ Expected CSV columns (from bib_sampling.ipynb):
 from __future__ import annotations
 
 import logging
+import numbers
 import os
 import shutil
 import threading
@@ -59,6 +60,14 @@ def _parse_status(val: object) -> str:
         return "pending"
     if isinstance(val, bool):
         return "completed" if val else "failed"
+    if isinstance(val, numbers.Real):
+        # Numeric retrievable columns (pandas int64/float64): 1 -> completed,
+        # 0 -> failed, anything else -> pending.
+        if float(val) == 1.0:
+            return "completed"
+        if float(val) == 0.0:
+            return "failed"
+        return "pending"
     if isinstance(val, str):
         lowered = val.strip().lower()
         if lowered in _TRUTHY:

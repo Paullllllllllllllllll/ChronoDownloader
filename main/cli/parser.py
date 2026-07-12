@@ -73,8 +73,9 @@ Examples:
 
     parser.add_argument(
         "--config",
-        default="config.json",
-        help="Path to JSON config file to enable/disable providers.",
+        default=None,
+        help="Path to JSON config file to enable/disable providers "
+        "(defaults to $CHRONO_CONFIG_PATH or config.json).",
     )
 
     parser.add_argument(

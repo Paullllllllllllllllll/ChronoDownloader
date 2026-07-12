@@ -399,6 +399,60 @@ class TestDownloadFunctions:
             assert result is False
 
 
+class TestQuotedQueryEscaping:
+    """Embedded double quotes must not break quoted query phrases."""
+
+    def test_ia_strips_quotes_from_title_and_creator(self) -> None:
+        with patch(
+            "api.providers.internet_archive.make_request", return_value=None
+        ) as mock:
+            from api.providers.internet_archive import search_internet_archive
+
+            search_internet_archive('Der "wahre" Koch', creator='Jean "le" Bon')
+
+            q = mock.call_args[1].get("params", {}).get("q", "")
+            assert 'title:("Der  wahre  Koch")' in q
+            assert 'creator:("Jean  le  Bon")' in q
+
+    def test_europeana_strips_quotes_from_title_and_creator(self) -> None:
+        with (
+            patch("api.providers.europeana._api_key", return_value="key"),
+            patch("api.providers.europeana.make_request", return_value=None) as mock,
+        ):
+            from api.providers.europeana import search_europeana
+
+            search_europeana('Der "wahre" Koch', creator='Jean "le" Bon')
+
+            query = mock.call_args[1].get("params", {}).get("query", "")
+            assert 'title:"Der  wahre  Koch"' in query
+            assert 'who:"Jean  le  Bon"' in query
+
+    def test_ddb_strips_quotes_from_title_and_creator(self) -> None:
+        with (
+            patch("api.providers.ddb._api_key", return_value="key"),
+            patch("api.providers.ddb.make_request", return_value=None) as mock,
+        ):
+            from api.providers.ddb import search_ddb
+
+            search_ddb('Der "wahre" Koch', creator='Jean "le" Bon')
+
+            query = mock.call_args[1].get("params", {}).get("query", "")
+            assert '"Der  wahre  Koch"' in query
+            assert 'creator:"Jean  le  Bon"' in query
+
+    def test_google_books_strips_quotes_in_strict_variant(self) -> None:
+        with patch(
+            "api.providers.google_books.make_request", return_value=None
+        ) as mock:
+            from api.providers.google_books import search_google_books
+
+            search_google_books('Der "wahre" Koch', creator='Jean "le" Bon')
+
+            first_q = mock.call_args_list[0][1].get("params", {}).get("q", "")
+            assert 'intitle:"Der  wahre  Koch"' in first_q
+            assert 'inauthor:"Jean  le  Bon"' in first_q
+
+
 class TestSearchResultScoring:
     """Tests for search result scoring integration."""
 

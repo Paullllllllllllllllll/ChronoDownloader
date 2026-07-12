@@ -98,7 +98,12 @@ def _provider_uses_quota_backed_api(pkey: str) -> bool:
     if pkey not in QUOTA_LIMITED_PROVIDERS:
         return False
     if pkey == "annas_archive":
-        return bool(os.environ.get("ANNAS_ARCHIVE_API_KEY"))
+        # Lazy import keeps the provider module optional at load time. The
+        # provider resolves its key from a (possibly remapped) env var or
+        # the config, so ask it rather than probing a hardcoded env var.
+        from api.providers.annas_archive import is_api_backed
+
+        return is_api_backed()
     return False
 
 

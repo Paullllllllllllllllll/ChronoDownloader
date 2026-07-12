@@ -71,9 +71,12 @@ def search_europeana(
     if not key:
         logger.warning("Europeana API key not configured. Skipping search.")
         return []
-    query_parts = [f'title:"{title}"']
+    # Strip embedded double quotes so they cannot terminate the quoted phrase.
+    safe_title = title.replace('"', " ")
+    query_parts = [f'title:"{safe_title}"']
     if creator:
-        query_parts.append(f'AND who:"{creator}"')
+        safe_creator = creator.replace('"', " ")
+        query_parts.append(f'AND who:"{safe_creator}"')
     query = " ".join(query_parts)
     params = {
         "wskey": key,

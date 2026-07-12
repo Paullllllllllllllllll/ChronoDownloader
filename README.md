@@ -1,4 +1,4 @@
-# ChronoDownloader v1.9.1
+# ChronoDownloader v1.10.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1082,6 +1082,23 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.10.0** (12 July 2026) -- Bug-fix release from an automated audit, closing
+  seven defects. Anna's Archive quota tracking now activates whenever the
+  provider is API-backed (config-based and remapped env-var keys included)
+  instead of probing only the hardcoded `ANNAS_ARCHIVE_API_KEY` variable.
+  Parallel-mode metadata writes no longer overwrite a candidate's
+  `search_result` JSON after a worker-thread counter reset; `save_json` bumps
+  the sequence until the path is free. `--config` defaults to the documented
+  `CHRONO_CONFIG_PATH` environment variable before falling back to
+  `config.json`, so CLI runs no longer clobber the override or load providers
+  from the wrong file. Numeric `retrievable` CSV values (int64/float64 1/0)
+  are classified completed/failed instead of pending, restoring resume
+  behavior. The deferred queue no longer collapses distinct works that share
+  an empty or default `entry_id`; deduplication now also matches on
+  `source_id`. `QuotaManager.has_quota` honors legacy `daily_download_limit`
+  configs whose `quota` block is absent. Internet Archive, Europeana, DDB, and
+  Google Books strip embedded double quotes from titles and creators before
+  building quoted query phrases. Nineteen regression tests added (1,084 total).
 - **v1.9.1** (5 July 2026) -- Follow-up patch to v1.9.0. The
   `include_creator_in_work_dir` and `include_year_in_work_dir` naming options,
   made effective in v1.9.0, are now opt-in (default `false`) across code

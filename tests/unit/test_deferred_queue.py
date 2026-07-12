@@ -365,6 +365,60 @@ class TestDeferredQueueOperations:
         assert item1.id == item2.id
         assert len(queue) == 1
 
+    def test_add_keeps_distinct_works_without_entry_id(self, queue: Any) -> None:
+        """Distinct works deferred with entry_id=None must both be queued."""
+        item1 = queue.add(
+            title="Le Viandier",
+            creator=None,
+            entry_id=None,
+            provider_key="annas_archive",
+            provider_name="Anna's Archive",
+            source_id="md5aaa",
+            work_dir="/w1",
+            base_output_dir="/o",
+        )
+
+        item2 = queue.add(
+            title="Opera di Scappi",
+            creator=None,
+            entry_id=None,
+            provider_key="annas_archive",
+            provider_name="Anna's Archive",
+            source_id="md5bbb",
+            work_dir="/w2",
+            base_output_dir="/o",
+        )
+
+        assert item1.id != item2.id
+        assert len(queue) == 2
+
+    def test_add_keeps_distinct_sources_with_shared_entry_id(self, queue: Any) -> None:
+        """Works sharing a default entry_id but differing source_ids both queue."""
+        item1 = queue.add(
+            title="Le Viandier",
+            creator=None,
+            entry_id="W0001",
+            provider_key="annas_archive",
+            provider_name="Anna's Archive",
+            source_id="md5aaa",
+            work_dir="/w1",
+            base_output_dir="/o",
+        )
+
+        item2 = queue.add(
+            title="Opera di Scappi",
+            creator=None,
+            entry_id="W0001",
+            provider_key="annas_archive",
+            provider_name="Anna's Archive",
+            source_id="md5bbb",
+            work_dir="/w2",
+            base_output_dir="/o",
+        )
+
+        assert item1.id != item2.id
+        assert len(queue) == 2
+
     def test_add_dedupes_against_retrying_item(self, queue: Any) -> None:
         """add must dedupe against a 'retrying' item, not only 'pending' ones.
 

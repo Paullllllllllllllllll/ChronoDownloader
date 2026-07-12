@@ -40,9 +40,12 @@ def search_internet_archive(
     Returns:
         List of SearchResult objects
     """
-    query_parts = [f'title:("{title}")']
+    # Strip embedded double quotes so they cannot terminate the quoted phrase.
+    safe_title = title.replace('"', " ")
+    query_parts = [f'title:("{safe_title}")']
     if creator:
-        query_parts.append(f'creator:("{creator}")')
+        safe_creator = creator.replace('"', " ")
+        query_parts.append(f'creator:("{safe_creator}")')
     query_parts.append("mediatype:(texts)")
     query = " AND ".join(query_parts)
     params = {

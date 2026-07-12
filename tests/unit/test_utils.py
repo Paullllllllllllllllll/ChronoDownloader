@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from unittest.mock import patch
 
@@ -249,6 +250,33 @@ class TestSaveJson:
             save_json({"data": 123}, output_dir, "test")
 
         assert os.path.exists(os.path.join(output_dir, "metadata"))
+
+    def test_does_not_overwrite_after_counter_reset(self, temp_dir: str) -> None:
+        """A fresh counter (e.g. a parallel worker thread) must not clobber files."""
+        from api.core.context import (
+            reset_counters,
+            set_current_name_stem,
+            set_current_provider,
+        )
+        from api.core.download import save_json
+
+        reset_counters()
+        set_current_name_stem("test_work")
+        set_current_provider("bnf_gallica")
+
+        with patch("api.core.download.include_metadata", return_value=True):
+            first = save_json({"kind": "search_result"}, temp_dir, "search_result")
+            # Simulate the worker thread starting with fresh counters
+            reset_counters()
+            second = save_json({"kind": "iiif_manifest"}, temp_dir, "manifest")
+
+        assert first is not None
+        assert second is not None
+        assert first != second
+        with open(first, encoding="utf-8") as f:
+            assert json.load(f)["kind"] == "search_result"
+        with open(second, encoding="utf-8") as f:
+            assert json.load(f)["kind"] == "iiif_manifest"
 
 
 class TestFilenameFromContentDisposition:

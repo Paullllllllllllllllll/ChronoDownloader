@@ -115,10 +115,13 @@ def search_google_books(
         return make_request(API_BASE_URL, params=_params(q, use_filter))
 
     # Build a few query variants
-    # 1) strict intitle/inauthor with quotes
-    q1 = f'intitle:"{title}"'
+    # 1) strict intitle/inauthor with quotes (strip embedded double quotes so
+    #    they cannot terminate the quoted phrase)
+    safe_title = title.replace('"', " ")
+    q1 = f'intitle:"{safe_title}"'
     if creator:
-        q1 += f'+inauthor:"{creator}"'
+        safe_creator = creator.replace('"', " ")
+        q1 += f'+inauthor:"{safe_creator}"'
     # 2) unquoted fields (helps with punctuation-heavy titles)
     q2 = f"intitle:{title}"
     if creator:

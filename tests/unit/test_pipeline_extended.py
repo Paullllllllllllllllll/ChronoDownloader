@@ -14,6 +14,7 @@ from main.orchestration.pipeline import (
     _compute_selected_source_id,
     _get_selection_config,
     _provider_order,
+    _provider_uses_quota_backed_api,
     _required_provider_envvars,
     _run_download_with_fallback,
     execute_download,
@@ -225,6 +226,62 @@ class TestFilterEnabledProvidersForKeysExtended:
             p = _make_provider_tuple("europeana", "Europeana")
             result = filter_enabled_providers_for_keys([p])
             assert len(result) == 0
+
+
+# ============================================================================
+# _provider_uses_quota_backed_api
+# ============================================================================
+
+
+class TestProviderUsesQuotaBackedApi:
+    """Tests for quota-backed API credential detection."""
+
+    def test_false_for_non_quota_provider(self) -> None:
+        assert _provider_uses_quota_backed_api("mdz") is False
+
+    def test_false_without_any_key(self, temp_dir: str) -> None:
+        config_path = os.path.join(temp_dir, "config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}, clear=True):
+            config_module._CONFIG_CACHE = None
+            config_module._API_KEYS_CACHE = None
+            assert _provider_uses_quota_backed_api("annas_archive") is False
+
+    def test_true_with_default_env_key(self, temp_dir: str) -> None:
+        config_path = os.path.join(temp_dir, "config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        env = {"CHRONO_CONFIG_PATH": config_path, "ANNAS_ARCHIVE_API_KEY": "k"}
+        with patch.dict(os.environ, env, clear=True):
+            config_module._CONFIG_CACHE = None
+            config_module._API_KEYS_CACHE = None
+            assert _provider_uses_quota_backed_api("annas_archive") is True
+
+    def test_true_with_config_api_key(self, temp_dir: str) -> None:
+        """A provider_settings.annas_archive.api_key enables quota tracking."""
+        config_path = os.path.join(temp_dir, "config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"provider_settings": {"annas_archive": {"api_key": "SECRET123"}}}, f
+            )
+        with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": config_path}, clear=True):
+            config_module._CONFIG_CACHE = None
+            config_module._API_KEYS_CACHE = None
+            assert _provider_uses_quota_backed_api("annas_archive") is True
+
+    def test_true_with_remapped_env_key(self, temp_dir: str) -> None:
+        """A key under a remapped env-var name enables quota tracking."""
+        config_path = os.path.join(temp_dir, "config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        with open(os.path.join(temp_dir, "api_keys.json"), "w", encoding="utf-8") as f:
+            json.dump({"annas_archive": "MY_AA_KEY"}, f)
+        env = {"CHRONO_CONFIG_PATH": config_path, "MY_AA_KEY": "k"}
+        with patch.dict(os.environ, env, clear=True):
+            config_module._CONFIG_CACHE = None
+            config_module._API_KEYS_CACHE = None
+            assert _provider_uses_quota_backed_api("annas_archive") is True
 
 
 # ============================================================================

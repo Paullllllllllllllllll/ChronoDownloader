@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Generator
 from typing import Any
@@ -60,13 +61,22 @@ class TestCreateCliParser:
         assert args.log_level == "DEBUG"
 
     def test_parser_has_config_option(self) -> None:
-        """Parser has --config option with default."""
+        """Parser has --config option; default None defers to CHRONO_CONFIG_PATH."""
         from main.cli import create_cli_parser
 
         parser = create_cli_parser()
         args = parser.parse_args([])
 
-        assert args.config == "config.json"
+        assert args.config is None
+
+    def test_parser_accepts_explicit_config(self) -> None:
+        """Parser accepts an explicit --config path."""
+        from main.cli import create_cli_parser
+
+        parser = create_cli_parser()
+        args = parser.parse_args(["--config", "custom.json"])
+
+        assert args.config == "custom.json"
 
     def test_parser_has_interactive_flag(self) -> None:
         """Parser has --interactive flag."""
@@ -362,6 +372,52 @@ class TestRunCli:
             mock_pipeline.filter_enabled_providers_for_keys.return_value = []
 
             run_cli(mock_args, mock_config)
+
+    def test_run_cli_honors_chrono_config_path_env(
+        self,
+        mock_args: argparse.Namespace,
+        mock_config: dict[str, Any],
+    ) -> None:
+        """Without --config, run_cli resolves the path via CHRONO_CONFIG_PATH."""
+        from main.cli.dispatch import run_cli
+
+        mock_args.config = None
+
+        with (
+            patch.dict(os.environ, {"CHRONO_CONFIG_PATH": "custom_config.json"}),
+            patch("main.cli.dispatch.pipeline") as mock_pipeline,
+        ):
+            mock_pipeline.load_enabled_apis.return_value = []
+            mock_pipeline.filter_enabled_providers_for_keys.return_value = []
+
+            run_cli(mock_args, mock_config)
+
+            mock_pipeline.load_enabled_apis.assert_called_once_with(
+                "custom_config.json"
+            )
+            assert os.environ["CHRONO_CONFIG_PATH"] == "custom_config.json"
+
+    def test_run_cli_explicit_config_wins_over_env(
+        self,
+        mock_args: argparse.Namespace,
+        mock_config: dict[str, Any],
+    ) -> None:
+        """An explicit --config overrides a pre-set CHRONO_CONFIG_PATH."""
+        from main.cli.dispatch import run_cli
+
+        mock_args.config = "explicit.json"
+
+        with (
+            patch.dict(os.environ, {"CHRONO_CONFIG_PATH": "env_config.json"}),
+            patch("main.cli.dispatch.pipeline") as mock_pipeline,
+        ):
+            mock_pipeline.load_enabled_apis.return_value = []
+            mock_pipeline.filter_enabled_providers_for_keys.return_value = []
+
+            run_cli(mock_args, mock_config)
+
+            mock_pipeline.load_enabled_apis.assert_called_once_with("explicit.json")
+            assert os.environ["CHRONO_CONFIG_PATH"] == "explicit.json"
 
     def test_run_cli_handles_missing_csv(
         self, mock_args: argparse.Namespace, mock_config: dict[str, Any], temp_dir: str

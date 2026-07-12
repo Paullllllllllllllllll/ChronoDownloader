@@ -693,6 +693,15 @@ def save_json(data: Any, folder_path: str, filename: str) -> str | None:
 
     filepath = os.path.join(meta_dir, sanitize_filename(base) + ".json")
 
+    # Counters are thread-local, so a fresh thread (e.g. a parallel-mode
+    # worker after reset_counters()) can recompute a name already written by
+    # another thread. Bump the sequence until the path is free so earlier
+    # metadata (such as the search_result JSON) is never silently replaced.
+    while os.path.exists(filepath):
+        idx = increment_counter(key)
+        base = f"{stem}_{prov_slug}_{idx}"
+        filepath = os.path.join(meta_dir, sanitize_filename(base) + ".json")
+
     try:
         atomic_write_json(filepath, data)
         logger.info("Saved JSON: %s", filepath)

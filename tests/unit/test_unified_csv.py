@@ -181,6 +181,42 @@ class TestGetPendingWorks:
         assert "E0001" not in entry_ids  # "true" is completed
         assert "E0003" not in entry_ids  # "True" is completed
 
+    def test_handles_numeric_status(self, temp_dir: str) -> None:
+        """Numeric retrievable values (1/0/empty -> float64) resume correctly."""
+        csv_path = os.path.join(temp_dir, "numeric_status.csv")
+        pd.DataFrame(
+            {
+                "entry_id": ["E0001", "E0002", "E0003"],
+                "short_title": ["A", "B", "C"],
+                "retrievable": [1, 0, pd.NA],
+            }
+        ).to_csv(csv_path, index=False)
+
+        df = load_works_csv(csv_path)
+        pending = get_pending_works(df)
+
+        entry_ids = pending[ENTRY_ID_COL].tolist()
+        assert "E0001" not in entry_ids  # 1 is completed
+        assert "E0002" in entry_ids  # 0 is failed, hence retried
+        assert "E0003" in entry_ids  # empty is pending
+        assert get_completed_entry_ids(df) == {"E0001"}
+
+    def test_handles_integer_status_column(self, temp_dir: str) -> None:
+        """A gap-free numeric column (int64 dtype) is classified correctly."""
+        csv_path = os.path.join(temp_dir, "int_status.csv")
+        pd.DataFrame(
+            {
+                "entry_id": ["E0001", "E0002"],
+                "short_title": ["A", "B"],
+                "retrievable": [1, 0],
+            }
+        ).to_csv(csv_path, index=False)
+
+        df = load_works_csv(csv_path)
+
+        assert get_completed_entry_ids(df) == {"E0001"}
+        assert get_pending_works(df)[ENTRY_ID_COL].tolist() == ["E0002"]
+
 
 class TestGetCompletedEntryIds:
     """Tests for get_completed_entry_ids function."""

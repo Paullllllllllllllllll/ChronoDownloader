@@ -438,9 +438,10 @@ class QuotaManager:
         Returns:
             True if provider has quotas, False if unlimited
         """
-        # Check new config structure
+        # Check new config structure. An empty/absent quota block must fall
+        # through to the legacy check rather than short-circuiting to False.
         quota_config = get_provider_setting(provider_key, "quota", {})
-        if isinstance(quota_config, dict):
+        if isinstance(quota_config, dict) and quota_config:
             return cast(bool, quota_config.get("enabled", False))
 
         # For legacy configs, assume quota exists if daily_limit setting exists
