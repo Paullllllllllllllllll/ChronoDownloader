@@ -125,6 +125,17 @@ class TestDownloadScheduler:
         assert scheduler.pending_count == 0
         assert scheduler.completed_count == 0
 
+    def test_init_does_not_mutate_caller_provider_limits(self) -> None:
+        """Regression: __init__ must not pop 'default' from the caller's dict."""
+        from main.orchestration.scheduler import DownloadScheduler
+
+        caller_limits = {"default": 5, "mdz": 2}
+        scheduler = DownloadScheduler(max_workers=2, provider_limits=caller_limits)
+
+        assert caller_limits == {"default": 5, "mdz": 2}
+        assert scheduler._default_concurrency == 5
+        assert scheduler._semaphores.get_limit("mdz") == 2
+
     def test_start_creates_executor(self) -> None:
         """Test that start() creates thread pool executor."""
         from main.orchestration.scheduler import DownloadScheduler

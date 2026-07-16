@@ -1,4 +1,4 @@
-# ChronoDownloader v1.12.1
+# ChronoDownloader v1.12.2
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1146,6 +1146,20 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.12.2** (16 July 2026) -- Follow-up patch closing the low-severity
+  items deferred from the v1.12.1 audit. `DownloadScheduler` no longer
+  mutates the caller's `provider_limits` dict (it popped the `"default"` key
+  in place; the mapping is now copied internally). The Library of Congress
+  connector appends `fo=json` with the correct separator, so an item URL
+  that already carries a query string no longer receives a second `?` that
+  made LoC serve HTML instead of JSON. The interactive config-file picker
+  reads the real `download_limits` config key (the former `budget` key never
+  existed, so its note never displayed), and the interactive CSV wizard now
+  accepts direct-link-only CSVs (no title column), matching the CLI batch
+  handler and the interactive execution path itself. The budget byte
+  pre-check against the encoded Content-Length was re-reviewed and left
+  as-is: it is advisory only, and enforcement happens per decoded chunk
+  during streaming. Five regression tests added (1,125 total).
 - **v1.12.1** (16 July 2026) -- Bug-fix release from an automated audit,
   closing two defects. Content-encoded downloads (`Content-Encoding: gzip`/
   `deflate`/`br`) are no longer discarded as "incomplete": the byte-count

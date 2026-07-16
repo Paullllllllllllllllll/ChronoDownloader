@@ -125,9 +125,13 @@ def download_loc_work(
     if not item_url:
         logger.warning("No item URL found for LOC item: %s", item_id)
         return False
-    item_json_url = (
-        f"{item_url}?fo=json" if not item_url.endswith("?fo=json") else item_url
-    )
+    # Append fo=json with the correct separator: a second "?" on a URL that
+    # already carries a query string would make LoC ignore the parameter.
+    if "fo=json" in item_url:
+        item_json_url = item_url
+    else:
+        sep = "&" if "?" in item_url else "?"
+        item_json_url = f"{item_url}{sep}fo=json"
     logger.info("Fetching LOC item JSON: %s", item_json_url)
     headers = {"Accept": "application/json"}
     item_full_json = make_request(item_json_url, headers=headers)

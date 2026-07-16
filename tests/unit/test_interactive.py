@@ -479,6 +479,26 @@ class TestConfigWorkflowIntegration:
 
         assert workflow.app_config == config_data
 
+    def test_configure_csv_mode_accepts_direct_link_only_csv(
+        self, temp_dir: str, mock_config: dict[str, Any]
+    ) -> None:
+        """Regression: a direct_link-only CSV (no title column) must pass.
+
+        The CLI batch handler and the interactive execution path both accept
+        IIIF-only CSVs; the wizard's column check must match.
+        """
+        csv_path = os.path.join(temp_dir, "iiif_only.csv")
+        with open(csv_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("entry_id,direct_link\n")
+            f.write("E0001,https://example.org/iiif/abc/manifest.json\n")
+
+        with patch.object(ConsoleUI, "enable_ansi"):
+            workflow = InteractiveWorkflow()
+
+        with patch.object(ConsoleUI, "prompt_input", return_value=csv_path):
+            assert workflow.configure_csv_mode() is True
+        assert workflow.config.csv_path == csv_path
+
     def test_full_csv_workflow_simulation(
         self, temp_dir: str, sample_csv_file: str
     ) -> None:

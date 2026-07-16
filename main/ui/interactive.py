@@ -108,11 +108,15 @@ class InteractiveWorkflow:
                 if download_cfg.get("prefer_pdf_over_images"):
                     notes.append("PDF preferred")
 
-                budget_cfg = cfg_data.get("budget", {})
-                if budget_cfg.get("enabled"):
-                    max_dl = budget_cfg.get("max_total_downloads", 0)
-                    if max_dl:
-                        notes.append(f"limit: {max_dl}")
+                limits_cfg = cfg_data.get("download_limits", {})
+                total_limits = (
+                    limits_cfg.get("total", {}) if isinstance(limits_cfg, dict) else {}
+                )
+                if isinstance(total_limits, dict) and any(
+                    isinstance(v, (int, float)) and v > 0
+                    for v in total_limits.values()
+                ):
+                    notes.append("download limits set")
 
                 note_str = f" ({', '.join(notes)})" if notes else ""
                 display = f"{f.name}{note_str}"
@@ -259,10 +263,13 @@ class InteractiveWorkflow:
         try:
             df = load_works_csv(csv_path)
 
-            # Check for required notebook columns
-            if TITLE_COL not in df.columns:
+            # Check for required notebook columns. A direct_link-only CSV
+            # (IIIF manifest URLs) is also acceptable, matching the CLI batch
+            # handler and this module's own execution path.
+            if TITLE_COL not in df.columns and DIRECT_LINK_COL not in df.columns:
                 ConsoleUI.print_error(
-                    f"CSV must have '{TITLE_COL}' column (sampling notebook format)"
+                    f"CSV must have a '{TITLE_COL}' or '{DIRECT_LINK_COL}' column "
+                    "(sampling notebook format)"
                 )
                 return False
 

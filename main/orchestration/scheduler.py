@@ -240,7 +240,9 @@ class DownloadScheduler:
             on_submit: Callback when a task is submitted
         """
         self._max_workers = max_workers
-        self._provider_limits = provider_limits or {}
+        # Copy so popping "default" below never mutates the caller's dict
+        # (e.g. a provider_concurrency mapping shared with the config cache).
+        self._provider_limits = dict(provider_limits or {})
         self._default_concurrency = self._provider_limits.pop("default", 2)
         self._semaphores = ProviderSemaphoreManager(
             self._provider_limits, self._default_concurrency
