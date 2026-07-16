@@ -56,7 +56,7 @@ class TestAtomicWrites:
         ).to_csv(csv_path, index=False)
 
         calls: list[str] = []
-        real_write = works_csv.atomic_write_text
+        from api.core.atomic import atomic_write_text as real_write
 
         def spy(path: str, data: str, **kw: Any) -> None:
             calls.append(path)

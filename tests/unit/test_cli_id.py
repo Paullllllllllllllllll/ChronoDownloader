@@ -108,8 +108,10 @@ class TestRunIdentifierCLI:
     def _test_output_dir(self, tmp_path: Path) -> None:
         self._output_dir = str(tmp_path / "downloaded_works")
 
-    def _make_args(self, **overrides: bool | str | None) -> argparse.Namespace:
-        defaults: dict[str, bool | str | None] = {
+    def _make_args(
+        self, **overrides: bool | str | list[str] | None
+    ) -> argparse.Namespace:
+        defaults: dict[str, bool | str | list[str] | None] = {
             "id": "bsb11280551",
             "provider": "mdz",
             "names": None,

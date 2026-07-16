@@ -1,4 +1,4 @@
-# ChronoDownloader v1.12.2
+# ChronoDownloader v1.12.3
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1146,6 +1146,14 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.12.3** (16 July 2026) -- Type-checking maintenance release. Fixed two
+  mypy errors in the test suite: the atomicity test now imports
+  `atomic_write_text` from its defining module (`api.core.atomic`) rather than
+  the re-export on `main.data.works_csv` (which mypy does not treat as an
+  explicit export), and the identifier-CLI test's `_make_args` helper widened
+  its overrides type to include `list[str]` so the repeatable `--name`
+  (`action="append"`) argument type-checks. No runtime code changed; 1,125
+  tests pass, ruff and mypy clean.
 - **v1.12.2** (16 July 2026) -- Follow-up patch closing the low-severity
   items deferred from the v1.12.1 audit. `DownloadScheduler` no longer
   mutates the caller's `provider_limits` dict (it popped the `"default"` key
