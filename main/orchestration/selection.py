@@ -3,19 +3,25 @@
 This module extracts the candidate collection, scoring, and ranking logic
 from the main pipeline to improve modularity and testability.
 
-Supports parallel provider searches via ThreadPoolExecutor when
+Supports parallel provider searches via daemon worker threads when
 selection.max_parallel_searches > 1 in config.
 """
 
 from __future__ import annotations
 
-import concurrent.futures
 import logging
+import math
+import threading
 import time
 from collections.abc import Callable
 from typing import Any, cast
 
-from api.core.config import get_config, get_min_title_score, get_provider_setting
+from api.core.config import (
+    get_config,
+    get_min_title_score,
+    get_provider_setting,
+    get_search_timeout,
+)
 from api.matching import creator_score, title_score
 from api.model import SearchResult, convert_to_searchresult
 
@@ -23,6 +29,43 @@ logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
 ProviderTuple = tuple[str, Callable[..., Any], Callable[..., Any], str]
+
+
+def _run_with_timeout(
+    timeout: float | None,
+    func: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Run ``func(*args, **kwargs)`` enforcing a wall-clock timeout.
+
+    When ``timeout`` is None or non-positive the call runs directly in the
+    caller thread with zero overhead (current unbounded behavior). Otherwise
+    the call runs in a daemon worker thread; if it exceeds the deadline a
+    ``TimeoutError`` is raised. The abandoned daemon worker may linger until
+    its blocking HTTP call returns, but being a daemon thread it never blocks
+    interpreter exit. A worker exception is re-raised in the caller thread.
+    """
+    if not timeout or timeout <= 0:
+        return func(*args, **kwargs)
+
+    box: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            box["result"] = func(*args, **kwargs)
+        except Exception as exc:  # surfaced in the caller thread
+            box["error"] = exc
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    thread.join(timeout)
+
+    if thread.is_alive():
+        raise TimeoutError(f"call timed out after {timeout}s")
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
 
 
 def call_search_function(
@@ -173,11 +216,25 @@ def _search_provider_logged(
 
     Logs the search banner, runs the provider's search function, and logs
     either the no-results message or the hit count. Returns the (possibly
-    empty) list of raw provider results.
+    empty) list of raw provider results. When the provider exceeds its
+    effective search timeout the call is abandoned, a WARNING is logged, and
+    an empty list is returned so the fan-out continues without it.
     """
     logger.info("--- Searching on %s for '%s' ---", pname, title)
     max_results = get_max_results_for_provider(pkey, max_candidates_per_provider)
-    results = call_search_function(search_func, title, creator, max_results)
+    timeout = get_search_timeout(pkey)
+    try:
+        results = cast(
+            list[Any],
+            _run_with_timeout(
+                timeout, call_search_function, search_func, title, creator, max_results
+            ),
+        )
+    except TimeoutError:
+        logger.warning(
+            "search on %s timed out after %ss; continuing without it", pname, timeout
+        )
+        return []
 
     if not results:
         logger.info("No items found for '%s' on %s.", title, pname)
@@ -272,7 +329,7 @@ def _search_single_provider(
 ) -> tuple[str, str, list[SearchResult]]:
     """Search a single provider and return scored candidates.
 
-    This function is designed to be called from a ThreadPoolExecutor.
+    This function is designed to be called from a daemon worker thread.
 
     Args:
         provider_tuple: (provider_key, search_func, download_func, provider_name)
@@ -374,6 +431,40 @@ def _collect_candidates_exhaustive(
     return all_candidates
 
 
+def _parallel_search_worker(
+    provider_tuple: ProviderTuple,
+    title: str,
+    creator: str | None,
+    max_candidates_per_provider: int,
+    creator_weight: float,
+    semaphore: threading.BoundedSemaphore,
+    box: dict[str, Any],
+) -> None:
+    """Run one provider search in a daemon thread, gated by ``semaphore``.
+
+    Records the actual start time (measured only after a concurrency slot is
+    acquired) so the caller measures the timeout from real work start, signals
+    the ``started`` and ``done`` events, and always releases the slot.
+    ``_search_single_provider`` is itself exception-safe, so no search error
+    escapes here.
+    """
+    semaphore.acquire()
+    try:
+        box["start"] = time.monotonic()
+        box["started"].set()
+        _pkey, _pname, candidates = _search_single_provider(
+            provider_tuple,
+            title,
+            creator,
+            max_candidates_per_provider,
+            creator_weight,
+        )
+        box["candidates"] = candidates
+    finally:
+        box["done"].set()
+        semaphore.release()
+
+
 def _collect_candidates_parallel(
     provider_list: list[ProviderTuple],
     title: str,
@@ -382,10 +473,18 @@ def _collect_candidates_parallel(
     max_candidates_per_provider: int,
     max_workers: int,
 ) -> list[SearchResult]:
-    """Parallel candidate collection using ThreadPoolExecutor.
+    """Parallel candidate collection using daemon worker threads.
 
-    Searches all providers concurrently, then merges results.
-    Provider order is preserved for consistent selection behavior.
+    Searches all providers concurrently (one daemon thread each, gated by a
+    ``BoundedSemaphore`` so ``max_parallel_searches`` is still honored), then
+    merges results in provider_list order for consistent selection behavior.
+
+    Each provider gets its own deadline (its recorded start time plus its
+    effective search timeout). A provider that exceeds its deadline is logged
+    at WARNING and dropped, so the total wait is bounded by the largest
+    per-provider timeout rather than the slowest provider's real runtime.
+    Workers are daemon threads: an abandoned worker still blocked in a slow
+    HTTP call lingers harmlessly and never blocks interpreter exit.
     """
     all_candidates: list[SearchResult] = []
     start_time = time.perf_counter()
@@ -397,38 +496,75 @@ def _collect_candidates_parallel(
         title,
     )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_provider: dict[concurrent.futures.Future[Any], ProviderTuple] = {}
-
-        for provider_tuple in provider_list:
-            future = executor.submit(
-                _search_single_provider,
+    semaphore = threading.BoundedSemaphore(max_workers)
+    workers: list[tuple[ProviderTuple, dict[str, Any], float | None]] = []
+    for provider_tuple in provider_list:
+        box: dict[str, Any] = {
+            "started": threading.Event(),
+            "done": threading.Event(),
+            "start": 0.0,
+            "candidates": [],
+        }
+        timeout = get_search_timeout(provider_tuple[0])
+        thread = threading.Thread(
+            target=_parallel_search_worker,
+            args=(
                 provider_tuple,
                 title,
                 creator,
                 max_candidates_per_provider,
                 creator_weight,
+                semaphore,
+                box,
+            ),
+            daemon=True,
+        )
+        thread.start()
+        workers.append((provider_tuple, box, timeout))
+
+    # Bound on how long to wait for a queued worker to acquire a slot and
+    # start: a slot pinned by a stalled search is never released, so a later
+    # provider may never run. Cap the wait rather than block forever; when
+    # every timeout is disabled there is no cap (unbounded, as before).
+    finite = [t for _pt, _box, t in workers if t]
+    if finite:
+        batches = math.ceil(len(workers) / max_workers)
+        started_guard: float | None = max(finite) * batches + 5.0
+    else:
+        started_guard = None
+
+    results_by_provider: dict[str, list[SearchResult]] = {}
+    for provider_tuple, box, timeout in workers:
+        pkey = provider_tuple[0]
+        pname = provider_tuple[3]
+
+        if not box["started"].wait(started_guard):
+            logger.warning(
+                "search on %s never started; all search slots stalled", pname
             )
-            future_to_provider[future] = provider_tuple
+            continue
 
-        results_by_provider: dict[str, list[SearchResult]] = {}
+        if timeout:
+            remaining = max(0.0, (box["start"] + timeout) - time.monotonic())
+            finished = box["done"].wait(remaining)
+        else:
+            box["done"].wait()
+            finished = True
 
-        for future in concurrent.futures.as_completed(future_to_provider):
-            provider_tuple = future_to_provider[future]
-            pkey = provider_tuple[0]
-            pname = provider_tuple[3]
+        if not finished:
+            logger.warning(
+                "search on %s timed out after %ss; continuing without it",
+                pname,
+                timeout,
+            )
+            continue
 
-            try:
-                _pkey, _pname, candidates = future.result()
-                if candidates:
-                    logger.info("Found %d item(s) on %s", len(candidates), pname)
-                    results_by_provider[pkey] = candidates
-                else:
-                    logger.info("No items found for '%s' on %s.", title, pname)
-            except Exception:
-                logger.exception(
-                    "Error retrieving results from %s for '%s'", pname, title
-                )
+        candidates = box["candidates"]
+        if candidates:
+            logger.info("Found %d item(s) on %s", len(candidates), pname)
+            results_by_provider[pkey] = candidates
+        else:
+            logger.info("No items found for '%s' on %s.", title, pname)
 
     for provider_tuple in provider_list:
         pkey = provider_tuple[0]

@@ -267,6 +267,7 @@
       "hathitrust"
     ],
     "min_title_score": 35,
+    "search_timeout_seconds": 60,
     "creator_weight": 0.2,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",

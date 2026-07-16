@@ -287,6 +287,15 @@ Examples:
     )
 
     parser.add_argument(
+        "--search-timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Override selection.search_timeout_seconds for this run: the "
+        "per-provider search timeout in seconds (0 disables it).",
+    )
+
+    parser.add_argument(
         "--max-candidates-per-provider",
         type=int,
         default=None,

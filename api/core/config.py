@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 _CONFIG_CACHE: dict[str, Any] | None = None
 _API_KEYS_CACHE: dict[str, Any] | None = None
 
+# Code default for the per-provider search timeout (seconds). Consumed by
+# api.core.config.get_search_timeout and mirrored in config.example.json.
+DEFAULT_SEARCH_TIMEOUT_SECONDS = 60.0
+
 
 def get_config(force_reload: bool = False) -> dict[str, Any]:
     """Load project configuration JSON.
@@ -323,3 +327,53 @@ def get_min_title_score(
             pass
 
     return default
+
+
+def _coerce_search_timeout(value: Any) -> float | None:
+    """Normalize a raw search-timeout config value to seconds or None.
+
+    Returns None (timeout disabled) when the value is null, zero, negative,
+    or non-numeric; otherwise returns the positive float.
+    """
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    return seconds
+
+
+def get_search_timeout(
+    provider_key: str | None = None,
+    default: float = DEFAULT_SEARCH_TIMEOUT_SECONDS,
+) -> float | None:
+    """Resolve the per-provider search timeout in seconds.
+
+    Resolution order: ``provider_settings.<provider_key>.search_timeout_seconds``,
+    then ``selection.search_timeout_seconds``, then ``default``. A value of 0,
+    null, or non-numeric disables the timeout (returns None = unbounded).
+
+    Args:
+        provider_key: Provider identifier for a per-provider override.
+        default: Fallback when no config value is present.
+
+    Returns:
+        Positive timeout in seconds, or None when the timeout is disabled.
+    """
+    cfg = get_config()
+
+    # Per-provider override wins over the global selection value.
+    if provider_key:
+        sentinel: Any = object()
+        pv = get_provider_setting(provider_key, "search_timeout_seconds", sentinel)
+        if pv is not sentinel:
+            return _coerce_search_timeout(pv)
+
+    sel = cfg.get("selection", {})
+    if isinstance(sel, dict) and "search_timeout_seconds" in sel:
+        return _coerce_search_timeout(sel.get("search_timeout_seconds"))
+
+    return _coerce_search_timeout(default)

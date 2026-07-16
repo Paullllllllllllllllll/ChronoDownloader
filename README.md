@@ -1,4 +1,4 @@
-# ChronoDownloader v1.11.0
+# ChronoDownloader v1.12.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -270,7 +270,11 @@ deterministic download via `--id SOURCE_ID --provider PROVIDER_KEY`
 (or `--iiif MANIFEST_URL`), giving a search, review, then targeted
 download workflow. Exit codes: `0` when every queried work produced
 a confident match, `1` when at least one did not, `2` on usage
-errors.
+errors. Searches run in parallel but results print after selection, so
+a slow provider would otherwise gate the whole fan-out; the per-provider
+`selection.search_timeout_seconds` (default 60, overridable per run with
+`--search-timeout`) drops any provider that exceeds it, and `--providers`
+scopes the run to a chosen subset.
 
 Downloads that hit a provider quota are recorded as `deferred` in
 the works CSV (retriable, distinct from `failed`). Ready deferred
@@ -440,6 +444,10 @@ optional in interactive).
 - `--min-title-score FLOAT` -- minimum PURE title-match score to
   accept a candidate (0--100). Creator similarity never lowers this
   gate; missing creator metadata is not penalized.
+- `--search-timeout SECONDS` -- per-provider search timeout (float);
+  overrides `selection.search_timeout_seconds` for this run. A provider
+  whose search exceeds it is dropped so one slow provider cannot stall the
+  fan-out; `0` disables the timeout
 - `--creator-weight FLOAT` -- author match weight (0.0--1.0), applied
   as a positive ranking bonus only
 - `--max-candidates-per-provider INT`
@@ -724,6 +732,7 @@ To adjust for slow providers, increase `delay_ms` and
       "google_books", "wellcome", "loc", "europeana"
     ],
     "min_title_score": 85,
+    "search_timeout_seconds": 60,
     "creator_weight": 0.2,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",
@@ -743,6 +752,14 @@ To adjust for slow providers, increase `delay_ms` and
 - `min_title_score`: minimum fuzzy match score (0--100); use
   50--60 for multilingual/historical collections, 70--85 for
   modern English collections
+- `search_timeout_seconds`: per-provider search timeout in
+  seconds (default 60); a provider whose search exceeds it is
+  logged at WARNING and dropped so one slow provider cannot stall
+  the fan-out. `0` or `null` disables it (unbounded wait). Override
+  per provider via `provider_settings.<key>.search_timeout_seconds`.
+  Applies to both CLI and interactive runs (the config value is read
+  live at search time); `--search-timeout` is a CLI-only per-run
+  override
 - `creator_weight`: weight of creator match in scoring
   (0.0--1.0)
 - `max_candidates_per_provider`: limit search results per
@@ -1129,6 +1146,23 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.12.0** (16 July 2026) -- Per-provider search timeout. A slow provider
+  can no longer stall the search fan-out: each provider search is bounded by
+  `selection.search_timeout_seconds` (default 60; `0`/`null` disables),
+  overridable per provider via
+  `provider_settings.<key>.search_timeout_seconds` and per run via the new
+  CLI flag `--search-timeout SECONDS`. The config value applies to CLI and
+  interactive runs alike and is resolved live at search time. Providers that
+  exceed their deadline are logged at WARNING and dropped; the parallel
+  fan-out is bounded by the largest per-provider timeout, and both the fan-out
+  and the sequential search paths now run provider searches on daemon worker
+  threads (concurrency still capped by `max_parallel_searches`), so an
+  abandoned search blocked in a slow HTTP call can never pin process exit. In
+  a live test against 10 providers with an 8-second timeout, a query that
+  previously took 651.6 seconds (SBB's SRU endpoint stalling in
+  multi-minute retries) completed in 8.7 seconds with identical selection.
+  Fifteen tests added, including subprocess-based regressions proving prompt
+  interpreter exit (1,118 total).
 - **v1.11.0** (16 July 2026) -- Search-only mode. New `--search TITLE`
   (with optional `--creator NAME`) runs the full discovery and matching
   pipeline for an ad hoc query and prints structured candidate metadata

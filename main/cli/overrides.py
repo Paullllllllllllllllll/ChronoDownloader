@@ -81,6 +81,7 @@ def _apply_runtime_config_overrides(
 
     selection_strategy = getattr(args, "selection_strategy", None)
     min_title_score = getattr(args, "min_title_score", None)
+    search_timeout = getattr(args, "search_timeout", None)
     creator_weight = getattr(args, "creator_weight", None)
     max_candidates_per_provider = getattr(args, "max_candidates_per_provider", None)
     download_strategy = getattr(args, "download_strategy", None)
@@ -107,6 +108,8 @@ def _apply_runtime_config_overrides(
         sel_cfg["strategy"] = selection_strategy
     if min_title_score is not None:
         sel_cfg["min_title_score"] = float(min_title_score)
+    if search_timeout is not None:
+        sel_cfg["search_timeout_seconds"] = float(search_timeout)
     if creator_weight is not None:
         sel_cfg["creator_weight"] = float(creator_weight)
     if max_candidates_per_provider is not None:
@@ -254,6 +257,7 @@ def _looks_like_cli_invocation(argv: list[str]) -> bool:
         "--resume-mode",
         "--selection-strategy",
         "--min-title-score",
+        "--search-timeout",
         "--creator-weight",
         "--max-candidates-per-provider",
         "--download-strategy",

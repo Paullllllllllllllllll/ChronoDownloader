@@ -739,6 +739,7 @@ def _get_selection_config() -> dict[str, Any]:
     )  # 1 = sequential, >1 = parallel provider searches
     sel.setdefault("provider_hierarchy", [])
     sel.setdefault("min_title_score", 85)
+    sel.setdefault("search_timeout_seconds", 60.0)
     sel.setdefault("creator_weight", 0.2)
     sel.setdefault("max_candidates_per_provider", 5)
     sel.setdefault("download_strategy", "selected_only")
