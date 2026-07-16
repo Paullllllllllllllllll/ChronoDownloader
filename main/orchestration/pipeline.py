@@ -1113,3 +1113,71 @@ def process_work(
             "provider": "",
             "reason": "no_selection",
         }
+
+
+def search_work(
+    title: str,
+    creator: str | None = None,
+    entry_id: str | None = None,
+) -> dict[str, Any]:
+    """Search all enabled providers for one work and return structured candidates.
+
+    Pure discovery with NO side effects: no work directory, no work.json, no
+    index.csv row, no source-CSV update, and no download. Unlike
+    :func:`process_work` there is also no resume skip -- already-completed
+    works are searched again, since searching is free and idempotent.
+
+    Args:
+        title: Work title to search for
+        creator: Optional creator/author name
+        entry_id: Optional identifier echoed back in the result
+
+    Returns:
+        Dict with 'entry_id', 'query', 'status' ('match', 'no_match', or
+        'no_candidates'), 'selected' (dict or None), and 'candidates' (list of
+        dicts with provider, title, creators, date, source_id, item_url,
+        iiif_manifest, and matching scores).
+    """
+    logger.info("Searching for: '%s'%s", title, f" by '{creator}'" if creator else "")
+
+    sel_cfg = _get_selection_config()
+    provider_list = _provider_order(
+        ENABLED_APIS, sel_cfg.get("provider_hierarchy") or []
+    )
+    all_candidates, selected, selected_provider_tuple = _collect_and_select(
+        title,
+        creator,
+        sel_cfg,
+        provider_list,
+    )
+    with contextlib.suppress(Exception):
+        clear_all_context()
+
+    selected_payload: dict[str, Any] | None = None
+    if selected and selected_provider_tuple:
+        selected_payload = {
+            "provider": selected.provider,
+            "provider_key": selected.provider_key,
+            "source_id": _compute_selected_source_id(selected),
+            "title": selected.title,
+            "creators": selected.creators,
+            "date": selected.date,
+            "item_url": selected.item_url,
+            "iiif_manifest": selected.iiif_manifest,
+            "scores": selected.raw.get("__matching__", {}),
+        }
+
+    if selected_payload:
+        status = "match"
+    elif all_candidates:
+        status = "no_match"
+    else:
+        status = "no_candidates"
+
+    return {
+        "entry_id": str(entry_id) if entry_id is not None else None,
+        "query": {"title": title, "creator": creator},
+        "status": status,
+        "selected": selected_payload,
+        "candidates": format_candidates_for_json(all_candidates),
+    }

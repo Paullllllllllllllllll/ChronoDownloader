@@ -17,6 +17,7 @@ from .commands.batch import run_batch_cli
 from .commands.direct_iiif import run_direct_iiif_cli
 from .commands.identifier import run_identifier_cli
 from .commands.providers import list_providers
+from .commands.search import run_search_cli
 from .exit_codes import EXIT_OK, EXIT_USAGE
 from .overrides import (
     _apply_provider_cli_overrides,
@@ -78,6 +79,9 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
             config_path,
         )
         return EXIT_USAGE
+
+    if getattr(args, "search", None) or getattr(args, "search_only", False):
+        return run_search_cli(args, config, logger)
 
     if args.iiif_urls:
         return run_direct_iiif_cli(args, config, logger)

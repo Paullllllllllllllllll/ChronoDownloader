@@ -199,6 +199,10 @@ class InteractiveWorkflow:
             ("single", "Single Work — Download a specific work by title"),
             ("collection", "Predefined Collection — Choose from sample datasets"),
             ("direct_iiif", "Direct IIIF — Download from IIIF manifest URL(s)"),
+            (
+                "search",
+                "Search Only — Preview provider candidates without downloading",
+            ),
         ]
 
     def configure_mode(self) -> bool:
@@ -306,6 +310,29 @@ class InteractiveWorkflow:
         self.config.single_creator = creator if creator else None
         self.config.single_entry_id = entry_id if entry_id else "W0001"
 
+        return True
+
+    def configure_search_mode(self) -> bool:
+        """Configure search-only mode (no downloads).
+
+        Returns:
+            True if configured, False to go back
+        """
+        ConsoleUI.print_info("SEARCH ONLY")
+        print("  Search all enabled providers and preview ranked candidates.")
+        print(
+            f"  {ConsoleUI.DIM}(No downloads, no folders, no index entries)"
+            f"{ConsoleUI.RESET}\n"
+        )
+
+        title = ConsoleUI.prompt_input("Work title", required=True)
+        if not title:
+            return False
+
+        creator = ConsoleUI.prompt_input("Creator/Author (optional)")
+
+        self.config.single_title = title
+        self.config.single_creator = creator if creator else None
         return True
 
     def configure_direct_iiif_mode(self) -> bool:
@@ -659,6 +686,13 @@ class InteractiveWorkflow:
                     else:
                         current_step = "mode"
 
+                elif current_step == "configure_search":
+                    # Search needs no output directory or download options.
+                    if self.configure_search_mode():
+                        self.start_time = time.time()
+                        return self.config
+                    current_step = "mode"
+
                 elif current_step == "output":
                     if self.configure_output():
                         current_step = "options"
@@ -683,6 +717,52 @@ class InteractiveWorkflow:
 # =============================================================================
 # Processing Functions
 # =============================================================================
+
+
+def _print_search_result(result: dict[str, Any]) -> None:
+    """Print a search_work() result as a ranked candidate table."""
+
+    def _score(candidate: dict[str, Any]) -> float:
+        try:
+            return float((candidate.get("scores") or {}).get("score") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    query = result.get("query", {})
+    head = str(query.get("title", ""))
+    if query.get("creator"):
+        head += f" / {query['creator']}"
+    candidates = result.get("candidates") or []
+
+    print()
+    status = result.get("status")
+    if status == "match":
+        ConsoleUI.print_success(f"{head} -> match ({len(candidates)} candidate(s))")
+    else:
+        ConsoleUI.print_warning(f"{head} -> {status} ({len(candidates)} candidate(s))")
+
+    selected = result.get("selected")
+    if selected:
+        print(
+            f"  {ConsoleUI.GREEN}selected:{ConsoleUI.RESET} "
+            f"{selected.get('provider')} | {selected.get('title')} | "
+            f"date={selected.get('date')} | id={selected.get('source_id')}"
+        )
+        if selected.get("item_url"):
+            print(f"    {ConsoleUI.DIM}{selected['item_url']}{ConsoleUI.RESET}")
+
+    for candidate in sorted(candidates, key=_score, reverse=True)[:10]:
+        print(
+            f"    {_score(candidate):6.1f}  {candidate.get('provider')} | "
+            f"{candidate.get('title')} | date={candidate.get('date')} | "
+            f"id={candidate.get('source_id')}"
+        )
+    if len(candidates) > 10:
+        print(
+            f"    {ConsoleUI.DIM}... and {len(candidates) - 10} more candidate(s)"
+            f"{ConsoleUI.RESET}"
+        )
+    print()
 
 
 def process_single_work(
@@ -776,7 +856,10 @@ def run_interactive_session(
     # download, name)
     provider_names = [name for _, _, _, name in providers]
 
-    ConsoleUI.print_header("DOWNLOAD IN PROGRESS", "Please wait...")
+    ConsoleUI.print_header(
+        "SEARCH IN PROGRESS" if config.mode == "search" else "DOWNLOAD IN PROGRESS",
+        "Please wait...",
+    )
     print(
         f"  {ConsoleUI.DIM}Processing with {len(providers)} provider(s)..."
         f"{ConsoleUI.RESET}\n"
@@ -814,6 +897,17 @@ def run_interactive_session(
             stats["succeeded"] = 1
         else:
             stats["processed"] = 1
+            stats["failed"] = 1
+    elif config.mode == "search":
+        result = pipeline.search_work(
+            config.single_title or "",
+            config.single_creator,
+        )
+        _print_search_result(result)
+        stats["processed"] = 1
+        if result.get("status") == "match":
+            stats["succeeded"] = 1
+        else:
             stats["failed"] = 1
     elif config.mode == "direct_iiif":
         for i, url in enumerate(config.iiif_urls, start=1):
@@ -863,6 +957,13 @@ def run_interactive_session(
     duration = None
     if start_time > 0:
         duration = time.time() - start_time
+
+    # Search mode already printed its candidate table; the download-centric
+    # session summary would only mislead.
+    if config.mode == "search":
+        if duration is not None:
+            print(f"  {ConsoleUI.DIM}Search took {duration:.1f}s{ConsoleUI.RESET}")
+        return
 
     # Display detailed completion summary
     ConsoleUI.print_session_summary(

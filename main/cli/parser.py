@@ -41,6 +41,12 @@ Examples:
 
   # Download by identifier with auto-detection
   python -m main.cli --id bpt6k1511262r --output_dir my_downloads
+
+  # Search-only: preview provider candidates without downloading
+  python -m main.cli --search "Le Viandier" --creator "Taillevent" --json
+
+  # Search-only over a CSV (one JSON line per work)
+  python -m main.cli works.csv --search-only --json
         """,
     )
 
@@ -112,6 +118,30 @@ Examples:
         metavar="KEY",
         help="Provider key for --id lookup (e.g., mdz, bnf_gallica, "
         "internet_archive). See --list-providers for valid keys.",
+    )
+
+    parser.add_argument(
+        "--search",
+        default=None,
+        metavar="TITLE",
+        help="Search all enabled providers for a work title and print structured "
+        "candidate metadata without downloading. Combine with --creator to "
+        "refine matching and --json for machine-readable output.",
+    )
+
+    parser.add_argument(
+        "--creator",
+        default=None,
+        metavar="NAME",
+        help="Creator/author name for --search (improves match scoring).",
+    )
+
+    parser.add_argument(
+        "--search-only",
+        action="store_true",
+        help="With a CSV file: search and match every row, print one JSON line "
+        "(or human-readable block) per work, and skip all downloads. Fully "
+        "side-effect-free.",
     )
 
     parser.add_argument(

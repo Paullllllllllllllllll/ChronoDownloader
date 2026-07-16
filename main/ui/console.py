@@ -15,7 +15,7 @@ from typing import Any
 class DownloadConfiguration:
     """User configuration for a download session."""
 
-    # Mode: "csv", "single", "collection", "direct_iiif"
+    # Mode: "csv", "single", "collection", "direct_iiif", "search"
     mode: str = "csv"
 
     # CSV mode settings

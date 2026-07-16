@@ -1,4 +1,4 @@
-# ChronoDownloader v1.10.0
+# ChronoDownloader v1.11.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -193,7 +193,8 @@ python -m main.cli
 ```
 
 The guided workflow walks through mode selection (CSV batch, single
-work, predefined collection, or direct IIIF), source configuration,
+work, predefined collection, direct IIIF, or search only), source
+configuration,
 output settings, and processing options. Colored console UI with
 provider status display, CSV discovery, back/quit navigation, and
 input validation.
@@ -209,6 +210,10 @@ python -m main.cli my_books.csv --output_dir ./historical_sources
 
 # Dry run (search and select without downloading)
 python -m main.cli my_books.csv --dry-run
+
+# Search only: print structured candidate metadata, download nothing
+python -m main.cli --search "Le Viandier" --creator "Taillevent" --json
+python -m main.cli my_books.csv --search-only --json
 
 # Direct IIIF manifest download (bypass search)
 python -m main.cli --cli \
@@ -233,6 +238,39 @@ instead of blocking on a prompt.
 classification, and candidate matching, but writes no work
 directories, `work.json` files, or `index.csv` rows and makes no
 downloads.
+
+### Search-Only Mode
+
+Search-only mode runs the same discovery and matching pipeline as a
+download run but stops before the download phase and prints one
+structured result per work. Like `--dry-run` it is fully
+side-effect-free; unlike `--dry-run` it returns the full ranked
+candidate list instead of a one-line log, and it ignores resume
+status (completed works are searched again, since searching is free
+and idempotent).
+
+```bash
+# Ad hoc search, human-readable ranked table
+python -m main.cli --search "Le Viandier" --creator "Taillevent"
+
+# Machine-readable: one JSON line (NDJSON) per work on stdout;
+# logs move to stderr so stdout stays parseable
+python -m main.cli --search "Le Viandier" --creator "Taillevent" --json
+
+# Search every row of a CSV (all rows with a title, regardless of
+# status; --entry-ids and --limit narrow the set)
+python -m main.cli my_books.csv --search-only --json --limit 10
+```
+
+Each JSON line carries `entry_id`, `query`, `status` (`match`,
+`no_match`, or `no_candidates`), the `selected` candidate, and all
+`candidates` with `provider_key`, `source_id`, `item_url`,
+`iiif_manifest`, and matching scores. Feed a chosen candidate to a
+deterministic download via `--id SOURCE_ID --provider PROVIDER_KEY`
+(or `--iiif MANIFEST_URL`), giving a search, review, then targeted
+download workflow. Exit codes: `0` when every queried work produced
+a confident match, `1` when at least one did not, `2` on usage
+errors.
 
 Downloads that hit a provider quota are recorded as `deferred` in
 the works CSV (retriable, distinct from `failed`). Ready deferred
@@ -340,6 +378,15 @@ optional in interactive).
   `--output_dir` (non-empty objects, PDF/EPUB magic bytes, and
   recorded page counts) and flip any incomplete work to `partial`
   for re-download, then exit
+
+**Search only** (no downloads, no side effects):
+
+- `--search TITLE` -- search all enabled providers for a title and
+  print structured candidate metadata
+- `--creator NAME` -- creator/author for `--search` (improves match
+  scoring)
+- `--search-only` -- with a CSV file: search and match every row
+  with a title, print one result per work (NDJSON with `--json`)
 
 **Direct downloads** (bypass search):
 
@@ -1082,6 +1129,20 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.11.0** (16 July 2026) -- Search-only mode. New `--search TITLE`
+  (with optional `--creator NAME`) runs the full discovery and matching
+  pipeline for an ad hoc query and prints structured candidate metadata
+  without downloading; new `--search-only` does the same for every titled row
+  of a works CSV (ignoring resume status; `--entry-ids`/`--limit` narrow the
+  set). With `--json`, output is one NDJSON line per work (query, status,
+  selected candidate, and the full ranked candidate list with provider keys,
+  source ids, IIIF manifests, and matching scores) with logs moved to stderr
+  so stdout stays parseable; candidates chain directly into deterministic
+  `--id`/`--iiif` downloads. Both forms are fully side-effect-free. Exit
+  codes: 0 all matched, 1 some unmatched, 2 usage. Interactive mode gains a
+  matching "Search Only" menu entry with a ranked candidate table.
+  Implemented via a new `pipeline.search_work()`; 19 tests added (1,103
+  total).
 - **v1.10.0** (12 July 2026) -- Bug-fix release from an automated audit, closing
   seven defects. Anna's Archive quota tracking now activates whenever the
   provider is API-backed (config-based and remapped env-var keys included)

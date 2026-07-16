@@ -59,7 +59,7 @@ class TestInteractiveWorkflowModeOptions:
     def test_mode_options_has_four_entries(
         self, mock_general: MagicMock, mock_config: MagicMock
     ) -> None:
-        """Test that there are exactly 4 mode options."""
+        """Test that there are exactly 5 mode options."""
         mock_config.return_value = {}
         mock_general.return_value = {}
 
@@ -69,7 +69,7 @@ class TestInteractiveWorkflowModeOptions:
         workflow.config = DownloadConfiguration()
 
         options = workflow.get_mode_options()
-        assert len(options) == 4
+        assert len(options) == 5
 
 
 class TestConfigureDirectIIIFMode:
