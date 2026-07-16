@@ -62,6 +62,11 @@ class TestEscapeSparqlString:
     def test_escapes_single_quotes(self) -> None:
         assert escape_sparql_string("it's done") == "it\\'s done"
 
+    def test_escapes_double_quotes(self) -> None:
+        # Regression: the British Library BNB SPARQL fallback embeds titles in
+        # DOUBLE-quoted literals; an unescaped '"' broke the query silently.
+        assert escape_sparql_string('say "cheese"') == 'say \\"cheese\\"'
+
     def test_replaces_newlines(self) -> None:
         assert escape_sparql_string("line1\nline2") == "line1 line2"
 

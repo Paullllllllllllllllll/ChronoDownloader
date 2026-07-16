@@ -1,4 +1,4 @@
-# ChronoDownloader v1.12.0
+# ChronoDownloader v1.12.1
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1146,6 +1146,18 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.12.1** (16 July 2026) -- Bug-fix release from an automated audit,
+  closing two defects. Content-encoded downloads (`Content-Encoding: gzip`/
+  `deflate`/`br`) are no longer discarded as "incomplete": the byte-count
+  completeness check compared the decoded stream length against the encoded
+  wire `Content-Length`, so any compressed-and-length-declared response was
+  rejected on every attempt; the check now applies only to identity-encoded
+  responses. `escape_sparql_string` additionally escapes double quotes, so
+  titles or creators containing `"` no longer break the British Library BNB
+  SPARQL fallback query (which embeds them in double-quoted literals). Also
+  strips a UTF-8 BOM from `.gitattributes` that made Git misparse the leading
+  comment and warn `policy: is not a valid attribute name` on every
+  attribute-touching operation. Two regression tests added (1,120 total).
 - **v1.12.0** (16 July 2026) -- Per-provider search timeout. A slow provider
   can no longer stall the search fan-out: each provider search is bounded by
   `selection.search_timeout_seconds` (default 60; `0`/`null` disables),

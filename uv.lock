@@ -170,7 +170,7 @@ wheels = [
 
 [[package]]
 name = "chronodownloader"
-version = "1.12.0"
+version = "1.12.1"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

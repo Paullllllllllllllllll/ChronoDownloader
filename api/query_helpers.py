@@ -32,9 +32,11 @@ def escape_sru_literal(value: str | None) -> str:
 
 
 def escape_sparql_string(value: str | None) -> str:
-    """Escape a string for safe inclusion in SPARQL single-quoted literals.
+    """Escape a string for safe inclusion in SPARQL quoted literals.
 
-    - Escapes backslashes and single quotes.
+    - Escapes backslashes, single quotes, and double quotes (``\\'`` and
+      ``\\"`` are valid ECHAR escapes in both quoting styles, so the result
+      is safe inside single- and double-quoted literals alike).
     - Replaces newlines, carriage returns, and tabs with spaces.
 
     Args:
@@ -49,6 +51,7 @@ def escape_sparql_string(value: str | None) -> str:
     s = str(value)
     s = s.replace("\\", r"\\")
     s = s.replace("'", r"\'")
+    s = s.replace('"', r"\"")
     s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ")
 
     return s

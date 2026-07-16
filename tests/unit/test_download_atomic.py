@@ -89,6 +89,40 @@ def test_content_length_short_read_discarded(
     assert _objects_files(folder) == []
 
 
+def test_content_encoded_stream_not_discarded_on_length_mismatch(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """A gzip-encoded response must not be discarded as 'incomplete'.
+
+    ``iter_content`` yields DECODED bytes while Content-Length counts the
+    encoded wire bytes, so the byte counts legitimately differ; the
+    completeness check applies only to identity-encoded responses.
+    """
+    payload = b"%PDF-1.4\n" + b"x" * 1024  # decoded size 1033 != wire size 500
+
+    def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload
+
+    resp = _make_response(
+        {
+            "Content-Type": "application/pdf",
+            "Content-Length": "500",
+            "Content-Encoding": "gzip",
+        },
+        good_iter,
+    )
+    session = _make_session(resp)
+    folder = str(tmp_path / "work")
+
+    dl_mod._BUDGET._exhausted = False
+    with patch.object(dl_mod, "get_session", return_value=session):
+        result = dl_mod.download_file("https://example.org/book.pdf", folder, "book")
+
+    assert result is not None
+    with open(result, "rb") as fh:
+        assert fh.read() == payload
+
+
 def test_complete_download_promoted_atomically(
     tmp_path: Any, mock_config: dict[str, Any]
 ) -> None:

@@ -500,8 +500,20 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             return None
 
         # When the server declared a Content-Length, require the written byte
-        # count to match; a short read means the stream was truncated.
-        if content_len is not None and bytes_written != content_len:
+        # count to match; a short read means the stream was truncated. Skip the
+        # check for content-encoded responses (gzip/deflate/br): iter_content
+        # yields DECODED bytes while Content-Length counts the encoded wire
+        # bytes, so the two legitimately differ and a complete download would
+        # be discarded as "incomplete".
+        content_encoding = (
+            (response.headers.get("Content-Encoding") or "").strip().lower()
+        )
+        is_identity_encoding = content_encoding in ("", "identity")
+        if (
+            content_len is not None
+            and is_identity_encoding
+            and bytes_written != content_len
+        ):
             logger.error(
                 "Incomplete download for %s: wrote %d of %d declared bytes; "
                 "discarding.",
