@@ -93,6 +93,36 @@ class TestDownloadBudget:
             assert result is True
             assert fresh_budget.total_images_bytes == 1000
 
+    def test_refund_returns_bytes(self, fresh_budget: DownloadBudget) -> None:
+        """Refund subtracts previously booked bytes globally and per-work."""
+        with patch("api.core.budget.get_download_limits", return_value={}):
+            fresh_budget.add_bytes("ia", "work_1", 1000, content_type="pdfs")
+            assert fresh_budget.total_pdfs_bytes == 1000
+            fresh_budget.refund("pdfs", "work_1", 400)
+            assert fresh_budget.total_pdfs_bytes == 600
+            assert fresh_budget.per_work["work_1"]["pdfs"] == 600
+
+    def test_refund_clamps_at_zero(self, fresh_budget: DownloadBudget) -> None:
+        """Refunding more than was booked never drives a counter negative."""
+        with patch("api.core.budget.get_download_limits", return_value={}):
+            fresh_budget.add_bytes("ia", "work_1", 100, content_type="images")
+            fresh_budget.refund("images", "work_1", 999)
+            assert fresh_budget.total_images_bytes == 0
+            assert fresh_budget.per_work["work_1"]["images"] == 0
+
+    def test_refund_ignores_nonpositive(self, fresh_budget: DownloadBudget) -> None:
+        """A zero/negative refund is a no-op (covers the discarded 0-byte case)."""
+        with patch("api.core.budget.get_download_limits", return_value={}):
+            fresh_budget.add_bytes("ia", "work_1", 500, content_type="images")
+            fresh_budget.refund("images", "work_1", 0)
+            fresh_budget.refund("images", "work_1", -5)
+            assert fresh_budget.total_images_bytes == 500
+
+    def test_refund_unknown_work_is_safe(self, fresh_budget: DownloadBudget) -> None:
+        """Refunding a work with no per-work record does not raise or create one."""
+        fresh_budget.refund("images", "never_seen", 100)
+        assert "never_seen" not in fresh_budget.per_work
+
     def test_add_file_no_op(self, fresh_budget: DownloadBudget) -> None:
         """Test that add_file is a no-op."""
         # Should not raise

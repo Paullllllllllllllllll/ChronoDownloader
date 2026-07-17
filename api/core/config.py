@@ -69,9 +69,13 @@ def get_config(force_reload: bool = False) -> dict[str, Any]:
             )
     except FileNotFoundError:
         raise
-    except Exception as e:
-        logger.error("Failed to load config from %s: %s", config_path, e)
-        _CONFIG_CACHE = {}
+    except (json.JSONDecodeError, ValueError) as e:
+        # A present-but-unparseable config is a user error: fail loudly rather
+        # than silently caching an empty dict and running on bare defaults
+        # (wrong output paths, no budget limits) for the rest of the process.
+        raise ValueError(
+            f"Configuration file {config_path!r} contains invalid JSON: {e}"
+        ) from e
 
     return _CONFIG_CACHE
 

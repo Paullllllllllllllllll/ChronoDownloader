@@ -94,6 +94,14 @@ class TestSanitizeFilename:
         assert "?" not in result
         assert "*" not in result
 
+    def test_strips_illegal_characters_from_extension(self) -> None:
+        """Illegal characters in the extension portion (e.g. from a URL-derived
+        '.pdf?token=1' suffix) must be scrubbed too, else os.replace fails on
+        Windows."""
+        result = sanitize_filename("document.pdf?token=1")
+        assert "?" not in result
+        assert result.startswith("document")
+
     def test_collapses_separators(self) -> None:
         """Test that multiple separators are collapsed."""
         result = sanitize_filename("foo...bar___baz.txt")

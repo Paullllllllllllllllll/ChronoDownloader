@@ -69,15 +69,18 @@ class TestGetConfig:
             assert "providers" in result
 
     def test_handles_invalid_json(self, temp_dir: str) -> None:
-        """Test handling of invalid JSON file."""
+        """A present-but-unparseable config raises rather than silently
+        caching an empty dict and running on bare defaults."""
         invalid_path = os.path.join(temp_dir, "invalid.json")
         with open(invalid_path, "w", encoding="utf-8") as f:
             f.write("not valid json {{{")
 
         with patch.dict(os.environ, {"CHRONO_CONFIG_PATH": invalid_path}):
             config_module._CONFIG_CACHE = None
-            result = get_config(force_reload=True)
-            assert result == {}
+            with pytest.raises(ValueError, match="invalid JSON"):
+                get_config(force_reload=True)
+            # The bad config must not have been cached.
+            assert config_module._CONFIG_CACHE is None
 
 
 class TestGetProviderSetting:

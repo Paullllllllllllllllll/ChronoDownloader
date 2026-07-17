@@ -515,6 +515,12 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         part_path = filepath + ".part"
         truncated = False
         bytes_written = 0
+
+        def _discard_partial() -> None:
+            """Remove the .part file and refund any bytes already booked."""
+            _safe_remove(part_path)
+            _BUDGET.refund(budget_type, work_id, bytes_written)
+
         # Buffer the leading bytes so the post-write validators need not reopen
         # the just-written file (which triggers a Defender re-scan on Windows).
         head = bytearray()
@@ -548,17 +554,17 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 part_path,
                 e,
             )
-            _safe_remove(part_path)
+            _discard_partial()
             return None
 
         if truncated:
-            _safe_remove(part_path)
+            _discard_partial()
             return None
 
         # Reject zero-byte downloads outright.
         if bytes_written == 0:
             logger.warning("Downloaded 0 bytes for %s; discarding.", url)
-            _safe_remove(part_path)
+            _discard_partial()
             return None
 
         # When the server declared a Content-Length, require the written byte
@@ -583,7 +589,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 bytes_written,
                 content_len,
             )
-            _safe_remove(part_path)
+            _discard_partial()
             return None
 
         head_bytes = bytes(head)
@@ -594,7 +600,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         )
         if not is_valid:
             logger.warning("%s; discarding: %s", error_msg, url)
-            _safe_remove(part_path)
+            _discard_partial()
             return None
 
         if inferred_ext == ".html":
@@ -603,14 +609,14 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             )
             if not is_valid:
                 logger.warning("%s; discarding: %s", error_msg, url)
-                _safe_remove(part_path)
+                _discard_partial()
                 return None
 
         try:
             os.replace(part_path, filepath)
         except OSError as e:
             logger.error("Failed to finalize download %s: %s", filepath, e)
-            _safe_remove(part_path)
+            _discard_partial()
             return None
 
         log_suffix = " (insecure)" if is_insecure_retry else ""

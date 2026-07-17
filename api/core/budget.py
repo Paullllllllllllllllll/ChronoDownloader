@@ -318,6 +318,36 @@ class DownloadBudget:
 
         return True
 
+    def refund(
+        self, content_type: str, work_id: str | None, n: int
+    ) -> None:
+        """Return bytes previously booked via ``add_bytes`` for a discarded file.
+
+        ``add_bytes`` records every accepted chunk into the budget *before* the
+        streamed ``.part`` file is validated and promoted. When a download is
+        later discarded (connection drop, truncation, failed magic-byte/login
+        validation, or a failed ``os.replace``), the already-counted bytes must
+        be given back or repeated failed attempts would inflate the budget with
+        bytes that were never kept and exhaust it prematurely.
+
+        Args:
+            content_type: Budget bucket ("images", "pdfs", or "metadata").
+            work_id: Work ID for per-work tracking.
+            n: Number of bytes to return (values <= 0 are ignored).
+        """
+        if n <= 0:
+            return
+        if content_type not in ("images", "pdfs", "metadata"):
+            content_type = "images"
+
+        with self._lock:
+            attr_name = f"total_{content_type}_bytes"
+            setattr(self, attr_name, max(0, getattr(self, attr_name, 0) - n))
+            if work_id:
+                m = self.per_work.get(work_id)
+                if m is not None:
+                    m[content_type] = max(0, int(m.get(content_type, 0)) - n)
+
     def add_file(self, provider: str | None, work_id: str | None) -> None:
         """Record a completed file download (legacy method).
 

@@ -136,6 +136,11 @@ def sanitize_filename(name: str, max_base_len: int = 100) -> str:
     # Truncate base only
     base = base[:max_base_len]
     base = _guard_reserved_name(base)
+    # Scrub illegal characters from the extension too: a suffix inferred from a
+    # URL or Content-Disposition header (e.g. ".pdf?token=1") can smuggle
+    # filesystem-illegal characters like "?" past the base-only cleaning above,
+    # which then breaks os.replace() on Windows.
+    ext = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", ext)
     return f"{base}{ext}"
 
 
