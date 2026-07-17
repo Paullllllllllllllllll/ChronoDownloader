@@ -1,4 +1,4 @@
-# ChronoDownloader v1.12.3
+# ChronoDownloader v1.12.4
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1055,8 +1055,8 @@ ChronoDownloader/
 |   |-- unit/
 |   |-- integration/
 |   `-- staging/
-|-- config.json
-|-- requirements.txt
+|-- config.example.json
+|-- pyproject.toml
 `-- README.md
 ```
 
@@ -1087,8 +1087,6 @@ DOWNLOAD PHASE (worker threads):
   Update index.csv (thread-safe)
 Summary report
 ```
-
-## Migration
 
 ## FAQ
 
@@ -1146,6 +1144,17 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.12.4** (17 July 2026) -- Documentation maintenance release. Rewrote the
+  stale `tests/README.md` (it claimed 305 tests against 1,125 actual, listed 9
+  of 43 unit test files, and pointed to a `pytest.ini` and `requirements-dev.txt`
+  that do not exist; pytest configuration lives in `pyproject.toml` and test
+  dependencies install via `uv sync --extra dev`). Removed the empty
+  `## Migration` heading from the README and corrected its architecture tree
+  (`config.example.json` and `pyproject.toml` instead of the retired
+  `config.json` and `requirements.txt` entries). Dropped the dead
+  `deferred.check_interval_minutes` key from `config.example.json` (unused since
+  the background daemon was removed in v1.7.0). No runtime code changed; 1,125
+  tests pass.
 - **v1.12.3** (16 July 2026) -- Type-checking maintenance release. Fixed two
   mypy errors in the test suite: the atomicity test now imports
   `atomic_write_text` from its defining module (`api.core.atomic`) rather than

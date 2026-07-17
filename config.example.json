@@ -293,7 +293,6 @@
   },
   "deferred": {
     "background_enabled": true,
-    "check_interval_minutes": 15,
     "max_retries": 5,
     "_note": "Quota-deferred downloads are retried synchronously at the start of the next run. State lives in ~/.chronodownloader/.downloader_state.json by default; a legacy CWD state file is adopted once automatically.",
     "_state_dir_note": "Optional overrides: set 'state_dir' to change the state directory, or 'state_file' for a full path override (legacy behavior)."
