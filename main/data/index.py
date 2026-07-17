@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 # Thread-safe lock for index.csv updates
 _index_csv_lock = threading.Lock()
 
+# In-process cache of parsed index.csv rows, keyed by absolute path and gated
+# on the file's (mtime, size) stat signature. This lets update_index_csv skip
+# re-reading the whole file when this process made the last write, while a
+# stat mismatch (e.g. an external process rewrote the file) forces a re-read.
+# All access happens under _index_csv_lock, so no separate lock is needed.
+_index_cache: dict[str, tuple[list[dict[str, str]], float, int]] = {}
+
 # Fixed, stable column set. The header is always written in full so a partial
 # first row (e.g. a dry-run row lacking a status) can never drop a column for
 # every subsequent write.
@@ -66,6 +73,34 @@ def _read_existing_rows(index_path: str) -> list[dict[str, str]]:
         return []
 
 
+def _index_stat(index_path: str) -> tuple[float, int]:
+    """Return the (mtime, size) signature of ``index_path`` (zeros if absent)."""
+    try:
+        st = os.stat(index_path)
+    except OSError:
+        return (0.0, 0)
+    return (st.st_mtime, st.st_size)
+
+
+def _load_rows_for_update(index_path: str) -> list[dict[str, str]]:
+    """Return parsed index rows, from cache when the stat signature matches.
+
+    On a cache miss the file is read via ``_read_existing_rows`` and the result
+    is stored keyed on the file's own post-read stat signature.
+    """
+    key = _index_stat(index_path)
+    cached = _index_cache.get(index_path)
+    if cached is not None:
+        rows, cached_mtime, cached_size = cached
+        if (cached_mtime, cached_size) == key:
+            return rows
+
+    rows = _read_existing_rows(index_path)
+    mtime, size = _index_stat(index_path)
+    _index_cache[index_path] = (rows, mtime, size)
+    return rows
+
+
 def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
     """Thread-safe upsert of a row into index.csv keyed by ``work_id``.
 
@@ -82,7 +117,7 @@ def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
             os.makedirs(base_output_dir, exist_ok=True)
             index_path = _index_path(base_output_dir)
 
-            rows = _read_existing_rows(index_path)
+            rows = _load_rows_for_update(index_path)
             work_id = str(row.get("work_id", "") or "")
 
             normalized = {col: _cell(row.get(col)) for col in INDEX_COLUMNS}
@@ -105,6 +140,10 @@ def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
 
             buf = _render_csv(rows)
             atomic_write_text(index_path, buf)
+            # Refresh the cache with the just-written rows, keyed on the file's
+            # own stat signature so the next call can skip the re-read.
+            mtime, size = _index_stat(index_path)
+            _index_cache[index_path] = (rows, mtime, size)
         except Exception:
             logger.exception("Failed to update index.csv")
 

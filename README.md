@@ -1,4 +1,4 @@
-# ChronoDownloader v1.12.4
+# ChronoDownloader v1.13.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1144,6 +1144,20 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.13.0** (17 July 2026) -- Performance release targeting local CPU and
+  disk paths; network behavior, rate limiting, and retries are untouched, and
+  all outputs remain byte-identical. Downloaded files are now validated from
+  an in-stream buffer instead of reopening the just-written file (which
+  re-triggered antivirus scanning; ~46x faster per PDF); the download budget
+  resolves its limits once per file rather than on every chunk, and the
+  streaming chunk size rises from 8 KB to 64 KB; `index.csv` updates use an
+  mtime/size-keyed row cache that removes the O(n squared) full-file re-read
+  (3.8x at 2,000 works) while keeping atomic rewrites; works-CSV status
+  updates guard their dtype casts; deferred-queue and quota state replace
+  `dataclasses.asdict` reflection with explicit `to_dict` methods; and fuzzy
+  matching skips redundant re-normalization of already-normalized strings
+  (verified score-identical across 20,049 pairs). The test suite itself runs
+  about 25 percent faster.
 - **v1.12.4** (17 July 2026) -- Documentation maintenance release. Rewrote the
   stale `tests/README.md` (it claimed 305 tests against 1,125 actual, listed 9
   of 43 unit test files, and pointed to a `pytest.ini` and `requirements-dev.txt`

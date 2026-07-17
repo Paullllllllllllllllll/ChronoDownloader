@@ -8,11 +8,26 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from typing import Any, NamedTuple
 
 from .config import get_download_limits
 
 logger = logging.getLogger(__name__)
+
+
+class _Limits(NamedTuple):
+    """Resolved byte limits and policy for one (content_type, work_id).
+
+    Snapshotting these once per streaming session lets the per-chunk budget
+    check avoid rebuilding the config dict and re-converting GB/MB thresholds
+    on every chunk. Only the limit *values* are captured; the live byte
+    counters are still read and compared under the lock on each chunk, so
+    mid-file cutoff behavior is unchanged.
+    """
+
+    max_total: int | None
+    max_work: int | None
+    policy: str
 
 
 class DownloadBudget:
@@ -78,6 +93,31 @@ class DownloadBudget:
         pol = str(dl.get("on_exceed", "skip") or "skip").lower()
         return "stop" if pol == "stop" else "skip"
 
+    def resolve_limits(self, content_type: str, work_id: str | None) -> _Limits:
+        """Resolve the applicable byte limits + policy for one download.
+
+        Reads the download-limits config exactly once and converts the GB/MB
+        thresholds to bytes, so a streaming loop can pass the result to
+        ``add_bytes`` per chunk instead of rebuilding and re-parsing the config
+        on every chunk. The returned limits capture the same values that a live
+        per-chunk resolution would see for this ``content_type``/``work_id``.
+        """
+        dl = get_download_limits()
+        total_limits = dl.get("total", {})
+        max_total = self._gb_to_bytes(total_limits.get(f"{content_type}_gb"))
+
+        max_work: int | None = None
+        if work_id:
+            per_work_limits = dl.get("per_work", {})
+            if content_type == "metadata":
+                max_work = self._mb_to_bytes(per_work_limits.get("metadata_mb"))
+            else:
+                max_work = self._gb_to_bytes(per_work_limits.get(f"{content_type}_gb"))
+
+        pol = str(dl.get("on_exceed", "skip") or "skip").lower()
+        policy = "stop" if pol == "stop" else "skip"
+        return _Limits(max_total, max_work, policy)
+
     def exhausted(self) -> bool:
         """Check if the download budget has been exhausted."""
         with self._lock:
@@ -124,19 +164,24 @@ class DownloadBudget:
             return self._allow_content_locked(content_type, work_id, add_bytes)
 
     def _allow_content_locked(
-        self, content_type: str, work_id: str | None, add_bytes: int
+        self,
+        content_type: str,
+        work_id: str | None,
+        add_bytes: int,
+        limits: _Limits | None = None,
     ) -> bool:
-        """Limit check body; caller must hold ``self._lock``."""
-        dl = get_download_limits()
+        """Limit check body; caller must hold ``self._lock``.
 
-        # Get total limits
-        total_limits = dl.get("total", {})
+        ``limits`` may be a pre-resolved snapshot (once per streaming session)
+        to avoid re-reading and re-parsing the config per chunk. When omitted
+        it is resolved live, preserving the original per-call behavior.
+        """
+        if limits is None:
+            limits = self.resolve_limits(content_type, work_id)
 
         # Global limit for this content type
-        limit_key = f"{content_type}_gb"
-        max_total = self._gb_to_bytes(total_limits.get(limit_key))
-
         current_total = getattr(self, f"total_{content_type}_bytes", 0)
+        max_total = limits.max_total
         if max_total is not None and (current_total + add_bytes) > max_total:
             logger.info(
                 "Global %s limit would be exceeded: %.2f GB > %.2f GB",
@@ -144,28 +189,18 @@ class DownloadBudget:
                 (current_total + add_bytes) / (1024**3),
                 max_total / (1024**3),
             )
-            if self._policy() == "stop":
+            if limits.policy == "stop":
                 self._exhausted = True
             return False
 
         # Per-work limit for this content type
-        if work_id:
-            per_work_limits = dl.get("per_work", {})
-
-            # Handle MB for metadata, GB for others
-            if content_type == "metadata":
-                limit_key = "metadata_mb"
-                max_work = self._mb_to_bytes(per_work_limits.get(limit_key))
-            else:
-                limit_key = f"{content_type}_gb"
-                max_work = self._gb_to_bytes(per_work_limits.get(limit_key))
-
+        if work_id and limits.max_work is not None:
             current_work = self._get(self.per_work, work_id, content_type)
-            if max_work is not None and (current_work + add_bytes) > max_work:
+            if (current_work + add_bytes) > limits.max_work:
                 logger.info(
                     "Per-work %s limit would be exceeded for %s", content_type, work_id
                 )
-                if self._policy() == "stop":
+                if limits.policy == "stop":
                     self._exhausted = True
                 return False
 
@@ -249,6 +284,7 @@ class DownloadBudget:
         work_id: str | None,
         add_bytes: int,
         content_type: str = "images",
+        limits: _Limits | None = None,
     ) -> bool:
         """Atomically check-and-record bytes during a streaming download.
 
@@ -261,6 +297,9 @@ class DownloadBudget:
             add_bytes: Number of bytes to add
             content_type: Budget bucket ("images", "pdfs", or "metadata"),
                 classified by the caller from the file extension.
+            limits: Optional pre-resolved limit snapshot (see ``resolve_limits``)
+                to skip re-reading the config on every chunk. When omitted, the
+                limits are resolved live for each call.
 
         Returns:
             True if bytes were accepted, False if limit exceeded
@@ -269,7 +308,7 @@ class DownloadBudget:
             content_type = "images"
 
         with self._lock:
-            if not self._allow_content_locked(content_type, work_id, add_bytes):
+            if not self._allow_content_locked(content_type, work_id, add_bytes, limits):
                 return False
 
             attr_name = f"total_{content_type}_bytes"

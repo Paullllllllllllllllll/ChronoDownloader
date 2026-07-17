@@ -97,7 +97,10 @@ def token_set_ratio(a: str, b: str) -> int:
     sa = " ".join(sorted(a_tokens))
     sb = " ".join(sorted(b_tokens))
 
-    return simple_ratio(sa, sb)
+    # sa/sb are already fully normalized (normalize_text is idempotent on its
+    # own output) and non-empty here, so skip simple_ratio's redundant
+    # re-normalization and compute the difflib ratio directly.
+    return int(round(difflib.SequenceMatcher(None, sa, sb).ratio() * 100))
 
 
 def title_score(query_title: str, item_title: str, method: str = "token_set") -> int:

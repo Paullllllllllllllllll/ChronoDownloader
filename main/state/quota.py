@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
@@ -56,8 +56,19 @@ class ProviderQuota:
     exhausted_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return asdict(self)
+        """Convert to dictionary for JSON serialization.
+
+        Mirrors ``from_dict``'s field list. All fields are immutable scalars,
+        so no defensive copy is needed.
+        """
+        return {
+            "provider_key": self.provider_key,
+            "daily_limit": self.daily_limit,
+            "reset_hours": self.reset_hours,
+            "downloads_used": self.downloads_used,
+            "period_start": self.period_start,
+            "exhausted_at": self.exhausted_at,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProviderQuota:

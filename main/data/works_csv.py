@@ -251,10 +251,13 @@ def mark_success(
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
 
-            # Ensure columns have compatible dtype for mixed values
-            if STATUS_COL in df.columns:
+            # Ensure columns have compatible dtype for mixed values. The
+            # astype(object) cast is skipped when the column is already object
+            # dtype (the common case after the first write), avoiding a
+            # full-column copy on every call.
+            if STATUS_COL in df.columns and df[STATUS_COL].dtype != object:
                 df[STATUS_COL] = df[STATUS_COL].astype(object)
-            if LINK_COL in df.columns:
+            if LINK_COL in df.columns and df[LINK_COL].dtype != object:
                 df[LINK_COL] = df[LINK_COL].astype(object)
 
             # Update status and link
@@ -308,8 +311,9 @@ def mark_failed(
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
 
-            # Ensure column has compatible dtype for mixed values
-            if STATUS_COL in df.columns:
+            # Ensure column has compatible dtype for mixed values, skipping the
+            # cast when it is already object dtype.
+            if STATUS_COL in df.columns and df[STATUS_COL].dtype != object:
                 df[STATUS_COL] = df[STATUS_COL].astype(object)
 
             # Update status
@@ -361,8 +365,9 @@ def mark_deferred(
                 logger.warning("Entry ID %s not found in CSV", entry_id)
                 return False
 
-            # Ensure column can hold the string status value
-            if STATUS_COL in df.columns:
+            # Ensure column can hold the string status value, skipping the cast
+            # when it is already object dtype.
+            if STATUS_COL in df.columns and df[STATUS_COL].dtype != object:
                 df[STATUS_COL] = df[STATUS_COL].astype(object)
 
             df.loc[mask, STATUS_COL] = "deferred"

@@ -20,11 +20,12 @@ Features:
 
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 import uuid
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -82,8 +83,31 @@ class DeferredItem:
     raw_data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return asdict(self)
+        """Convert to dictionary for JSON serialization.
+
+        Mirrors ``from_dict``'s field list. ``raw_data`` is deep-copied to
+        preserve ``dataclasses.asdict`` semantics: callers mutating the
+        returned dict must not be able to corrupt queue state.
+        """
+        return {
+            "id": self.id,
+            "title": self.title,
+            "creator": self.creator,
+            "entry_id": self.entry_id,
+            "provider_key": self.provider_key,
+            "provider_name": self.provider_name,
+            "source_id": self.source_id,
+            "work_dir": self.work_dir,
+            "base_output_dir": self.base_output_dir,
+            "item_url": self.item_url,
+            "deferred_at": self.deferred_at,
+            "reset_time": self.reset_time,
+            "retry_count": self.retry_count,
+            "last_retry_at": self.last_retry_at,
+            "status": self.status,
+            "error_message": self.error_message,
+            "raw_data": copy.deepcopy(self.raw_data),
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeferredItem:

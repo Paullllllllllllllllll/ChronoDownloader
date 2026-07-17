@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import threading
 import time
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -49,6 +50,29 @@ from .network import (
 logger = logging.getLogger(__name__)
 
 _BUDGET = get_budget()
+
+# Number of leading bytes buffered from the stream for post-write validation
+# (magic-byte + HTML login-page checks), so the file need not be reopened.
+# Covers the larger of the two validators (HTML login check reads 2048).
+_VALIDATION_HEAD_BYTES = 2048
+
+# Directories created this run. os.makedirs(exist_ok=True) is a syscall even
+# when the directory already exists; every page of a work re-creates the same
+# objects/ and metadata/ directories. Caching known-created paths skips the
+# redundant calls. A directory deleted externally after caching is still caught
+# by the existing OSError handling on the subsequent write.
+_CREATED_DIRS: set[str] = set()
+_CREATED_DIRS_LOCK = threading.Lock()
+
+
+def _ensure_dir(path: str) -> None:
+    """Create ``path`` once, caching to skip redundant makedirs syscalls."""
+    with _CREATED_DIRS_LOCK:
+        if path in _CREATED_DIRS:
+            return
+        os.makedirs(path, exist_ok=True)
+        _CREATED_DIRS.add(path)
+
 
 _CONTENT_TYPE_EXT_MAP = {
     "application/pdf": ".pdf",
@@ -144,13 +168,23 @@ def _should_reject_html_response(
     return False, ""
 
 
-def _validate_file_magic_bytes(filepath: str, ext: str) -> tuple[bool, str]:
+def _validate_file_magic_bytes(
+    filepath: str,
+    ext: str,
+    head: bytes | None = None,
+    complete: bool = False,
+) -> tuple[bool, str]:
     if ext not in (".pdf", ".epub"):
         return True, ""
 
     try:
-        with open(filepath, "rb") as f:
-            first_bytes = f.read(512)
+        # Prefer the bytes already buffered during streaming; fall back to
+        # reopening the file only if the buffered prefix is too short.
+        if head is not None and (len(head) >= 512 or complete):
+            first_bytes = head[:512]
+        else:
+            with open(filepath, "rb") as f:
+                first_bytes = f.read(512)
 
         is_html = b"<!DOCTYPE" in first_bytes or b"<html" in first_bytes.lower()
 
@@ -171,7 +205,11 @@ def _validate_file_magic_bytes(filepath: str, ext: str) -> tuple[bool, str]:
 
 
 def _validate_html_not_login_page(
-    filepath: str, url: str, provider: str | None
+    filepath: str,
+    url: str,
+    provider: str | None,
+    head: bytes | None = None,
+    complete: bool = False,
 ) -> tuple[bool, str]:
     url_lower = url.lower()
     provider_lower = (provider or "").lower()
@@ -180,8 +218,17 @@ def _validate_html_not_login_page(
         return True, ""
 
     try:
-        with open(filepath, encoding="utf-8", errors="ignore") as f:
-            html_content = f.read(2048).lower()
+        # Decode the bytes buffered during streaming; only reopen the file when
+        # that prefix does not cover the 2048 characters this check inspects
+        # (e.g. a large multibyte file whose first 2048 bytes decode short).
+        html_content: str | None = None
+        if head is not None:
+            decoded = head.decode("utf-8", errors="ignore").lower()
+            if len(decoded) >= 2048 or complete:
+                html_content = decoded[:2048]
+        if html_content is None:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
+                html_content = f.read(2048).lower()
 
         if any(marker in html_content for marker in _ANNAS_LOGIN_MARKERS):
             return False, "Anna's Archive login/error page detected"
@@ -322,7 +369,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     Returns:
         Path to downloaded file or None on failure
     """
-    os.makedirs(folder_path, exist_ok=True)
+    _ensure_dir(folder_path)
 
     session = get_session()
     provider = get_provider_for_url(url)
@@ -420,7 +467,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         if log_msg:
             logger.info(log_msg)
 
-        os.makedirs(target_dir, exist_ok=True)
+        _ensure_dir(target_dir)
 
         safe_name = _build_standardized_filename(inferred_ext, stem, prov_slug)
         filepath = os.path.join(target_dir, safe_name)
@@ -459,16 +506,29 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         # A connection drop, disk-full error, or budget cutoff therefore never
         # leaves a partial file at the final path that a later resume run would
         # treat as a complete download.
+        # Resolve the budget limits once for this streaming session; the
+        # per-chunk atomic check-and-record still reads live counters against
+        # this snapshot, so mid-file cutoff behavior is unchanged while the
+        # config dict rebuild and GB/MB conversions no longer run per chunk.
+        budget_limits = _BUDGET.resolve_limits(budget_type, work_id)
+
         part_path = filepath + ".part"
         truncated = False
         bytes_written = 0
+        # Buffer the leading bytes so the post-write validators need not reopen
+        # the just-written file (which triggers a Defender re-scan on Windows).
+        head = bytearray()
         try:
             with open(part_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=65536):
                     if not chunk:
                         continue
                     if not _BUDGET.add_bytes(
-                        provider, work_id, len(chunk), content_type=budget_type
+                        provider,
+                        work_id,
+                        len(chunk),
+                        content_type=budget_type,
+                        limits=budget_limits,
                     ):
                         logger.error(
                             "Download budget exceeded while writing %s; "
@@ -478,6 +538,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                         truncated = True
                         break
                     f.write(chunk)
+                    if len(head) < _VALIDATION_HEAD_BYTES:
+                        head.extend(chunk[: _VALIDATION_HEAD_BYTES - len(head)])
                     bytes_written += len(chunk)
         except (requests.exceptions.RequestException, OSError) as e:
             logger.error(
@@ -524,7 +586,12 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             _safe_remove(part_path)
             return None
 
-        is_valid, error_msg = _validate_file_magic_bytes(part_path, inferred_ext)
+        head_bytes = bytes(head)
+        head_complete = bytes_written == len(head_bytes)
+
+        is_valid, error_msg = _validate_file_magic_bytes(
+            part_path, inferred_ext, head=head_bytes, complete=head_complete
+        )
         if not is_valid:
             logger.warning("%s; discarding: %s", error_msg, url)
             _safe_remove(part_path)
@@ -532,7 +599,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
 
         if inferred_ext == ".html":
             is_valid, error_msg = _validate_html_not_login_page(
-                part_path, url, provider
+                part_path, url, provider, head=head_bytes, complete=head_complete
             )
             if not is_valid:
                 logger.warning("%s; discarding: %s", error_msg, url)
