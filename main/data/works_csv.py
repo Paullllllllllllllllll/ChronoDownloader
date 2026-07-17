@@ -12,6 +12,7 @@ Expected CSV columns (from bib_sampling.ipynb):
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import numbers
 import os
@@ -58,6 +59,17 @@ def _parse_status(val: object) -> str:
     """
     if val is None or val is pd.NA or (isinstance(val, float) and pd.isna(val)):
         return "pending"
+    # Normalize numpy scalars (numpy.bool_, numpy.int64, numpy.float64) to their
+    # native Python equivalents via .item(). This matters most for numpy.bool_:
+    # when every retrievable cell is True/False, pandas loads the column as bool
+    # dtype whose cells are numpy.bool_, which is NOT an instance of bool OR
+    # numbers.Real, so without this the value would fall through to "pending" and
+    # every completed work would be misclassified (breaking resume, --status
+    # counts, and --pending-mode filtering). Duck-typing .item() avoids a direct
+    # numpy import (numpy is only a transitive dependency via pandas).
+    if hasattr(val, "item") and not isinstance(val, (str, bytes)):
+        with contextlib.suppress(ValueError, AttributeError):
+            val = val.item()
     if isinstance(val, bool):
         return "completed" if val else "failed"
     if isinstance(val, numbers.Real):

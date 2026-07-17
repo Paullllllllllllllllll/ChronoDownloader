@@ -217,6 +217,27 @@ class TestGetPendingWorks:
         assert get_completed_entry_ids(df) == {"E0001"}
         assert get_pending_works(df)[ENTRY_ID_COL].tolist() == ["E0002"]
 
+    def test_handles_bool_dtype_status_column(self, temp_dir: str) -> None:
+        """A retrievable column of only True/False loads as bool dtype whose
+        cells are numpy.bool_; these must classify as completed/failed, not
+        fall through to pending (regression: broke resume and --status)."""
+        csv_path = os.path.join(temp_dir, "bool_status.csv")
+        pd.DataFrame(
+            {
+                "entry_id": ["E0001", "E0002"],
+                "short_title": ["A", "B"],
+                "retrievable": [True, False],
+            }
+        ).to_csv(csv_path, index=False)
+
+        df = load_works_csv(csv_path)
+        # Guard: the column really is bool dtype (the condition that triggered
+        # the bug), so this test would regress if the loader changed.
+        assert df["retrievable"].dtype == bool
+
+        assert get_completed_entry_ids(df) == {"E0001"}
+        assert get_pending_works(df)[ENTRY_ID_COL].tolist() == ["E0002"]
+
 
 class TestGetCompletedEntryIds:
     """Tests for get_completed_entry_ids function."""
