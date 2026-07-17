@@ -1,4 +1,4 @@
-# ChronoDownloader v1.13.0
+# ChronoDownloader v1.14.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1144,6 +1144,22 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.14.0** (18 July 2026) -- Correctness and robustness release. Several
+  provider search paths are hardened against well-formed but variably shaped
+  API responses: Europeana no longer aborts on an empty title list, Internet
+  Archive, Library of Congress, DPLA, and MDZ tolerate null, string, or
+  structured creator/title fields, and Wellcome clamps its page size to the
+  API cap. Google Books now joins its intitle/inauthor clauses with a space
+  instead of a "+" (which requests encoded to %2B, nullifying author-scoped
+  queries), and IIIF v2 manifests whose resource service is a list are parsed
+  correctly rather than yielding zero page images. The download budget refunds
+  bytes booked for any download later discarded, so repeated failed attempts
+  no longer exhaust it; an unparseable config now raises instead of silently
+  running on bare defaults; and filename suffixes are scrubbed of illegal
+  characters. The scheduler releases its pending count when a task is skipped
+  during shutdown, fallback selection honors per-provider score thresholds,
+  and a retrievable column loaded as pandas bool dtype is classified
+  correctly, restoring resume and status reporting.
 - **v1.13.0** (17 July 2026) -- Performance release targeting local CPU and
   disk paths; network behavior, rate limiting, and retries are untouched, and
   all outputs remain byte-identical. Downloaded files are now validated from
