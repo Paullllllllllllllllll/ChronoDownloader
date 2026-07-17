@@ -61,8 +61,12 @@ def search_mdz(
                 if not obj_id:
                     continue
                 title_html = doc.get("title") or title
+                # A list-valued (highlighted) title would make re.sub raise
+                # TypeError, silently dropping the doc; coerce to str first.
+                if isinstance(title_html, list):
+                    title_html = title_html[0] if title_html else title
                 # Strip simple tags from highlighted title
-                title_text = re.sub(r"<[^>]+>", "", title_html)
+                title_text = re.sub(r"<[^>]+>", "", str(title_html))
                 authors = doc.get("authors") or []
                 creator_text = (
                     ", ".join(authors)
@@ -76,7 +80,8 @@ def search_mdz(
                     "item_url": f"https://www.digitale-sammlungen.de/view/{obj_id}",
                 }
                 results.append(convert_to_searchresult("MDZ", raw))
-            except Exception:
+            except Exception as e:
+                logger.debug("Skipping malformed MDZ result: %s", e)
                 continue
     if results:
         return results

@@ -80,11 +80,19 @@ def search_loc(
         item_id = item.get("id")
         if item_id:
             item_id = item_id.strip("/").split("/")[-1]
+        # contributor_names is normally a list of strings, but guard against a
+        # bare string (where [0] would take just the first character) and an
+        # absent/empty field.
+        contributors = item.get("contributor_names")
+        if isinstance(contributors, list) and contributors:
+            creator = str(contributors[0])
+        elif isinstance(contributors, str) and contributors:
+            creator = contributors
+        else:
+            creator = "N/A"
         raw = {
             "title": item.get("title", "N/A"),
-            "creator": item.get("contributor_names", ["N/A"])[0]
-            if item.get("contributor_names")
-            else "N/A",
+            "creator": creator,
             "id": item_id,
             "item_url": item.get("url"),
             "iiif_manifest": _extract_iiif_manifest(item),

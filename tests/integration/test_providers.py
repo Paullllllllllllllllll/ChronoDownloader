@@ -110,6 +110,28 @@ class TestInternetArchiveProvider:
             params = call_args[1].get("params", {})
             assert params.get("rows") == "5"
 
+    def test_search_handles_null_creator(self) -> None:
+        """A present-but-null creator must not raise (join(None) -> TypeError)
+        and non-string list entries are coerced rather than crashing."""
+        response = {
+            "response": {
+                "docs": [
+                    {"identifier": "a", "title": "T1", "creator": None},
+                    {"identifier": "b", "title": "T2", "creator": [123, "X"]},
+                ]
+            }
+        }
+        with patch(
+            "api.providers.internet_archive.make_request", return_value=response
+        ):
+            from api.providers.internet_archive import search_internet_archive
+
+            results = search_internet_archive("Title")
+
+            assert len(results) == 2
+            assert results[0].raw["creator"] == "N/A"
+            assert results[1].raw["creator"] == "123, X"
+
 
 class TestGallicaProvider:
     """Integration tests for BnF Gallica provider."""
@@ -160,6 +182,25 @@ class TestLocProvider:
             assert len(results) >= 1
             assert all(isinstance(r, SearchResult) for r in results)
 
+    def test_search_contributor_names_as_string(self) -> None:
+        """A string (not list) contributor_names must not be indexed as
+        ``[0]`` (which would take just the first character)."""
+        mock_response = {
+            "results": [
+                {
+                    "id": "http://www.loc.gov/item/12345/",
+                    "title": "American Cookbook",
+                    "contributor_names": "Chef Smith",
+                }
+            ]
+        }
+        with patch("api.providers.loc.make_request", return_value=mock_response):
+            from api.providers.loc import search_loc
+
+            results = search_loc("cookbook")
+
+            assert results[0].raw["creator"] == "Chef Smith"
+
 
 class TestMdzProvider:
     """Integration tests for MDZ (Münchener DigitalisierungsZentrum) provider."""
@@ -173,6 +214,65 @@ class TestMdzProvider:
 
             # Should return empty list for None response
             assert results == []
+
+    def test_search_handles_list_title(self) -> None:
+        """A list-valued (highlighted) title must be coerced, not dropped by
+        the broad except (which silently yielded zero results)."""
+        response = {
+            "docs": [{"id": "bsb123", "title": ["Kochbuch"], "iiifAvailable": True}]
+        }
+        with patch("api.providers.mdz.make_request", return_value=response):
+            from api.providers.mdz import search_mdz
+
+            results = search_mdz("kochen")
+
+            assert len(results) == 1
+            assert results[0].raw["title"] == "Kochbuch"
+
+
+class TestEuropeanaProvider:
+    """Integration tests for the Europeana provider."""
+
+    def test_search_handles_empty_title_list(self) -> None:
+        """A present-but-empty ``title: []`` must not raise IndexError (which
+        aborted the whole search); a string dcCreator is used as-is."""
+        response = {
+            "success": True,
+            "items": [
+                {"id": "/1/x", "title": [], "dcCreator": "Solo Author"},
+                {"id": "/1/y", "title": ["Good Title"]},
+            ],
+        }
+        with (
+            patch("api.providers.europeana._api_key", return_value="KEY"),
+            patch("api.providers.europeana.make_request", return_value=response),
+        ):
+            from api.providers.europeana import search_europeana
+
+            results = search_europeana("cookbook")
+
+            assert len(results) == 2
+            assert results[0].raw["title"] == "N/A"
+            assert results[0].raw["creator"] == "Solo Author"
+            assert results[1].raw["title"] == "Good Title"
+
+
+class TestGoogleBooksProvider:
+    """Integration tests for the Google Books provider."""
+
+    def test_author_query_uses_space_not_plus(self) -> None:
+        """Field clauses must be space-separated: a literal '+' is URL-encoded
+        to %2B by requests, nullifying the combined title+author query."""
+        with patch(
+            "api.providers.google_books.make_request", return_value=None
+        ) as mock:
+            from api.providers.google_books import search_google_books
+
+            search_google_books("Cookery", creator="Glasse")
+
+            first_q = mock.call_args_list[0].kwargs["params"]["q"]
+            assert "+inauthor" not in first_q
+            assert 'inauthor:"Glasse"' in first_q
 
 
 class TestProviderRegistry:

@@ -52,6 +52,33 @@ class TestExtractImageServiceBasesV2:
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
 
+    def test_extracts_when_v2_service_is_a_list(self) -> None:
+        """IIIF v2 permits resource.service to be an array; the extractor must
+        normalize it to the first entry instead of raising AttributeError
+        (which was swallowed, silently yielding zero page images)."""
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": [
+                                            {"@id": "https://example.org/iiif/img1"},
+                                            {"@id": "https://example.org/iiif/other"},
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        bases = extract_image_service_bases(manifest)
+        assert bases == ["https://example.org/iiif/img1"]
+
     def test_skips_canvas_without_images(self) -> None:
         manifest = {
             "sequences": [

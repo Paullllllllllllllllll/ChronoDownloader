@@ -91,8 +91,10 @@ def search_wellcome(
         List of SearchResult objects
     """
     q = title if not creator else f"{title} {creator}"
-    # Pull a few extra results to increase the chance of having iiif images
-    page_size = max(25, max_results * 5)
+    # Pull a few extra results to increase the chance of having iiif images,
+    # but stay within the Wellcome catalogue API's pageSize cap of 100 (a
+    # larger value 400s and make_request then returns no results).
+    page_size = min(100, max(25, max_results * 5))
     params = {
         "query": q,
         "include": "items",

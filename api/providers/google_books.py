@@ -121,11 +121,15 @@ def search_google_books(
     q1 = f'intitle:"{safe_title}"'
     if creator:
         safe_creator = creator.replace('"', " ")
-        q1 += f'+inauthor:"{safe_creator}"'
+        # Join field clauses with a space, not "+": the value is passed through
+        # requests' URL encoding, which turns a literal "+" into %2B (a literal
+        # plus) rather than the space/AND separator Google Books expects,
+        # nullifying the combined title+author query.
+        q1 += f' inauthor:"{safe_creator}"'
     # 2) unquoted fields (helps with punctuation-heavy titles)
     q2 = f"intitle:{title}"
     if creator:
-        q2 += f"+inauthor:{creator}"
+        q2 += f" inauthor:{creator}"
     # 3) plain text title+creator
     q3 = f"{title} {creator}" if creator else f"{title}"
     # 4) heavily sanitized plain title only

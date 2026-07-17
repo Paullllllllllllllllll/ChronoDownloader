@@ -120,8 +120,16 @@ def extract_image_service_bases(manifest: dict[str, Any]) -> list[str]:
 
     for res in _iter_v2_resources(manifest):
         try:
+            # The IIIF Presentation v2 spec permits resource.service to be an
+            # array; several real manifests emit this. Normalize to a single
+            # dict as the v3 branch below already does, otherwise the whole
+            # manifest silently yields zero page images.
             service = res.get("service", {})
-            svc_id = service.get("@id") or service.get("id")
+            if isinstance(service, list):
+                service = service[0] if service else {}
+            svc_id = None
+            if isinstance(service, dict):
+                svc_id = service.get("@id") or service.get("id")
 
             if not svc_id:
                 img_id = res.get("@id") or res.get("id")

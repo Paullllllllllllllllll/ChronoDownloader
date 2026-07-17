@@ -94,12 +94,20 @@ def search_europeana(
         return results
     if data.get("success") and data.get("items"):
         for item in data["items"]:
-            item_title = item.get("title", ["N/A"])
-            if isinstance(item_title, list):
-                item_title = item_title[0]
+            # A present-but-empty "title": [] (records lacking dc:title) would
+            # make the default unused and [][0] raise IndexError, aborting the
+            # whole search; guard for the empty-list case explicitly.
+            titles = item.get("title") or ["N/A"]
+            if isinstance(titles, list):
+                item_title = titles[0] if titles else "N/A"
+            else:
+                item_title = titles
             item_creator = "N/A"
-            if item.get("dcCreator"):
-                item_creator = item["dcCreator"][0]
+            dc_creator = item.get("dcCreator")
+            if isinstance(dc_creator, list) and dc_creator:
+                item_creator = dc_creator[0]
+            elif isinstance(dc_creator, str) and dc_creator:
+                item_creator = dc_creator
             iiif_manifest = None
             # Prefer direct manifest URL if given by provider
             # Check edmIsShownBy / hasView / object

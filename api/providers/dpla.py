@@ -100,7 +100,9 @@ def search_dpla(
                 creators = [creators]
             raw = {
                 "title": title_text or "N/A",
-                "creator": ", ".join(creators),
+                # Coerce elements to str: DPLA occasionally returns structured
+                # (dict) creator entries that a bare join would choke on.
+                "creator": ", ".join(str(c) for c in creators),
                 "id": doc.get("id"),
                 "item_url": doc.get("isShownAt"),
                 "iiif_manifest": iiif_manifest,

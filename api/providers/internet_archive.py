@@ -66,9 +66,13 @@ def search_internet_archive(
             ia_identifier = item.get("identifier")
             # The IA API returns creator as either a single string or a list;
             # joining a bare string would split it into individual characters.
-            creator_val = item.get("creator", ["N/A"])
+            # ``or ["N/A"]`` also covers a present-but-null "creator" field,
+            # which the two-arg .get() default would not (join(None) raises).
+            creator_val = item.get("creator") or ["N/A"]
             creator_str = (
-                creator_val if isinstance(creator_val, str) else ", ".join(creator_val)
+                creator_val
+                if isinstance(creator_val, str)
+                else ", ".join(str(c) for c in creator_val)
             )
             raw = {
                 "title": item.get("title", "N/A"),
