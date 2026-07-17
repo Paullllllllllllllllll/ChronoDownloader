@@ -235,6 +235,34 @@ class TestDownloadScheduler:
 
         scheduler.shutdown(wait=True)
 
+    def test_run_task_skipped_on_shutdown_releases_pending(self) -> None:
+        """A task already submitted (pending incremented) but skipped because
+        shutdown was signalled before it ran must decrement the pending count
+        rather than leak it; on_complete is not called for a task that never
+        ran (its CSV row stays pending for the next run)."""
+        from main.orchestration.scheduler import DownloadScheduler, DownloadTask
+
+        on_complete_calls: list[Any] = []
+        scheduler = DownloadScheduler(
+            max_workers=1,
+            on_complete=lambda t, s, e: on_complete_calls.append((t, s, e)),
+        )
+
+        task = MagicMock(spec=DownloadTask)
+        task.title = "Test"
+        task.provider_key = "ia"
+
+        # Simulate submit() having incremented the pending count, then a
+        # shutdown request landing before the worker picks the task up.
+        scheduler._pending_count = 1
+        scheduler._shutdown_event.set()
+
+        result = scheduler._run_task(task, lambda t: True)
+
+        assert result is False
+        assert scheduler.pending_count == 0
+        assert on_complete_calls == []
+
 
 class TestGetParallelDownloadConfig:
     """Tests for get_parallel_download_config function."""

@@ -41,7 +41,12 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from main.orchestration.scheduler import DownloadTask
 
-from api.core.config import get_api_key_envvar, get_config, get_resume_mode
+from api.core.config import (
+    get_api_key_envvar,
+    get_config,
+    get_min_title_score,
+    get_resume_mode,
+)
 from api.core.context import (
     clear_all_context,
     clear_current_provider,
@@ -377,9 +382,14 @@ def _try_ranked_fallbacks(
                 if sr.provider_key == pkey and sr.source_id == selected.source_id:
                     continue
                 sc = sr.raw.get("__matching__", {})
-                if float(sc.get("score", 0.0)) < float(
-                    sel_cfg.get("min_title_score", 85)
-                ):
+                # Gate each candidate on its per-provider threshold, mirroring
+                # select_best_candidate; using the global value alone let a
+                # provider be attempted as a fallback with a title score its own
+                # stricter config would reject (and vice-versa).
+                provider_threshold = get_min_title_score(
+                    sr.provider_key, default=float(sel_cfg.get("min_title_score", 85))
+                )
+                if float(sc.get("score", 0.0)) < float(provider_threshold):
                     continue
                 pprio = prov_priority.get(sr.provider_key or "", 9999)
                 ranked_fallbacks.append((pprio, float(sc.get("total", 0.0)), sr))

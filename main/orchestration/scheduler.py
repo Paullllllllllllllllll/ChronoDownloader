@@ -351,6 +351,13 @@ class DownloadScheduler:
         """
         if self._shutdown_event.is_set():
             logger.debug("Shutdown in progress; skipping task for '%s'", task.title)
+            # submit() incremented _pending_count for this future; decrement it
+            # here so a shutdown-skipped task does not leak the pending count.
+            # on_complete is intentionally not called: the task never ran, so
+            # its source-CSV row is left unmarked (pending) to be retried on the
+            # next run rather than recorded as a failure.
+            with self._lock:
+                self._pending_count -= 1
             return False
 
         provider = task.provider_key
