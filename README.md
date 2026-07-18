@@ -1,4 +1,4 @@
-# ChronoDownloader v1.14.0
+# ChronoDownloader v1.15.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1144,6 +1144,22 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.15.0** (18 July 2026) -- Deep second-round audit release. The HTTP
+  layer clamps malformed negative Retry-After headers instead of crashing the
+  worker, treats a negative Content-Length as unknown, and gives the circuit
+  breaker true single-probe half-open semantics plus a side-effect-free
+  availability check; atomic state writes retry transient Windows
+  PermissionError instead of silently dropping a save. The scheduler enforces
+  the worker timeout during shutdown (cancelling queued tasks and reclaiming
+  their pending count) and no longer lets the pending count go transiently
+  negative; direct-IIIF outcomes now reach the batch statistics, and the eager
+  deferred retry no longer lets resume_from_csv re-download and clobber a
+  just-completed work. IIIF manifests without Image API services fall back to
+  direct canvas image URLs, v2/v3 Choice bodies are unwrapped, the --id
+  command stops on partial results, and --iiif works without enabled search
+  providers. HathiTrust search now parses the Bib API's top-level items array
+  (fromRecord linkage), and DDB/Europeana/DPLA parsing is hardened against
+  variant response shapes.
 - **v1.14.0** (18 July 2026) -- Correctness and robustness release. Several
   provider search paths are hardened against well-formed but variably shaped
   API responses: Europeana no longer aborts on an empty title list, Internet
