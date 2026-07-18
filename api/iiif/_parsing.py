@@ -58,6 +58,37 @@ def _fetch_info_json(service_base: str) -> dict[str, Any] | None:
     return None
 
 
+def _unwrap_v2_choice(resource: Any) -> Any:
+    """Descend into a v2 ``oa:Choice`` resource, returning the first usable
+    alternative (``default`` preferred, then the first ``item``).
+
+    Non-Choice resources are returned unchanged.
+    """
+    if isinstance(resource, dict) and resource.get("@type") == "oa:Choice":
+        default = resource.get("default")
+        if isinstance(default, dict):
+            return default
+        item = resource.get("item")
+        if isinstance(item, list) and item and isinstance(item[0], dict):
+            return item[0]
+        if isinstance(item, dict):
+            return item
+    return resource
+
+
+def _unwrap_v3_choice(body: Any) -> Any:
+    """Descend into a v3 ``Choice`` body, returning the first usable ``items``
+    entry.
+
+    Non-Choice bodies are returned unchanged.
+    """
+    if isinstance(body, dict) and body.get("type") == "Choice":
+        items = body.get("items")
+        if isinstance(items, list) and items and isinstance(items[0], dict):
+            return items[0]
+    return body
+
+
 def _iter_v2_resources(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """Yield the primary image ``resource`` dict for each v2 canvas.
 
@@ -76,7 +107,7 @@ def _iter_v2_resources(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                     images = canvas.get("images", [])
                     if not images:
                         continue
-                    resources.append(images[0].get("resource", {}))
+                    resources.append(_unwrap_v2_choice(images[0].get("resource", {})))
                 except Exception:
                     continue
     except Exception:
@@ -107,6 +138,7 @@ def _iter_v3_bodies(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                     body = annos[0].get("body", {})
                     if isinstance(body, list) and body:
                         body = body[0]
+                    body = _unwrap_v3_choice(body)
                     bodies.append(body)
                 except Exception:
                     continue

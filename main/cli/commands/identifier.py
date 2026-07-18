@@ -113,6 +113,19 @@ def run_identifier_cli(
                 )
                 return EXIT_OK
 
+            # A partial result means pages already landed in this work dir.
+            # Stop here rather than trying the next candidate, which would
+            # interleave pages from two sources; mirror --iiif's exit contract
+            # (partial maps to failure).
+            if status == "partial":
+                logger.warning(
+                    "Download partial via %s (%s): %s",
+                    pkey,
+                    manifest_url,
+                    result.get("error", "incomplete"),
+                )
+                return EXIT_FAILURES
+
             logger.warning(
                 "Failed via %s (%s): %s",
                 pkey,

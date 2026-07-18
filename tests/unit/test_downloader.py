@@ -419,6 +419,33 @@ class TestRunCli:
             mock_pipeline.load_enabled_apis.assert_called_once_with("explicit.json")
             assert os.environ["CHRONO_CONFIG_PATH"] == "explicit.json"
 
+    def test_run_cli_allows_iiif_without_providers(
+        self,
+        mock_args: argparse.Namespace,
+        mock_config: dict[str, Any],
+    ) -> None:
+        """Direct-IIIF downloads need no search provider, so an empty provider
+        list must not short-circuit to a usage error before the --iiif
+        branch runs."""
+        from main.cli.dispatch import run_cli
+        from main.cli.exit_codes import EXIT_OK
+
+        mock_args.iiif_urls = ["https://example.org/manifest.json"]
+
+        with (
+            patch("main.cli.dispatch.pipeline") as mock_pipeline,
+            patch(
+                "main.cli.dispatch.run_direct_iiif_cli", return_value=EXIT_OK
+            ) as mock_iiif,
+        ):
+            mock_pipeline.load_enabled_apis.return_value = []
+            mock_pipeline.filter_enabled_providers_for_keys.return_value = []
+
+            rc = run_cli(mock_args, mock_config)
+
+        assert rc == EXIT_OK
+        mock_iiif.assert_called_once()
+
     def test_run_cli_handles_missing_csv(
         self, mock_args: argparse.Namespace, mock_config: dict[str, Any], temp_dir: str
     ) -> None:

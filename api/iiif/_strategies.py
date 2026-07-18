@@ -13,13 +13,18 @@ from ..core.budget import budget_exhausted
 from ..core.config import get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
-from ._parsing import download_one_from_service, extract_image_service_bases
+from ._parsing import (
+    download_one_from_service,
+    extract_direct_image_urls,
+    extract_image_service_bases,
+)
 from ._renderings import download_iiif_renderings
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "download_page_images",
+    "download_direct_image_urls",
     "download_iiif_manifest_and_images",
     "try_pdf_first_then_images",
 ]
@@ -112,6 +117,86 @@ def download_page_images(
     return any_downloaded
 
 
+def download_direct_image_urls(
+    image_urls: list[str],
+    output_folder: str,
+    provider_key: str,
+    item_id: str,
+    *,
+    max_pages: int | None = None,
+) -> bool:
+    """Download whole-image URLs carried directly on canvas resources/bodies.
+
+    Used as a fallback for manifests that expose no IIIF Image API service but
+    still reference downloadable page images. Applies the same page-limit and
+    budget checks as :func:`download_page_images`.
+
+    Args:
+        image_urls: List of direct image URLs.
+        output_folder: Target directory for downloads.
+        provider_key: Provider identifier for filenames and logging.
+        item_id: Item identifier for filenames and logging.
+        max_pages: Override page limit. When ``None`` the limit is read
+            from config via ``get_max_pages(provider_key)``.
+
+    Returns:
+        ``True`` if at least one image was downloaded.
+    """
+    if not image_urls:
+        logger.info(
+            "No direct image URLs found for %s item %s",
+            provider_key,
+            item_id,
+        )
+        return False
+
+    if max_pages is None:
+        max_pages = get_max_pages(provider_key)
+    total = len(image_urls)
+    to_download = image_urls[:max_pages] if max_pages and max_pages > 0 else image_urls
+
+    logger.info(
+        "%s: downloading %d/%d direct page images for %s",
+        provider_key.upper(),
+        len(to_download),
+        total,
+        item_id,
+    )
+
+    any_downloaded = False
+    for idx, url in enumerate(to_download, start=1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping %s downloads at %d/%d "
+                "pages for %s",
+                provider_key,
+                idx - 1,
+                len(to_download),
+                item_id,
+            )
+            break
+
+        try:
+            fname = f"{provider_key}_{item_id}_p{idx:05d}"
+            if download_file(url, output_folder, fname) is not None:
+                any_downloaded = True
+            else:
+                logger.warning(
+                    "Failed to download %s image from URL %s",
+                    provider_key,
+                    url,
+                )
+        except Exception:
+            logger.exception(
+                "Error downloading %s image for %s from %s",
+                provider_key,
+                item_id,
+                url,
+            )
+
+    return any_downloaded
+
+
 def download_iiif_manifest_and_images(
     manifest_url: str,
     output_folder: str,
@@ -162,8 +247,17 @@ def download_iiif_manifest_and_images(
         )
 
     service_bases = extract_image_service_bases(manifest)
-    if download_page_images(service_bases, output_folder, provider_key, item_id):
-        any_downloaded = True
+    if service_bases:
+        if download_page_images(service_bases, output_folder, provider_key, item_id):
+            any_downloaded = True
+    else:
+        # No Image API service: fall back to whole-image URLs carried directly
+        # on the canvas resource/body, if any.
+        direct_urls = extract_direct_image_urls(manifest)
+        if download_direct_image_urls(
+            direct_urls, output_folder, provider_key, item_id
+        ):
+            any_downloaded = True
 
     return any_downloaded
 

@@ -11,6 +11,7 @@ import pytest
 
 from main.cli import create_cli_parser
 from main.cli.commands.identifier import run_identifier_cli as _run_identifier_cli
+from main.cli.exit_codes import EXIT_FAILURES
 from main.cli.overrides import _looks_like_cli_invocation
 
 # ============================================================================
@@ -278,3 +279,30 @@ class TestRunIdentifierCLI:
 
         _run_identifier_cli(args, {}, logger)
         mock_process.assert_called_once()
+
+    @patch("main.cli.commands.identifier.process_direct_iiif")
+    @patch(
+        "main.cli.commands.identifier.PROVIDERS",
+        {
+            "mdz": (MagicMock(), MagicMock(), "MDZ"),
+        },
+    )
+    def test_partial_stops_and_returns_failure(
+        self, mock_process: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A partial result means pages already landed in this work dir; the
+        loop must stop (not try the next candidate and interleave pages) and
+        return the failure exit code, mirroring --iiif."""
+        mock_process.return_value = {
+            "status": "partial",
+            "error": "Incomplete: downloaded 2 of 3 pages",
+        }
+        args = self._make_args()
+        logger = logging.getLogger("test")
+
+        with caplog.at_level(logging.WARNING):
+            rc = _run_identifier_cli(args, {}, logger)
+
+        assert rc == EXIT_FAILURES
+        mock_process.assert_called_once()
+        assert any("partial" in r.message.lower() for r in caplog.records)

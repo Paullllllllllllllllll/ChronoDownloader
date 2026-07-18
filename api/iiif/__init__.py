@@ -9,7 +9,7 @@ Public surface:
 
 - Manifest parsing: extract_image_service_bases, extract_direct_image_urls,
   image_url_candidates, download_one_from_service
-- Download strategies: download_page_images,
+- Download strategies: download_page_images, download_direct_image_urls,
   download_iiif_manifest_and_images, try_pdf_first_then_images
 - Manifest renderings: download_iiif_renderings
 - Direct manifest flow: is_iiif_manifest_url, detect_provider_from_url,
@@ -42,6 +42,7 @@ from ._parsing import (
 )
 from ._renderings import download_iiif_renderings
 from ._strategies import (
+    download_direct_image_urls,
     download_iiif_manifest_and_images,
     download_page_images,
     try_pdf_first_then_images,
@@ -55,6 +56,7 @@ __all__ = [
     "download_one_from_service",
     # Strategies
     "download_page_images",
+    "download_direct_image_urls",
     "download_iiif_manifest_and_images",
     "try_pdf_first_then_images",
     # Renderings

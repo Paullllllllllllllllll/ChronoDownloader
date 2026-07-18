@@ -79,6 +79,42 @@ class TestExtractImageServiceBasesV2:
         bases = extract_image_service_bases(manifest)
         assert bases == ["https://example.org/iiif/img1"]
 
+    def test_extracts_from_v2_oa_choice_resource(self) -> None:
+        """IIIF v2 ``oa:Choice`` resources wrap the real image in ``default``
+        (plus alternate ``item`` entries). The extractor must descend into the
+        default alternative rather than yielding nothing."""
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "@type": "oa:Choice",
+                                        "default": {
+                                            "service": {
+                                                "@id": "https://example.org/iiif/img1"
+                                            }
+                                        },
+                                        "item": [
+                                            {
+                                                "service": {
+                                                    "@id": "https://example.org/iiif/alt"
+                                                }
+                                            }
+                                        ],
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        bases = extract_image_service_bases(manifest)
+        assert bases == ["https://example.org/iiif/img1"]
+
     def test_skips_canvas_without_images(self) -> None:
         manifest = {
             "sequences": [
@@ -213,6 +249,48 @@ class TestExtractImageServiceBasesV3:
                                         "service": {
                                             "@id": "https://example.org/iiif/img1"
                                         }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        bases = extract_image_service_bases(manifest)
+        assert bases == ["https://example.org/iiif/img1"]
+
+    def test_extracts_from_v3_choice_body(self) -> None:
+        """A v3 ``Choice`` body nests the usable image annotations under
+        ``items``; the extractor must descend into the first entry instead of
+        dropping the page."""
+        manifest = {
+            "items": [
+                {
+                    "items": [
+                        {
+                            "items": [
+                                {
+                                    "body": {
+                                        "type": "Choice",
+                                        "items": [
+                                            {
+                                                "type": "Image",
+                                                "service": [
+                                                    {
+                                                        "id": "https://example.org/iiif/img1"
+                                                    }
+                                                ],
+                                            },
+                                            {
+                                                "type": "Image",
+                                                "service": [
+                                                    {
+                                                        "id": "https://example.org/iiif/alt"
+                                                    }
+                                                ],
+                                            },
+                                        ],
                                     }
                                 }
                             ]
