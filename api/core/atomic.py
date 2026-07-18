@@ -13,12 +13,26 @@ import contextlib
 import json
 import os
 import tempfile
+import time
 from typing import Any
+
+# On Windows a transiently open destination (AV scanner, file viewer) makes
+# os.replace raise PermissionError; a short bounded retry avoids silently
+# dropping the save.
+_REPLACE_ATTEMPTS = 5
+_REPLACE_BASE_SLEEP_S = 0.1
 
 
 def _atomic_replace(path: str, tmp_path: str) -> None:
     try:
-        os.replace(tmp_path, path)
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp_path, path)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_BASE_SLEEP_S * (attempt + 1))
     except BaseException:
         with contextlib.suppress(OSError):
             os.remove(tmp_path)

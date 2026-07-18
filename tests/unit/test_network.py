@@ -122,13 +122,20 @@ class TestCircuitBreaker:
         assert result is True
         assert cb.state == CircuitState.HALF_OPEN
 
-    def test_allow_request_true_when_half_open(self) -> None:
-        """allow_request returns True when circuit is HALF_OPEN."""
+    def test_allow_request_single_probe_when_half_open(self) -> None:
+        """HALF_OPEN admits exactly one probe; concurrent callers are denied."""
         from api.core.network import CircuitBreaker, CircuitState
 
-        cb = CircuitBreaker()
-        cb.state = CircuitState.HALF_OPEN
+        cb = CircuitBreaker(cooldown_seconds=60.0)
+        cb.state = CircuitState.OPEN
+        cb.opened_at = time.monotonic() - 61
 
+        assert cb.allow_request() is True  # OPEN -> HALF_OPEN, probe granted
+        assert cb.state == CircuitState.HALF_OPEN
+        assert cb.allow_request() is False  # burst denied while probe in flight
+
+        cb.record_success()
+        assert cb.state == CircuitState.CLOSED  # type: ignore[comparison-overlap]
         assert cb.allow_request() is True
 
     def test_time_until_retry_zero_when_closed(self) -> None:
@@ -261,6 +268,22 @@ class TestCircuitBreakerFunctions:
 
         with patch("api.core.network.get_circuit_breaker", return_value=cb):
             assert is_provider_available("test") is False
+
+    def test_is_provider_available_does_not_mutate_state(self) -> None:
+        """Passive availability check neither transitions OPEN -> HALF_OPEN
+        nor consumes the single half-open probe slot."""
+        from api.core.network import CircuitBreaker, CircuitState, is_provider_available
+
+        cb = CircuitBreaker(cooldown_seconds=60.0)
+        cb.state = CircuitState.OPEN
+        cb.opened_at = time.monotonic() - 61  # cooldown elapsed
+
+        with patch("api.core.network.get_circuit_breaker", return_value=cb):
+            assert is_provider_available("test") is True
+            assert cb.state == CircuitState.OPEN  # no transition performed
+        # The actual probe is still available to allow_request afterwards.
+        assert cb.allow_request() is True
+        assert cb.state == CircuitState.HALF_OPEN  # type: ignore[comparison-overlap]
 
     def test_get_provider_cooldown_returns_zero_when_available(self) -> None:
         """get_provider_cooldown returns 0 when provider available."""

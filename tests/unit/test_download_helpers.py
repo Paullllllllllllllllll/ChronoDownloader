@@ -373,3 +373,32 @@ class TestTryPdfFirstThenImages:
             "item123",
         )
         assert result is True
+
+
+# ============================================================================
+# _parse_content_length
+# ============================================================================
+
+
+class TestParseContentLength:
+    """Content-Length parsing: malformed values must degrade to None."""
+
+    def test_parses_valid_length(self) -> None:
+        from api.core.download import _parse_content_length
+
+        assert _parse_content_length("1024") == 1024
+        assert _parse_content_length("0") == 0
+
+    def test_returns_none_for_missing_or_malformed(self) -> None:
+        from api.core.download import _parse_content_length
+
+        assert _parse_content_length(None) is None
+        assert _parse_content_length("") is None
+        assert _parse_content_length("abc") is None
+
+    def test_returns_none_for_negative_length(self) -> None:
+        """A negative declared length is malformed and must be treated as
+        unknown, not as a size mismatch that discards a complete file."""
+        from api.core.download import _parse_content_length
+
+        assert _parse_content_length("-5") is None

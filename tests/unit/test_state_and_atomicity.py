@@ -46,6 +46,32 @@ class TestAtomicWrites:
         # Original content is untouched by the failed write.
         assert target.read_text(encoding="utf-8") == '{"ok": true}'
 
+    def test_atomic_replace_retries_on_permission_error(self, tmp_path: Path) -> None:
+        """A transient PermissionError (Windows AV/viewer) must not drop a save."""
+        from api.core import atomic
+
+        target = tmp_path / "out.txt"
+        target.write_text("old", encoding="utf-8")
+
+        real_replace = os.replace
+        calls = {"n": 0}
+
+        def flaky_replace(src: str, dst: str) -> None:
+            calls["n"] += 1
+            if calls["n"] <= 3:
+                raise PermissionError("file in use")
+            real_replace(src, dst)
+
+        with (
+            patch("api.core.atomic.os.replace", side_effect=flaky_replace),
+            patch("api.core.atomic.time.sleep", return_value=None),
+        ):
+            atomic.atomic_write_text(str(target), "new content")
+
+        assert calls["n"] == 4
+        assert target.read_text(encoding="utf-8") == "new content"
+        assert [p.name for p in tmp_path.iterdir()] == ["out.txt"]
+
     def test_works_csv_save_is_atomic(self, tmp_path: Path) -> None:
         """mark_failed must go through the atomic write helper."""
         from main.data import works_csv

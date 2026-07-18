@@ -122,9 +122,12 @@ def _parse_content_length(cl_header: str | None) -> int | None:
     if not cl_header:
         return None
     try:
-        return int(cl_header)
+        length = int(cl_header)
     except ValueError:
         return None
+    # A negative declared length is malformed; treating it as unknown avoids
+    # discarding a fully downloaded file over an impossible size mismatch.
+    return length if length >= 0 else None
 
 
 def _infer_extension_from_content_type(content_type: str) -> str:
@@ -417,7 +420,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         return None
 
     if not _BUDGET.allow_new_file(provider, work_id):
-        logger.warning("Download budget (files) exceeded; skipping %s", url)
+        logger.warning("Download budget stop-policy tripped; skipping %s", url)
         return None
 
     def _process_response(
@@ -477,7 +480,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             return filepath
 
         if not _BUDGET.allow_new_file(provider, work_id):
-            logger.warning("Download budget (files) exceeded; skipping %s", url)
+            logger.warning("Download budget stop-policy tripped; skipping %s", url)
             return None
 
         # Classify the payload into its budget bucket by extension so PDF and
@@ -634,7 +637,9 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     def _calculate_backoff(attempt: int, retry_after: str | None) -> float:
         if retry_after:
             try:
-                return min(float(retry_after), max_backoff)
+                # Clamp to [0, max_backoff]: a malformed negative numeric
+                # Retry-After must not reach time.sleep (ValueError).
+                return max(0.0, min(float(retry_after), max_backoff))
             except ValueError:
                 try:
                     retry_dt = parsedate_to_datetime(retry_after)

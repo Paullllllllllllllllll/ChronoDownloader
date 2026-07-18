@@ -58,6 +58,7 @@ class CircuitBreaker:
     state: CircuitState = field(default=CircuitState.CLOSED)
     failure_count: int = field(default=0)
     opened_at: float = field(default=0.0)
+    probe_started_at: float = field(default=0.0)
     _lock: threading.Lock = field(
         default_factory=threading.Lock, repr=False, compare=False
     )
@@ -113,6 +114,7 @@ class CircuitBreaker:
                 elapsed = time.monotonic() - self.opened_at
                 if elapsed >= self.cooldown_seconds:
                     self.state = CircuitState.HALF_OPEN
+                    self.probe_started_at = time.monotonic()
                     logger.info(
                         "Circuit breaker: Cooldown elapsed (%.0fs), testing provider",
                         elapsed,
@@ -120,8 +122,29 @@ class CircuitBreaker:
                     return True
                 return False
 
-            # HALF_OPEN: allow the test request
-            return True
+            # HALF_OPEN: admit a single probe request. Concurrent workers that
+            # arrive while the probe is in flight are denied, so a provider
+            # that just tripped the breaker is not hit by a burst at the
+            # recovery moment. If the probe never records an outcome (e.g. the
+            # worker died), allow a fresh probe after another cooldown period.
+            if time.monotonic() - self.probe_started_at >= self.cooldown_seconds:
+                self.probe_started_at = time.monotonic()
+                return True
+            return False
+
+    def is_available(self) -> bool:
+        """Report availability without mutating breaker state.
+
+        Unlike ``allow_request``, this neither performs the OPEN -> HALF_OPEN
+        transition nor consumes the single half-open probe slot, so it is safe
+        for passive "should I enqueue?" checks.
+        """
+        with self._lock:
+            if self.state == CircuitState.CLOSED:
+                return True
+            if self.state == CircuitState.OPEN:
+                return time.monotonic() - self.opened_at >= self.cooldown_seconds
+            return True  # HALF_OPEN: a request may be admitted
 
     def time_until_retry(self) -> float:
         """Get seconds until circuit will allow requests again.
@@ -187,7 +210,9 @@ def is_provider_available(provider_key: str | None) -> bool:
     cb = get_circuit_breaker(provider_key)
     if cb is None:
         return True
-    return cb.allow_request()
+    # Passive read: must not perform the OPEN -> HALF_OPEN transition or
+    # consume the single half-open probe slot.
+    return cb.is_available()
 
 
 def get_provider_cooldown(provider_key: str | None) -> float:
@@ -524,7 +549,9 @@ def make_request(
                         base_backoff * (backoff_mult ** (attempt - 1)), max_backoff
                     )
                 else:
-                    sleep_s = min(sleep_s, max_backoff)
+                    # Clamp to [0, max_backoff]: a malformed negative numeric
+                    # Retry-After must not reach time.sleep (ValueError).
+                    sleep_s = max(0.0, min(sleep_s, max_backoff))
 
                 logger.warning(
                     "429 Too Many Requests for %s; sleeping %.1fs (attempt %d/%d)",
