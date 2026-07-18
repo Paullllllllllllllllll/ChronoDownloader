@@ -110,6 +110,17 @@ def search_hathitrust(
         out: list[SearchResult] = []
         try:
             recs = (data or {}).get("records", {})
+            # The Bibliographic API returns "records" and "items" as sibling
+            # top-level keys; each item carries "fromRecord" linking it back to
+            # its record. Group the top-level items by record number so htid /
+            # item_url can be populated per record.
+            top_items = (data or {}).get("items") or []
+            items_by_record: dict[str, list[dict[str, Any]]] = {}
+            if isinstance(top_items, list):
+                for it in top_items:
+                    if isinstance(it, dict):
+                        rec_key = str(it.get("fromRecord"))
+                        items_by_record.setdefault(rec_key, []).append(it)
             for rec_id, rec in recs.items():
                 titles = rec.get("titles") or rec.get("title") or []
                 if isinstance(titles, list):
@@ -128,7 +139,9 @@ def search_hathitrust(
                     if isinstance(v, (str, int)):
                         date = str(v)
                         break
-                items = rec.get("items") or []
+                # Prefer top-level items linked via fromRecord; fall back to a
+                # per-record "items" list for robustness.
+                items = items_by_record.get(str(rec_id)) or rec.get("items") or []
                 htid = None
                 item_url = None
                 for it in items:

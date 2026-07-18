@@ -257,6 +257,77 @@ class TestEuropeanaProvider:
             assert results[1].raw["title"] == "Good Title"
 
 
+class TestHathiTrustProvider:
+    """Integration tests for the HathiTrust Bibliographic API provider."""
+
+    def test_search_extracts_htid_from_top_level_items(self) -> None:
+        """The Bibliographic API returns "records" and "items" as sibling
+        top-level keys; items link back via "fromRecord". htid/item_url must be
+        read from the top-level items, not from a per-record "items" list, so
+        the identifier is the htid and not the useless record number."""
+        response = {
+            "records": {
+                "000123456": {
+                    "recordURL": "https://catalog.hathitrust.org/Record/000123456",
+                    "titles": ["The Art of Cooking"],
+                    "publishDates": ["1850"],
+                }
+            },
+            "items": [
+                {
+                    "orig": "University of California",
+                    "fromRecord": "000123456",
+                    "htid": "uc1.b1234567",
+                    "itemURL": "https://babel.hathitrust.org/cgi/pt?id=uc1.b1234567",
+                }
+            ],
+        }
+        with patch("api.providers.hathitrust.make_request", return_value=response):
+            from api.providers.hathitrust import search_hathitrust
+
+            results = search_hathitrust("Cookery oclc:12345")
+
+            assert len(results) == 1
+            first = results[0]
+            assert first.raw["htid"] == "uc1.b1234567"
+            assert (
+                first.raw["item_url"]
+                == "https://babel.hathitrust.org/cgi/pt?id=uc1.b1234567"
+            )
+            # Identifier must be the htid, not the 9-digit record number.
+            assert first.source_id == "uc1.b1234567"
+
+
+class TestDdbProvider:
+    """Integration tests for the DDB provider."""
+
+    def test_search_handles_non_list_view(self) -> None:
+        """A dict-valued (or too-short) "view" must not raise IndexError and
+        abort the whole search loop; creator falls back to None."""
+        response = {
+            "results": [
+                {
+                    "docs": [
+                        {"id": "abc", "label": "Kochbuch", "view": {"unexpected": 1}},
+                        {"id": "def", "label": "Backbuch", "view": ["a", "b"]},
+                    ]
+                }
+            ]
+        }
+        with (
+            patch("api.providers.ddb._api_key", return_value="KEY"),
+            patch("api.providers.ddb.make_request", return_value=response),
+        ):
+            from api.providers.ddb import search_ddb
+
+            results = search_ddb("cookbook")
+
+            assert len(results) == 2
+            assert results[0].raw["title"] == "Kochbuch"
+            assert results[0].raw["creator"] is None
+            assert results[1].raw["creator"] is None
+
+
 class TestGoogleBooksProvider:
     """Integration tests for the Google Books provider."""
 

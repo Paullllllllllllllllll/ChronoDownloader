@@ -141,8 +141,8 @@ def download_dpla_work(
     # Manifest discovery from details and search fallbacks
     manifest_url = None
     # From details
-    for key in ("object", "isShownAt", "isShownBy"):
-        v = item_details.get(key)
+    for field in ("object", "isShownAt", "isShownBy"):
+        v = item_details.get(field)
         if isinstance(v, str) and "manifest" in v and "iiif" in v:
             manifest_url = v
             break

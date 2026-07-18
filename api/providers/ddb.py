@@ -109,19 +109,21 @@ def search_ddb(
             docs = result_group.get("docs", [])
             for item in docs:
                 # Clean title by removing <match> tags
-                title = item.get("label") or item.get("title") or "N/A"
-                title = title.replace("<match>", "").replace("</match>", "")
+                item_title = item.get("label") or item.get("title") or "N/A"
+                item_title = item_title.replace("<match>", "").replace("</match>", "")
 
-                # Extract creator from view array if available
-                creator = ""
-                view = item.get("view", [])
-                if len(view) > 6:
-                    creator = view[6]  # Provider/creator is often at index 6
+                # Extract creator from view array if available. The DDB API may
+                # return a dict or a shorter list here; only index when it is a
+                # list long enough to hold the provider/creator at index 6.
+                item_creator = None
+                view = item.get("view")
+                if isinstance(view, list) and len(view) > 6:
+                    item_creator = view[6]  # Provider/creator is often at index 6
 
                 ddb_id = item.get("id")
                 raw = {
-                    "title": title,
-                    "creator": creator,
+                    "title": item_title,
+                    "creator": item_creator,
                     "id": ddb_id,
                     "item_url": f"https://www.deutsche-digitale-bibliothek.de/item/{ddb_id}"
                     if ddb_id

@@ -140,15 +140,20 @@ def search_europeana(
                 built = _build_manifest_url_from_id(item.get("id"), key, prefer_v3=True)
                 if built:
                     iiif_manifest = built
+            data_provider = item.get("dataProvider")
+            if isinstance(data_provider, list) and data_provider:
+                provider = data_provider[0]
+            elif isinstance(data_provider, str) and data_provider:
+                provider = data_provider
+            else:
+                provider = "N/A"
             raw = {
                 "title": item_title,
                 "creator": item_creator,
                 "id": item.get("id"),
                 "item_url": item.get("guid"),
                 "europeana_url": item.get("guid"),
-                "provider": item.get("dataProvider", ["N/A"])[0]
-                if item.get("dataProvider")
-                else "N/A",
+                "provider": provider,
                 "iiif_manifest": iiif_manifest,
             }
             results.append(convert_to_searchresult("Europeana", raw))
