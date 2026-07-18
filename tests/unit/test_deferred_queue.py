@@ -950,6 +950,44 @@ class TestDeferredQueueCleanup:
         assert queue.get("old-item") is None
         assert queue.get(recent.id) is not None
 
+    def test_cleanup_prunes_completed_without_deferred_at(self, queue: Any) -> None:
+        """Completed/failed items lacking a deferred_at must not accumulate."""
+        from main.state.deferred import DeferredItem
+
+        no_ts = DeferredItem(
+            id="no-ts",
+            title="No timestamp",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+            status="failed",
+            deferred_at=None,
+        )
+        queue._items[no_ts.id] = no_ts
+
+        # A pending item without a timestamp must be left alone.
+        pending = queue.add(
+            title="Pending",
+            creator=None,
+            entry_id="E002",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+        )
+        pending.deferred_at = None
+
+        removed = queue.cleanup_old_items(max_age_days=7)
+
+        assert removed == 1
+        assert queue.get("no-ts") is None
+        assert queue.get(pending.id) is not None
+
     def test_clear_all_removes_everything(self, queue: Any) -> None:
         """clear_all removes all items."""
         for i in range(5):

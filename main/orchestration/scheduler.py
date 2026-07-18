@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -320,11 +321,21 @@ class DownloadScheduler:
             )
             return None
 
-        future = self._executor.submit(self._run_task, task, download_fn)
+        # Increment before submitting: executor.submit may start the worker
+        # (and run _run_task's finally-decrement) before the following lines
+        # execute, which would transiently drive _pending_count negative.
+        with self._lock:
+            self._pending_count += 1
+
+        try:
+            future = self._executor.submit(self._run_task, task, download_fn)
+        except Exception:
+            with self._lock:
+                self._pending_count -= 1
+            raise
 
         with self._lock:
             self._futures[future] = task
-            self._pending_count += 1
 
         if self._on_submit:
             try:
@@ -485,7 +496,10 @@ class DownloadScheduler:
 
         Args:
             wait: If True, wait for pending tasks to complete
-            timeout: Maximum seconds to wait (None = wait forever)
+            timeout: Maximum seconds to wait for pending tasks (None = wait
+                forever). When the deadline elapses, queued tasks that have not
+                started are cancelled and dropped; an in-flight download cannot
+                be preempted and is allowed to finish on its worker thread.
         """
         self._shutdown_event.set()
 
@@ -496,7 +510,31 @@ class DownloadScheduler:
                     "Shutting down scheduler with %d pending task(s)...", pending
                 )
 
-            self._executor.shutdown(wait=wait)
+            if wait and timeout is not None:
+                deadline = time.monotonic() + timeout
+                while self.pending_count > 0 and time.monotonic() < deadline:
+                    time.sleep(0.2)
+                if self.pending_count > 0:
+                    logger.warning(
+                        "Shutdown timeout (%.0fs) elapsed with %d task(s) still "
+                        "pending; cancelling queued tasks (in-flight downloads "
+                        "cannot be preempted).",
+                        timeout,
+                        self.pending_count,
+                    )
+                    self._executor.shutdown(wait=False, cancel_futures=True)
+                    # Cancelled queued futures never enter _run_task, so their
+                    # pending count would otherwise leak; reclaim it here,
+                    # mirroring the shutdown-skip accounting in _run_task.
+                    with self._lock:
+                        for fut in list(self._futures):
+                            if fut.cancelled():
+                                self._futures.pop(fut, None)
+                                self._pending_count -= 1
+                else:
+                    self._executor.shutdown(wait=wait)
+            else:
+                self._executor.shutdown(wait=wait)
             self._executor = None
             if get_active_semaphore_manager() is self._semaphores:
                 _set_active_semaphore_manager(None)

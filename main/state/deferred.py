@@ -587,16 +587,20 @@ class DeferredQueue:
                 if item.status not in ("completed", "failed"):
                     continue
 
-                # Check deferred_at timestamp
-                if item.deferred_at:
-                    try:
-                        deferred = datetime.fromisoformat(item.deferred_at)
-                        if deferred.tzinfo is None:
-                            deferred = deferred.replace(tzinfo=UTC)
-                        if deferred < cutoff:
-                            to_remove.append(item_id)
-                    except Exception:
-                        pass
+                # Check deferred_at timestamp. A completed/failed item with a
+                # missing or unparseable deferred_at has no age to measure and
+                # would otherwise accumulate forever, so treat it as eligible.
+                if not item.deferred_at:
+                    to_remove.append(item_id)
+                    continue
+                try:
+                    deferred = datetime.fromisoformat(item.deferred_at)
+                    if deferred.tzinfo is None:
+                        deferred = deferred.replace(tzinfo=UTC)
+                    if deferred < cutoff:
+                        to_remove.append(item_id)
+                except Exception:
+                    to_remove.append(item_id)
 
             for item_id in to_remove:
                 del self._items[item_id]

@@ -135,7 +135,9 @@ class BackgroundRetryScheduler:
         for provider_key, (_search_fn, download_fn, _name) in PROVIDERS.items():
             self._provider_download_fns[provider_key] = download_fn
 
-    def retry_ready_now(self, csv_path: str | None = None) -> dict[str, int]:
+    def retry_ready_now(
+        self, csv_path: str | None = None
+    ) -> tuple[dict[str, int], set[str]]:
         """Synchronously retry every currently-ready deferred item (eager retry).
 
         Called at run start instead of a background daemon thread. On success,
@@ -146,7 +148,11 @@ class BackgroundRetryScheduler:
             csv_path: Optional works-CSV path to mark retried items successful.
 
         Returns:
-            Dict with ``attempted``, ``succeeded``, ``failed`` counts.
+            A tuple of ``(stats, completed_entry_ids)`` where ``stats`` holds
+            ``attempted``, ``succeeded``, ``failed`` counts and
+            ``completed_entry_ids`` is the set of entry_ids (as ``str``) whose
+            retry just completed. The caller uses the latter to drop rows the
+            batch loop would otherwise re-download (and possibly re-defer).
         """
         self._queue = get_deferred_queue()
         self._quota_manager = get_quota_manager()
@@ -155,8 +161,9 @@ class BackgroundRetryScheduler:
 
         ready = self._queue.get_ready()
         stats = {"attempted": 0, "succeeded": 0, "failed": 0}
+        completed_entry_ids: set[str] = set()
         if not ready:
-            return stats
+            return stats, completed_entry_ids
 
         logger.info("Eager retry: %d deferred item(s) ready", len(ready))
         for item in ready:
@@ -164,9 +171,11 @@ class BackgroundRetryScheduler:
             if self._retry_item(item):
                 stats["succeeded"] += 1
                 self._persist_retry_success(item, csv_path)
+                if item.entry_id:
+                    completed_entry_ids.add(str(item.entry_id))
             else:
                 stats["failed"] += 1
-        return stats
+        return stats, completed_entry_ids
 
     def _persist_retry_success(self, item: DeferredItem, csv_path: str | None) -> None:
         """Write a successful retry through work.json, index.csv, and works CSV."""

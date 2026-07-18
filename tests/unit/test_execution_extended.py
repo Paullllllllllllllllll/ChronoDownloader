@@ -165,11 +165,10 @@ class TestEagerDeferredRetry:
         import logging
 
         scheduler = MagicMock()
-        scheduler.retry_ready_now.return_value = {
-            "attempted": 1,
-            "succeeded": 1,
-            "failed": 0,
-        }
+        scheduler.retry_ready_now.return_value = (
+            {"attempted": 1, "succeeded": 1, "failed": 0},
+            set(),
+        )
         mock_sched.return_value = scheduler
 
         _run_eager_deferred_retry(
@@ -421,6 +420,101 @@ class TestRunBatchDownloads:
             enable_background_retry=False,
         )
         mock_seq.assert_called_once()
+
+    @patch("main.orchestration.execution._run_eager_deferred_retry")
+    @patch("main.orchestration.execution._run_sequential")
+    @patch("main.orchestration.execution.get_deferred_queue")
+    def test_eager_retry_completed_row_not_processed(
+        self,
+        mock_queue: MagicMock,
+        mock_seq: MagicMock,
+        mock_eager: MagicMock,
+    ) -> None:
+        # The eager retry reports E001 as completed; that row must be dropped
+        # before the batch loop runs so it is not re-downloaded/re-deferred.
+        mock_eager.return_value = {"E001"}
+        mock_seq.return_value = {
+            "processed": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "skipped": 0,
+        }
+        mock_queue.return_value.get_pending.return_value = []
+
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book One", "Book Two"],
+                "main_author": ["Author One", "Author Two"],
+                "entry_id": ["E001", "E002"],
+            }
+        )
+        run_batch_downloads(
+            works_df,
+            "/output",
+            {},
+            use_parallel=False,
+            enable_background_retry=True,
+        )
+
+        mock_seq.assert_called_once()
+        passed_df = mock_seq.call_args[0][0]
+        assert list(passed_df["entry_id"]) == ["E002"]
+
+
+# ============================================================================
+# _run_parallel — direct IIIF stats folding
+# ============================================================================
+
+
+class TestRunParallelDirectIIIF:
+    """Tests that synchronous direct-IIIF outcomes reach the batch stats."""
+
+    @patch("main.orchestration.execution.process_direct_iiif")
+    @patch("main.orchestration.execution.is_direct_download_enabled", return_value=True)
+    @patch("main.orchestration.execution.get_parallel_download_config")
+    def test_direct_iiif_success_counted_in_stats(
+        self,
+        mock_cfg: MagicMock,
+        mock_direct_enabled: MagicMock,
+        mock_process: MagicMock,
+    ) -> None:
+        """A completed direct-IIIF row (handled outside the scheduler) must be
+        folded into the returned ``succeeded`` stat rather than lost."""
+        import logging
+
+        from main.orchestration.execution import _run_parallel
+
+        mock_cfg.return_value = {
+            "max_parallel_downloads": 2,
+            "provider_concurrency": {},
+            "worker_timeout_s": 0,
+        }
+        mock_process.return_value = {
+            "status": "completed",
+            "provider": "Gallica",
+            "item_url": "https://example.org/item",
+        }
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book A"],
+                "main_author": ["Author"],
+                "entry_id": ["E001"],
+                "direct_link": [
+                    "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k123/manifest.json"
+                ],
+            }
+        )
+        stats = _run_parallel(
+            works_df,
+            "/output",
+            {},
+            None,
+            logging.getLogger("test"),
+        )
+        assert stats["succeeded"] == 1
+        assert stats["failed"] == 0
+        assert stats["processed"] == 1
+        mock_process.assert_called_once()
 
 
 # ============================================================================

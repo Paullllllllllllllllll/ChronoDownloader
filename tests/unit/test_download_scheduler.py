@@ -263,6 +263,68 @@ class TestDownloadScheduler:
         assert scheduler.pending_count == 0
         assert on_complete_calls == []
 
+    def test_shutdown_timeout_drops_queued_and_reclaims_pending(self) -> None:
+        """shutdown(timeout=...) must return promptly when an in-flight task
+        blocks past the deadline: queued (never-started) tasks are cancelled and
+        their pending count reclaimed, and once the in-flight task finishes the
+        pending count settles at 0 (no leak)."""
+        from main.orchestration.scheduler import DownloadScheduler, DownloadTask
+
+        scheduler = DownloadScheduler(max_workers=1)
+        scheduler.start()
+
+        started = threading.Event()
+        release = threading.Event()
+        a_done = threading.Event()
+
+        def blocking(_task: Any) -> bool:
+            started.set()
+            # Bounded wait so the worker thread cannot dangle forever.
+            release.wait(timeout=5.0)
+            a_done.set()
+            return True
+
+        def queued(_task: Any) -> bool:  # pragma: no cover - must be cancelled
+            return True
+
+        task_a = MagicMock(spec=DownloadTask)
+        task_a.title = "A"
+        task_a.provider_key = "ia"
+        task_a.work_id = "work_a"
+        task_a.entry_id = "E_A"
+        task_a.work_stem = "a"
+        task_b = MagicMock(spec=DownloadTask)
+        task_b.title = "B"
+        task_b.provider_key = "ia"
+        task_b.work_id = "work_b"
+        task_b.entry_id = "E_B"
+        task_b.work_stem = "b"
+
+        scheduler.submit(task_a, blocking)
+        # A occupies the single worker; B is then queued behind it.
+        assert started.wait(timeout=2.0)
+        scheduler.submit(task_b, queued)
+        assert scheduler.pending_count == 2
+
+        start = time.monotonic()
+        scheduler.shutdown(wait=True, timeout=0.3)
+        elapsed = time.monotonic() - start
+
+        # Returned promptly despite A still blocked (timeout honored, not the
+        # unbounded executor.shutdown(wait=True)).
+        assert elapsed < 3.0
+        # B was queued and must have been cancelled, reclaiming its pending
+        # count; only the in-flight A remains.
+        assert scheduler.pending_count == 1
+
+        # Let A finish and confirm the pending count settles at 0.
+        release.set()
+        assert a_done.wait(timeout=5.0)
+        deadline = time.monotonic() + 2.0
+        while scheduler.pending_count > 0 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert scheduler.pending_count == 0
+
 
 class TestGetParallelDownloadConfig:
     """Tests for get_parallel_download_config function."""

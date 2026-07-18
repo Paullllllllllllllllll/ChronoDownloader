@@ -54,21 +54,27 @@ def _run_eager_deferred_retry(
     config: dict[str, Any],
     logger: logging.Logger,
     csv_path: str | None,
-) -> None:
+) -> set[str]:
     """Synchronously retry any ready deferred items before starting new work.
 
     Replaces the former background daemon thread (which exited with the
     process before it could do anything). Ready items are retried in-line and,
     on success, written through the works CSV, work.json, and index.csv.
+
+    Returns:
+        The set of entry_ids (as ``str``) that the retry completed, so the
+        caller can drop those rows from the pending works before the batch
+        loop re-processes (and potentially re-defers, clobbering the freshly
+        written "completed" status) them.
     """
     deferred_cfg = config.get("deferred", {})
     if not deferred_cfg.get("background_enabled", True):
         logger.debug("Eager deferred retry disabled in config")
-        return
+        return set()
 
     try:
         scheduler = get_background_scheduler()
-        stats = scheduler.retry_ready_now(csv_path=csv_path)
+        stats, completed_entry_ids = scheduler.retry_ready_now(csv_path=csv_path)
         if stats.get("attempted"):
             logger.info(
                 "Eager deferred retry: %d attempted, %d succeeded, %d failed",
@@ -76,8 +82,10 @@ def _run_eager_deferred_retry(
                 stats.get("succeeded", 0),
                 stats.get("failed", 0),
             )
+        return completed_entry_ids
     except Exception:
         logger.exception("Eager deferred retry failed")
+        return set()
 
 
 def run_batch_downloads(
@@ -123,9 +131,22 @@ def run_batch_downloads(
         backup_works_csv(csv_path)
 
     # Eagerly retry ready deferred items at run start (synchronous, replaces
-    # the former no-op background daemon thread).
+    # the former no-op background daemon thread). Any entry the retry just
+    # completed must be dropped from the pending works: otherwise the batch
+    # loop re-searches/re-downloads it and, under resume_from_csv (which never
+    # skips on work.json), a quota-gated provider re-defers it, clobbering the
+    # freshly written "completed" cell and duplicating the deferred entry.
     if enable_background_retry and not dry_run:
-        _run_eager_deferred_retry(config, logger, csv_path)
+        completed_entry_ids = _run_eager_deferred_retry(config, logger, csv_path)
+        if completed_entry_ids and ENTRY_ID_COL in works_df.columns:
+            already_done = works_df[ENTRY_ID_COL].astype(str).isin(completed_entry_ids)
+            drop_count = int(already_done.sum())
+            if drop_count:
+                works_df = works_df[~already_done]
+                logger.info(
+                    "Skipping %d row(s) already completed by eager deferred retry",
+                    drop_count,
+                )
 
     # Determine effective parallel settings
     dl_config = config.get("download", {})
@@ -559,6 +580,10 @@ def _run_parallel(
     # Track statistics
     submitted_count = 0
     skipped_count = 0
+    # Direct-IIIF rows are handled synchronously (not via the scheduler), so
+    # their outcomes never reach scheduler.get_stats(); count them locally.
+    direct_iiif_succeeded = 0
+    direct_iiif_failed = 0
 
     # Default callbacks if none provided
     def default_on_submit(task: DownloadTask) -> None:
@@ -673,6 +698,15 @@ def _run_parallel(
                     creator=None if pd.isna(creator) else str(creator),
                 )
 
+                # Fold this synchronous outcome into the batch stats. Mirror
+                # the CSV policy: only "completed"/"failed" count; a "partial"
+                # (incomplete page set) is left uncounted for retry.
+                direct_status = dl_result.get("status")
+                if direct_status == "completed":
+                    direct_iiif_succeeded += 1
+                elif direct_status == "failed":
+                    direct_iiif_failed += 1
+
                 # Update CSV for direct downloads. Mirror sequential mode: only
                 # an explicit "completed"/"failed" writes the CSV; a "partial"
                 # (incomplete page set) is left pending so it can be retried.
@@ -736,17 +770,9 @@ def _run_parallel(
                 "Search phase complete. Waiting for %d pending download(s)...", pending
             )
 
-            try:
-                scheduler.wait_all(timeout=worker_timeout)
-            except TimeoutError as te:
-                # Some futures didn't complete within timeout, but downloads may
-                # have finished. The scheduler tracks completed/succeeded/failed
-                # counts independently
-                logger.warning(
-                    "Timeout waiting for all futures: %s. Some downloads may "
-                    "still be in progress.",
-                    te,
-                )
+            # wait_all catches its own TimeoutError internally and always
+            # returns normally (with whatever completed within the deadline).
+            scheduler.wait_all(timeout=worker_timeout)
 
             stats = scheduler.get_stats()
             logger.info(
@@ -771,7 +797,10 @@ def _run_parallel(
                 )
 
     finally:
-        scheduler.shutdown(wait=True)
+        # Bound the shutdown wait by the same worker timeout used for wait_all
+        # so a stuck in-flight batch cannot block the process indefinitely;
+        # None preserves the wait-forever default.
+        scheduler.shutdown(wait=True, timeout=worker_timeout)
         stats = scheduler.get_stats()
         logger.info(
             "Scheduler shutdown. Final stats: %d completed (%d succeeded, %d failed)",
@@ -783,8 +812,8 @@ def _run_parallel(
     final_stats = scheduler.get_stats()
     return {
         "processed": actual_submitted[0],
-        "succeeded": final_stats["succeeded"],
-        "failed": final_stats["failed"],
+        "succeeded": final_stats["succeeded"] + direct_iiif_succeeded,
+        "failed": final_stats["failed"] + direct_iiif_failed,
         "skipped": skipped_count,
     }
 

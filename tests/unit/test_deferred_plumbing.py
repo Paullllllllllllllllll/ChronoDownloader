@@ -134,9 +134,12 @@ class TestEagerRetryPersistence:
             scheduler.set_provider_download_fn("testprov", lambda sr, wd: True)
 
             with patch("main.state.background.get_deferred_queue", return_value=queue):
-                stats = scheduler.retry_ready_now(csv_path=csv_path)
+                stats, completed_entry_ids = scheduler.retry_ready_now(
+                    csv_path=csv_path
+                )
 
             assert stats["succeeded"] == 1
+            assert completed_entry_ids == {"E001"}
 
             # work.json flipped to completed
             with open(work_json_path, encoding="utf-8") as f:
