@@ -75,8 +75,11 @@ def resolve_state_file_path() -> Path:
                 target,
             )
         except Exception as e:
+            # Fall through to the user-level target rather than the CWD file:
+            # returning the legacy path would reinstate exactly the
+            # working-directory-dependent state the user-level default exists
+            # to eliminate (quota counters silently resetting per directory).
             logger.warning("Failed to adopt legacy state file: %s", e)
-            return legacy
 
     return target
 
@@ -127,6 +130,13 @@ class StateManager:
                         state_file,
                     )
                 return
+
+            if type(self)._instance is not self:
+                # A concurrent construction that failed cleared the
+                # singleton pointer; re-publish this object so later
+                # callers share one instance instead of building a second
+                # manager that writes the same file.
+                type(self)._instance = self
 
             try:
                 self._data_lock = threading.RLock()
@@ -192,6 +202,15 @@ class StateManager:
         if self._state_file.exists():
             try:
                 data = self._read_state_file()
+                if not isinstance(data, dict):
+                    # Valid JSON with a non-object root ("[]", "null", "x").
+                    # Without this check the data.get() calls below raise
+                    # AttributeError, which escapes _load_state, is swallowed
+                    # by the callers, and leaves every save failing silently
+                    # for the whole run with the bad file never preserved.
+                    raise ValueError(
+                        f"state root is {type(data).__name__}, expected object"
+                    )
             except OSError as e:
                 # The file exists but cannot be read (permissions, transient
                 # lock). This is NOT corruption: keep the on-disk file intact
@@ -231,8 +250,12 @@ class StateManager:
                 # unified state.
                 return
             else:
-                self._state["quotas"] = data.get("quotas", {})
-                self._state["deferred_items"] = data.get("deferred_items", [])
+                # Both sections are defended by type: a wrong-typed section
+                # would otherwise blow up much later, inside a mutator.
+                quotas = data.get("quotas", {})
+                items = data.get("deferred_items", [])
+                self._state["quotas"] = quotas if isinstance(quotas, dict) else {}
+                self._state["deferred_items"] = items if isinstance(items, list) else []
                 self._state["version"] = data.get("version", "1.0")
 
                 logger.info(
@@ -278,8 +301,13 @@ class StateManager:
             self._save_state()
             logger.info("Migration complete. Old files can be deleted manually.")
 
-    def _save_state(self) -> None:
+    def _save_state(self) -> bool:
         """Save state to disk atomically (temp file + os.replace).
+
+        Returns True when the state reached disk. Callers must not report a
+        successful persist on a False return: a deferred item that was never
+        written is not retried on the next run, and reporting it as "deferred"
+        promises a retry that cannot happen.
 
         The data lock is held while serializing so a concurrent mutator (or a
         ``force_save`` from another thread) cannot change ``self._state``
@@ -287,13 +315,15 @@ class StateManager:
         """
         if self._save_disabled:
             logger.debug("State persistence disabled; skipping save.")
-            return
+            return False
         with self._data_lock, self._save_lock:
             try:
                 self._state["last_updated"] = datetime.now(UTC).isoformat()
                 atomic_write_json(str(self._state_file), self._state)
             except Exception as e:
                 logger.warning("Failed to save state: %s", e)
+                return False
+        return True
 
     # === Quota State Methods ===
 
@@ -318,26 +348,32 @@ class StateManager:
         with self._data_lock:
             return cast(dict[str, Any] | None, self._state["quotas"].get(provider_key))
 
-    def set_quota(self, provider_key: str, quota_data: dict[str, Any]) -> None:
+    def set_quota(self, provider_key: str, quota_data: dict[str, Any]) -> bool:
         """Set quota state for a provider.
 
         Args:
             provider_key: Provider identifier
             quota_data: Quota data to store
+
+        Returns:
+            True if the state reached disk.
         """
         with self._data_lock:
             self._state["quotas"][provider_key] = quota_data
-            self._save_state()
+            return self._save_state()
 
-    def update_quotas(self, quotas: dict[str, dict[str, Any]]) -> None:
+    def update_quotas(self, quotas: dict[str, dict[str, Any]]) -> bool:
         """Update multiple quotas at once.
 
         Args:
             quotas: Dictionary of provider_key -> quota_data
+
+        Returns:
+            True if the state reached disk.
         """
         with self._data_lock:
             self._state["quotas"].update(quotas)
-            self._save_state()
+            return self._save_state()
 
     # === Deferred Queue Methods ===
 
@@ -350,15 +386,18 @@ class StateManager:
         with self._data_lock:
             return list(self._state["deferred_items"])
 
-    def set_deferred_items(self, items: list[Any]) -> None:
+    def set_deferred_items(self, items: list[Any]) -> bool:
         """Set all deferred items (replaces existing).
 
         Args:
             items: List of deferred item dicts
+
+        Returns:
+            True if the state reached disk.
         """
         with self._data_lock:
             self._state["deferred_items"] = items
-            self._save_state()
+            return self._save_state()
 
     # === General Methods ===
 
@@ -370,9 +409,13 @@ class StateManager:
         """
         return self._state_file
 
-    def force_save(self) -> None:
-        """Force a save to disk."""
-        self._save_state()
+    def force_save(self) -> bool:
+        """Force a save to disk.
+
+        Returns:
+            True if the state reached disk.
+        """
+        return self._save_state()
 
 
 def get_state_manager() -> StateManager:

@@ -209,6 +209,13 @@ class DeferredQueue:
             if getattr(self, "_initialized", False):
                 return
 
+            if type(self)._instance is not self:
+                # A concurrent construction that failed cleared the
+                # singleton pointer; re-publish this object so later
+                # callers share one instance instead of building a second
+                # manager that writes the same file.
+                type(self)._instance = self
+
             try:
                 self._items: dict[str, DeferredItem] = {}
                 self._data_lock = threading.RLock()
@@ -247,7 +254,16 @@ class DeferredQueue:
             items_data = state_manager.get_deferred_items()
 
             for item_data in items_data:
-                item = DeferredItem.from_dict(item_data)
+                # Per-item recovery: one malformed entry (a null retry_count,
+                # a non-dict element) used to abort the whole load, and the
+                # next full-replace save then erased every item after it.
+                try:
+                    item = DeferredItem.from_dict(item_data)
+                except Exception as e:
+                    logger.warning(
+                        "Skipping malformed deferred item (%s): %r", e, item_data
+                    )
+                    continue
                 self._items[item.id] = item
 
             if self._items:
@@ -264,21 +280,25 @@ class DeferredQueue:
         except Exception as e:
             logger.warning("Failed to load deferred queue: %s", e)
 
-    def _save_queue(self) -> None:
+    def _save_queue(self) -> bool:
         """Save queue to StateManager.
 
         The data lock is acquired (re-entrantly for mutators that already
         hold it) so external callers cannot serialize ``self._items`` while
         another thread mutates it mid-iteration.
+
+        Returns:
+            True if the queue reached disk.
         """
         with self._data_lock:
             items_data = [item.to_dict() for item in self._items.values()]
         with self._save_lock:
             try:
                 state_manager = self._get_state_manager()
-                state_manager.set_deferred_items(items_data)
+                return state_manager.set_deferred_items(items_data)
             except Exception as e:
                 logger.warning("Failed to save deferred queue: %s", e)
+                return False
 
     def add(
         self,
@@ -293,7 +313,7 @@ class DeferredQueue:
         item_url: str | None = None,
         reset_time: datetime | None = None,
         raw_data: dict[str, Any] | None = None,
-    ) -> DeferredItem:
+    ) -> DeferredItem | None:
         """Add a new item to the deferred queue.
 
         Args:
@@ -310,7 +330,9 @@ class DeferredQueue:
             raw_data: Additional raw data
 
         Returns:
-            Created DeferredItem
+            The created ``DeferredItem``, or None when it could not be
+            persisted. A caller must not report an unpersisted item as
+            deferred: it will not be in the queue on the next run.
         """
         with self._data_lock:
             # Check for duplicate (same entry_id, provider, and source item).
@@ -352,7 +374,14 @@ class DeferredQueue:
             )
 
             self._items[item.id] = item
-            self._save_queue()
+            if not self._save_queue():
+                del self._items[item.id]
+                logger.error(
+                    "Could not persist the deferred entry for '%s'; it will "
+                    "not be retried automatically.",
+                    title,
+                )
+                return None
 
             logger.info(
                 "Added to deferred queue: '%s' from %s (reset in %.1f hours)",

@@ -229,6 +229,21 @@ class BackgroundRetryScheduler:
             except Exception:
                 logger.exception("Failed to update works CSV for %s", item.title)
 
+    def _estimate_reset_time(self, provider_key: str) -> datetime:
+        """Best-effort reset time for a deferral that carries none.
+
+        A provider that rejects server-side (rather than through the local
+        counter) raises without a reset time, and an item without one counts
+        as ready immediately -- so five runs in an hour would exhaust the
+        retry budget without ever waiting for the quota to return.
+        """
+        if self._quota_manager and self._quota_manager.has_quota(provider_key):
+            status = self._quota_manager.get_quota_status(provider_key)
+            seconds = float(status.get("seconds_until_reset") or 0.0)
+            if seconds > 0:
+                return datetime.now(UTC) + timedelta(seconds=seconds)
+        return datetime.now(UTC) + timedelta(hours=1)
+
     def _retry_item(self, item: DeferredItem) -> bool:
         """Attempt to retry a deferred item.
 
@@ -357,7 +372,9 @@ class BackgroundRetryScheduler:
                 self._stats["retries_redeferred"] += 1
 
             if self._queue:
-                self._queue.mark_retrying(item.id, qde.reset_time)
+                self._queue.mark_retrying(
+                    item.id, qde.reset_time or self._estimate_reset_time(provider_key)
+                )
             logger.info(
                 "Deferred download hit quota again: '%s' - %s", item.title, qde.message
             )

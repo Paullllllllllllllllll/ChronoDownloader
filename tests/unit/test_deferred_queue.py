@@ -1128,3 +1128,137 @@ class TestGetDeferredQueue:
         queue2 = get_deferred_queue()
 
         assert queue1 is queue2
+
+
+class TestDeferredQueueLoadRecovery:
+    """Regression: one malformed queue entry must not abort the whole load.
+
+    Previously a single bad entry (e.g. a null retry_count) raised out of the
+    load loop entirely, and the next full-replace save then erased every item
+    after it. Per-item recovery must skip only the malformed entry.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_singletons(
+        self, mock_config: dict[str, Any]
+    ) -> Generator[None, None, None]:
+        """Reset singletons before and after each test."""
+        from main.state.deferred import DeferredQueue
+        from main.state.store import StateManager
+
+        DeferredQueue._instance = None
+        StateManager._instance = None
+        yield
+        DeferredQueue._instance = None
+        StateManager._instance = None
+
+    def test_skips_malformed_item_keeps_good_ones(self, temp_dir: str) -> None:
+        """A malformed middle item (retry_count: null) is skipped, not fatal."""
+        from main.state.deferred import DeferredQueue
+        from main.state.store import StateManager
+
+        state_file = os.path.join(temp_dir, "load_recovery_state.json")
+        StateManager._instance = None
+        state_manager = StateManager(state_file=state_file)
+
+        good1 = {
+            "id": "good-1",
+            "title": "Good One",
+            "creator": None,
+            "entry_id": "E001",
+            "provider_key": "test",
+            "provider_name": "Test",
+            "source_id": "src1",
+            "work_dir": "/w1",
+            "base_output_dir": "/o",
+        }
+        bad = {
+            "id": "bad-1",
+            "title": "Bad One",
+            "creator": None,
+            "entry_id": "E002",
+            "provider_key": "test",
+            "provider_name": "Test",
+            "source_id": "src2",
+            "work_dir": "/w2",
+            "base_output_dir": "/o",
+            # Explicitly null (not missing): int(None) raises inside from_dict.
+            "retry_count": None,
+        }
+        good2 = {
+            "id": "good-2",
+            "title": "Good Two",
+            "creator": None,
+            "entry_id": "E003",
+            "provider_key": "test",
+            "provider_name": "Test",
+            "source_id": "src3",
+            "work_dir": "/w3",
+            "base_output_dir": "/o",
+        }
+        state_manager.set_deferred_items([good1, bad, good2])
+
+        DeferredQueue._instance = None
+        queue = DeferredQueue()
+
+        assert queue.get("good-1") is not None
+        assert queue.get("good-2") is not None
+        assert queue.get("bad-1") is None
+        assert len(queue) == 2
+
+
+class TestDeferredQueueAddPersistenceFailure:
+    """Regression: add() must not report a deferral that was never persisted."""
+
+    @pytest.fixture(autouse=True)
+    def reset_singletons(
+        self, mock_config: dict[str, Any], temp_dir: str
+    ) -> Generator[None, None, None]:
+        """Reset singletons before and after each test."""
+        from main.state.deferred import DeferredQueue
+        from main.state.store import StateManager
+
+        DeferredQueue._instance = None
+        StateManager._instance = None
+        yield
+        DeferredQueue._instance = None
+        StateManager._instance = None
+
+    @pytest.fixture
+    def queue(self, temp_dir: str) -> Any:
+        """Create fresh DeferredQueue with isolated state."""
+        from main.state.deferred import DeferredQueue
+        from main.state.store import StateManager
+
+        state_file = os.path.join(temp_dir, "add_failure_state.json")
+        StateManager._instance = None
+        StateManager(state_file=state_file)
+
+        DeferredQueue._instance = None
+        q = DeferredQueue()
+        q._items.clear()
+        return q
+
+    def test_add_returns_none_and_rolls_back_on_persist_failure(
+        self, queue: Any
+    ) -> None:
+        """When set_deferred_items fails, add returns None and drops the item."""
+        from unittest.mock import patch
+
+        from main.state.store import StateManager
+
+        with patch.object(StateManager, "set_deferred_items", return_value=False):
+            result = queue.add(
+                title="Test",
+                creator=None,
+                entry_id="E001",
+                provider_key="test",
+                provider_name="Test",
+                source_id="src",
+                work_dir="/w",
+                base_output_dir="/o",
+            )
+
+        assert result is None
+        assert len(queue) == 0
+        assert queue.get_pending() == []

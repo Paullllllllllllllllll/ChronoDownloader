@@ -396,6 +396,60 @@ class TestStateManagerPersistence:
         assert manager.get_quotas() == {}
         assert os.path.exists(os.path.join(temp_dir, "state.corrupt"))
 
+    def test_save_methods_return_bool_success_and_failure(
+        self, temp_dir: str, mock_config: dict[str, Any]
+    ) -> None:
+        """set_quota/update_quotas/set_deferred_items/force_save return True
+        when the state reaches disk, False when the write raises.
+
+        Callers must not report a successful persist on a False return: a
+        deferred item or quota update that was never written is silently
+        lost on the next run.
+        """
+        from unittest.mock import patch
+
+        from main.state.store import StateManager
+
+        state_file = os.path.join(temp_dir, "bool_return_state.json")
+        manager = StateManager(state_file=state_file)
+
+        assert manager.set_quota("p", {"a": 1}) is True
+        assert manager.update_quotas({"p2": {"a": 2}}) is True
+        assert manager.set_deferred_items([{"id": "x"}]) is True
+        assert manager.force_save() is True
+
+        with patch("main.state.store.atomic_write_json", side_effect=OSError("boom")):
+            assert manager.set_quota("p", {"a": 3}) is False
+            assert manager.update_quotas({"p2": {"a": 4}}) is False
+            assert manager.set_deferred_items([{"id": "y"}]) is False
+            assert manager.force_save() is False
+
+    def test_non_object_root_treated_as_corrupt(
+        self, temp_dir: str, mock_config: dict[str, Any]
+    ) -> None:
+        """A valid-JSON non-object root ("[]") is treated as corruption.
+
+        Without the isinstance guard, the data.get() calls in _load_state
+        raise AttributeError on a list root, which escapes the method, is
+        swallowed by callers, and leaves every save failing silently for the
+        whole run with the bad file never preserved.
+        """
+        from unittest.mock import patch
+
+        from main.state.store import StateManager
+
+        state_file = os.path.join(temp_dir, "list_root_state.json")
+        with open(state_file, "w", encoding="utf-8") as f:
+            f.write("[]")
+
+        with patch.object(StateManager, "_migrate_from_old_files") as migrate:
+            manager = StateManager(state_file=state_file)
+
+        migrate.assert_not_called()
+        assert manager.get_quotas() == {}
+        assert manager.get_deferred_items() == []
+        assert os.path.exists(os.path.join(temp_dir, "list_root_state.corrupt"))
+
 
 class TestGetStateManager:
     """Tests for get_state_manager helper function."""
