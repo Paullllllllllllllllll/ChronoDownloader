@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -644,3 +645,29 @@ class TestCoerceInt:
         from main.state.quota import _coerce_int
 
         assert _coerce_int({"nested": "dict"}, 10, "test_provider", "daily_limit") == 10
+
+
+class TestQuotaSavePropagation:
+    """A save that never reached disk must be visible in the log.
+
+    StateManager.update_quotas returns False once saves are disabled (an
+    unreadable state file); swallowing that left every record_download of the
+    run uncounted, so the next run started from a stale counter.
+    """
+
+    def test_failed_persist_warns(self, caplog: Any) -> None:
+        from main.state.quota import QuotaManager
+
+        QuotaManager._instance = None
+        try:
+            manager = QuotaManager()
+            state_manager = MagicMock()
+            state_manager.update_quotas.return_value = False
+            manager._state_manager = state_manager
+
+            with caplog.at_level(logging.WARNING, logger="main.state.quota"):
+                assert manager._save_state() is False
+
+            assert "could not be persisted" in caplog.text
+        finally:
+            QuotaManager._instance = None

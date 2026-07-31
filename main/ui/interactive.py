@@ -1047,10 +1047,11 @@ def process_csv_batch_with_stats(
     pending_df = get_pending_works(works_df)
 
     log.info(
-        "CSV status: %d total, %d completed, %d failed, %d pending",
+        "CSV status: %d total, %d completed, %d failed, %d deferred, %d pending",
         initial_stats["total"],
         initial_stats["completed"],
         initial_stats["failed"],
+        initial_stats.get("deferred", 0),
         initial_stats["pending"],
     )
 

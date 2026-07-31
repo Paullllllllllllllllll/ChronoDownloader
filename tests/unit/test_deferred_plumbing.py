@@ -159,6 +159,62 @@ class TestEagerRetryPersistence:
         finally:
             BackgroundRetryScheduler._instance = None
 
+    def test_entry_id_collision_does_not_stamp_a_foreign_csv(
+        self, tmp_path: Any
+    ) -> None:
+        """entry_id schemes repeat across sampling CSVs. Matching on the id
+        alone wrote this item's link, provider and timestamp into an unrelated
+        work's row and then dropped that row from the batch, so the work was
+        never downloaded."""
+        from main.state.background import BackgroundRetryScheduler
+
+        BackgroundRetryScheduler._instance = None
+        try:
+            csv_path = _make_csv(tmp_path)
+            out_dir = str(tmp_path / "out")
+            work_dir = os.path.join(out_dir, "e_001_other_corpus_book")
+            os.makedirs(work_dir, exist_ok=True)
+
+            scheduler = BackgroundRetryScheduler()
+            item = DeferredItem(
+                id="item-1",
+                title="A Book From Another Corpus",
+                creator="Author",
+                entry_id="E001",
+                provider_key="testprov",
+                provider_name="Test Provider",
+                source_id="src-1",
+                work_dir=work_dir,
+                base_output_dir=out_dir,
+                item_url="https://example.org/item",
+                status="pending",
+            )
+
+            queue = MagicMock()
+            queue.get_ready.return_value = [item]
+            queue.mark_completed.return_value = True
+            scheduler._queue = queue
+            scheduler._quota_manager = MagicMock()
+            scheduler._quota_manager.can_download.return_value = (True, None)
+            scheduler.set_provider_download_fn("testprov", lambda sr, wd: True)
+
+            with patch("main.state.background.get_deferred_queue", return_value=queue):
+                stats, completed_entry_ids = scheduler.retry_ready_now(
+                    csv_path=csv_path,
+                    csv_entry_titles={"E001": "Deferred Book"},
+                )
+
+            # The download itself still succeeded and is recorded under its own
+            # output directory; only the foreign CSV is left alone.
+            assert stats["succeeded"] == 1
+            assert completed_entry_ids == set()
+
+            df = pd.read_csv(csv_path)
+            status = df.loc[df["entry_id"] == "E001", "retrievable"].iloc[0]
+            assert str(status).strip().lower() != "true"
+        finally:
+            BackgroundRetryScheduler._instance = None
+
 
 class TestQuotaWaitDatetime:
     """B4: long quota waits must not crash the retry sweep."""

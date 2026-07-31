@@ -138,7 +138,9 @@ class BackgroundRetryScheduler:
             self._provider_download_fns[provider_key] = download_fn
 
     def retry_ready_now(
-        self, csv_path: str | None = None
+        self,
+        csv_path: str | None = None,
+        csv_entry_titles: dict[str, str] | None = None,
     ) -> tuple[dict[str, int], set[str]]:
         """Synchronously retry every currently-ready deferred item (eager retry).
 
@@ -148,6 +150,10 @@ class BackgroundRetryScheduler:
 
         Args:
             csv_path: Optional works-CSV path to mark retried items successful.
+            csv_entry_titles: Optional ``entry_id -> title`` map of the works
+                CSV this run is processing, used to confirm that a queued item
+                really belongs to it. Omitting it keeps the previous
+                match-on-entry_id-alone behavior.
 
         Returns:
             A tuple of ``(stats, completed_entry_ids)`` where ``stats`` holds
@@ -172,8 +178,19 @@ class BackgroundRetryScheduler:
             stats["attempted"] += 1
             if self._retry_item(item):
                 stats["succeeded"] += 1
-                self._persist_retry_success(item, csv_path)
-                if item.entry_id:
+                # entry_id schemes repeat across sampling CSVs, so an id match
+                # alone is not proof of ownership: it stamped this item's
+                # success (link, provider, timestamp) into an unrelated work's
+                # row and then dropped that row from the batch, so the work was
+                # never downloaded. The stored title is a verbatim copy of the
+                # same CSV cell, which makes this exact string equality rather
+                # than a fuzzy comparison; its only false negative is a
+                # hand-edited title, which costs one redundant search.
+                owns_csv = csv_entry_titles is None or (
+                    csv_entry_titles.get(str(item.entry_id)) == item.title
+                )
+                self._persist_retry_success(item, csv_path if owns_csv else None)
+                if item.entry_id and owns_csv:
                     completed_entry_ids.add(str(item.entry_id))
             else:
                 stats["failed"] += 1

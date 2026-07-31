@@ -228,14 +228,30 @@ class QuotaManager:
         except Exception as e:
             logger.warning("Failed to load quota state: %s", e)
 
-    def _save_state(self) -> None:
-        """Save quota state to StateManager."""
+    def _save_state(self) -> bool:
+        """Save quota state to StateManager.
+
+        Returns:
+            True when the counters reached disk. ``update_quotas`` returns
+            False once saves are disabled (an unreadable state file), and
+            swallowing that left the run silently uncounted: the next run
+            starts from a stale counter and issues downloads past the real
+            daily limit.
+        """
         try:
             state_manager = self._get_state_manager()
             quotas_data = {k: v.to_dict() for k, v in self._quotas.items()}
-            state_manager.update_quotas(quotas_data)
+            if not state_manager.update_quotas(quotas_data):
+                logger.warning(
+                    "Quota state could not be persisted; the counters will "
+                    "reset on the next run and the provider limit may be "
+                    "exceeded."
+                )
+                return False
+            return True
         except Exception as e:
             logger.warning("Failed to save quota state: %s", e)
+            return False
 
     def _get_or_create_quota(self, provider_key: str) -> ProviderQuota:
         """Get or create quota tracking for a provider.

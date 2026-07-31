@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable
 from typing import Any, cast
@@ -55,6 +56,7 @@ def _run_eager_deferred_retry(
     config: dict[str, Any],
     logger: logging.Logger,
     csv_path: str | None,
+    csv_entry_titles: dict[str, str] | None = None,
 ) -> set[str]:
     """Synchronously retry any ready deferred items before starting new work.
 
@@ -75,7 +77,9 @@ def _run_eager_deferred_retry(
 
     try:
         scheduler = get_background_scheduler()
-        stats, completed_entry_ids = scheduler.retry_ready_now(csv_path=csv_path)
+        stats, completed_entry_ids = scheduler.retry_ready_now(
+            csv_path=csv_path, csv_entry_titles=csv_entry_titles
+        )
         if stats.get("attempted"):
             logger.info(
                 "Eager deferred retry: %d attempted, %d succeeded, %d failed",
@@ -123,6 +127,7 @@ def run_batch_downloads(
         - 'succeeded': Successful downloads (parallel mode only)
         - 'failed': Failed downloads (parallel mode only)
         - 'skipped': Works skipped due to missing title
+        - 'deferred': Downloads this run deferred on quota (not failures)
     """
     if logger is None:
         logger = logging.getLogger(__name__)
@@ -138,7 +143,20 @@ def run_batch_downloads(
     # skips on work.json), a quota-gated provider re-defers it, clobbering the
     # freshly written "completed" cell and duplicating the deferred entry.
     if enable_background_retry and not dry_run:
-        completed_entry_ids = _run_eager_deferred_retry(config, logger, csv_path)
+        # Pass this CSV's entry_id -> title map so the retry can tell whether a
+        # queued item is actually one of these rows; entry_id schemes repeat
+        # across sampling CSVs.
+        csv_entry_titles: dict[str, str] | None = None
+        if ENTRY_ID_COL in works_df.columns and TITLE_COL in works_df.columns:
+            csv_entry_titles = {
+                str(e): str(t)
+                for e, t in zip(
+                    works_df[ENTRY_ID_COL], works_df[TITLE_COL], strict=False
+                )
+            }
+        completed_entry_ids = _run_eager_deferred_retry(
+            config, logger, csv_path, csv_entry_titles
+        )
         if completed_entry_ids and ENTRY_ID_COL in works_df.columns:
             already_done = works_df[ENTRY_ID_COL].astype(str).isin(completed_entry_ids)
             drop_count = int(already_done.sum())
@@ -148,6 +166,11 @@ def run_batch_downloads(
                     "Skipping %d row(s) already completed by eager deferred retry",
                     drop_count,
                 )
+
+    # Snapshot the queue before the batch so the reported "deferred" count is
+    # this run's, not the whole backlog's. The eager retry above has already
+    # drained whatever it completed.
+    pending_before = len(get_deferred_queue().get_pending())
 
     # Determine effective parallel settings
     dl_config = config.get("download", {})
@@ -170,16 +193,20 @@ def run_batch_downloads(
     else:
         stats = _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
 
-    # Add deferred count to stats
+    # Add deferred count to stats. get_pending() spans the whole user-level
+    # queue -- every corpus, every previous run -- so reporting it verbatim
+    # attributed another batch's backlog to this one in the log line, the
+    # "Batch complete" summary and the --json output. Report the delta.
     queue = get_deferred_queue()
-    deferred_count = len(queue.get_pending())
-    stats["deferred"] = deferred_count
+    deferred_total = len(queue.get_pending())
+    stats["deferred"] = max(0, deferred_total - pending_before)
 
-    if deferred_count > 0:
+    if deferred_total > 0:
         logger.info(
-            "%d download(s) deferred due to quota limits. "
+            "%d download(s) deferred by this run; %d pending in the queue. "
             "Ready items are retried at the start of the next run.",
-            deferred_count,
+            stats["deferred"],
+            deferred_total,
         )
 
     return stats
@@ -401,13 +428,13 @@ def _parse_work_row(
 
 
 def _mark_no_match_failed(
-    csv_path: str,
+    csv_path: str | None,
     output_dir: str,
     entry_id: str,
     title: str,
     logger: logging.Logger,
     creator: str | None = None,
-) -> None:
+) -> bool:
     """Mark a parallel-mode no-match work failed, unless it was resume-skipped.
 
     ``search_and_select`` returns None both for resume-skips (work already
@@ -416,6 +443,11 @@ def _mark_no_match_failed(
 
     ``creator`` must match the value ``_prepare_work`` used so the computed work
     directory (which may fold in the creator per naming config) is identical.
+
+    Returns:
+        True for a genuine no-match, which the caller must count as a failure;
+        False for a resume-skip, which is neither re-marked nor counted --
+        sequential mode counts such a row as processed only.
     """
     from main.data.work import check_work_status, compute_work_dir
 
@@ -423,11 +455,14 @@ def _mark_no_match_failed(
         work_dir, _ = compute_work_dir(output_dir, entry_id, title, creator=creator)
         should_skip, _reason = check_work_status(work_dir)
         if should_skip:
-            return
-        mark_failed(csv_path, entry_id)
-        logger.debug("Marked entry %s as failed (no match) in source CSV", entry_id)
+            return False
+        if csv_path:
+            mark_failed(csv_path, entry_id)
+            logger.debug("Marked entry %s as failed (no match) in source CSV", entry_id)
+        return True
     except Exception:
         logger.exception("Failed to mark no-match entry %s in source CSV", entry_id)
+        return True
 
 
 def _run_sequential(
@@ -602,6 +637,13 @@ def _run_parallel(
     # Genuine no-matches never reach the scheduler, so its failure counter
     # cannot see them; sequential mode counts them as failed.
     no_match_failed = 0
+    # A quota-deferred task returns False, and the scheduler has no notion of
+    # "deferred", so it books the outcome as a failure. The CLI exits non-zero
+    # on "failed" while documenting deferrals as explicitly not failures, and
+    # sequential mode counts them as neither. Netted out of the scheduler
+    # total below; incremented from worker threads, hence the lock.
+    deferred_completions = [0]
+    deferred_lock = threading.Lock()
 
     # Default callbacks if none provided
     def default_on_submit(task: DownloadTask) -> None:
@@ -632,6 +674,9 @@ def _run_parallel(
         # marked "deferred" (retriable) rather than "failed" so --pending-mode
         # new does not permanently drop it.
         task_status = getattr(task, "status", None)
+        if not success and task_status == "deferred":
+            with deferred_lock:
+                deferred_completions[0] += 1
         if csv_path and task.entry_id:
             try:
                 if success:
@@ -816,21 +861,22 @@ def _run_parallel(
                     # Mirror sequential mode: mark genuine no-matches failed in
                     # the CSV, but never overwrite a resume-skipped (already
                     # completed) work.
-                    if csv_path and entry_id:
-                        _mark_no_match_failed(
-                            csv_path,
-                            output_dir,
-                            str(entry_id),
-                            str(title),
-                            logger,
-                            creator=None if pd.isna(creator) else str(creator),
-                        )
-                    # Count the outcome regardless of whether a CSV is in play:
-                    # sequential mode counts the same no-match as processed and
-                    # failed, and the CLI derives its exit code from "failed",
-                    # so an all-no-match batch used to exit 0 in parallel mode
-                    # and 1 in sequential mode.
-                    no_match_failed += 1
+                    #
+                    # The classification also drives the counter, and does so
+                    # whether or not a CSV is in play: sequential mode counts a
+                    # no-match as processed and failed but a resume-skip as
+                    # processed only. The CLI derives its exit code from
+                    # "failed", so counting resume-skips there made a re-run of
+                    # an already-downloaded corpus exit 1.
+                    if _mark_no_match_failed(
+                        csv_path,
+                        output_dir,
+                        str(entry_id),
+                        str(title),
+                        logger,
+                        creator=None if pd.isna(creator) else str(creator),
+                    ):
+                        no_match_failed += 1
                     actual_submitted[0] += 1
 
         # Phase 2: Wait for all downloads to complete
@@ -895,7 +941,9 @@ def _run_parallel(
     return {
         "processed": actual_submitted[0],
         "succeeded": final_stats["succeeded"] + direct_iiif_succeeded,
-        "failed": final_stats["failed"] + direct_iiif_failed + no_match_failed,
+        "failed": max(0, final_stats["failed"] - deferred_completions[0])
+        + direct_iiif_failed
+        + no_match_failed,
         "skipped": skipped_count,
     }
 

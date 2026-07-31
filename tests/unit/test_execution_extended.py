@@ -176,7 +176,9 @@ class TestEagerDeferredRetry:
             logging.getLogger("test"),
             "works.csv",
         )
-        scheduler.retry_ready_now.assert_called_once_with(csv_path="works.csv")
+        scheduler.retry_ready_now.assert_called_once_with(
+            csv_path="works.csv", csv_entry_titles=None
+        )
 
 
 # ============================================================================
@@ -394,6 +396,38 @@ class TestRunBatchDownloads:
 
     @patch("main.orchestration.execution._run_sequential")
     @patch("main.orchestration.execution.get_deferred_queue")
+    def test_deferred_reports_this_runs_delta_not_the_backlog(
+        self, mock_queue: MagicMock, mock_seq: MagicMock
+    ) -> None:
+        """get_pending() spans the whole user-level queue, so reporting it
+        verbatim attributed another corpus's backlog to this batch."""
+        mock_seq.return_value = {
+            "processed": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "skipped": 0,
+        }
+        # Same backlog before and after: this run deferred nothing.
+        mock_queue.return_value.get_pending.return_value = ["old1", "old2", "old3"]
+
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book"],
+                "main_author": ["Author"],
+                "entry_id": ["E001"],
+            }
+        )
+        stats = run_batch_downloads(
+            works_df,
+            "/output",
+            {},
+            use_parallel=False,
+            enable_background_retry=False,
+        )
+        assert stats["deferred"] == 0
+
+    @patch("main.orchestration.execution._run_sequential")
+    @patch("main.orchestration.execution.get_deferred_queue")
     def test_dry_run_uses_sequential(
         self, mock_queue: MagicMock, mock_seq: MagicMock
     ) -> None:
@@ -558,6 +592,123 @@ class TestRunParallelNoMatchStats:
         )
         assert stats["failed"] == 2
         assert stats["processed"] == 2
+        assert stats["succeeded"] == 0
+
+    @patch("main.data.work.check_work_status", return_value=(True, "status=completed"))
+    @patch("main.orchestration.execution.pipeline.search_and_select", return_value=None)
+    @patch(
+        "main.orchestration.execution.is_direct_download_enabled", return_value=False
+    )
+    @patch("main.orchestration.execution.get_parallel_download_config")
+    def test_resume_skipped_rows_are_not_failures(
+        self,
+        mock_cfg: MagicMock,
+        mock_direct_enabled: MagicMock,
+        mock_search: MagicMock,
+        mock_status: MagicMock,
+    ) -> None:
+        """search_and_select returns None for a resume-skip as well as for a
+        genuine no-match. Counting both as failures made a re-run of an
+        already-downloaded corpus exit 1."""
+        import logging
+
+        from main.orchestration.execution import _run_parallel
+
+        mock_cfg.return_value = {
+            "max_parallel_downloads": 2,
+            "provider_concurrency": {},
+            "worker_timeout_s": 0,
+        }
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book A", "Book B"],
+                "main_author": ["Author A", "Author B"],
+                "entry_id": ["E001", "E002"],
+            }
+        )
+        stats = _run_parallel(
+            works_df,
+            "/output",
+            {},
+            None,
+            logging.getLogger("test"),
+        )
+        assert stats["failed"] == 0
+        assert stats["processed"] == 2
+
+
+class TestParallelDeferredNotCountedAsFailure:
+    """A quota deferral is documented as explicitly not a failure, and the CLI
+    derives its exit code from ``failed``."""
+
+    @patch(
+        "main.orchestration.execution.is_direct_download_enabled", return_value=False
+    )
+    @patch("main.orchestration.execution.get_parallel_download_config")
+    def test_deferred_task_nets_out_of_failed(
+        self, mock_cfg: MagicMock, mock_direct_enabled: MagicMock
+    ) -> None:
+        import logging
+
+        from main.orchestration.execution import _run_parallel
+        from main.orchestration.scheduler import DownloadTask
+
+        mock_cfg.return_value = {
+            "max_parallel_downloads": 2,
+            "provider_concurrency": {},
+            "worker_timeout_s": 0,
+        }
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book A"],
+                "main_author": ["Author A"],
+                "entry_id": ["E001"],
+            }
+        )
+
+        from api.model import SearchResult
+
+        task = DownloadTask(
+            work_id="w1",
+            entry_id="E001",
+            title="Book A",
+            creator="Author A",
+            work_dir="/output/w1",
+            work_stem="book_a",
+            selected_result=SearchResult(provider="P", title="Book A"),
+            provider_key="annas_archive",
+            provider_tuple=(
+                "annas_archive",
+                lambda *a, **k: [],
+                lambda *a, **k: False,
+                "Anna's Archive",
+            ),
+            work_json_path="/output/w1/work.json",
+        )
+
+        def _defer(*_args: object, **_kwargs: object) -> bool:
+            task.status = "deferred"
+            return False
+
+        with (
+            patch(
+                "main.orchestration.execution.pipeline.search_and_select",
+                return_value=task,
+            ),
+            patch(
+                "main.orchestration.execution.pipeline.execute_download",
+                side_effect=_defer,
+            ),
+        ):
+            stats = _run_parallel(
+                works_df,
+                "/output",
+                {},
+                None,
+                logging.getLogger("test"),
+            )
+
+        assert stats["failed"] == 0
         assert stats["succeeded"] == 0
 
 
