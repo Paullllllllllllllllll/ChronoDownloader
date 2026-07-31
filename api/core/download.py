@@ -546,10 +546,13 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                         )
                         truncated = True
                         break
+                    # Count the chunk as soon as it is booked in the budget:
+                    # if f.write below raises, _discard_partial must refund
+                    # this chunk too, so bytes_written has to include it.
+                    bytes_written += len(chunk)
                     f.write(chunk)
                     if len(head) < _VALIDATION_HEAD_BYTES:
                         head.extend(chunk[: _VALIDATION_HEAD_BYTES - len(head)])
-                    bytes_written += len(chunk)
         except (requests.exceptions.RequestException, OSError) as e:
             logger.error(
                 "Error while streaming %s to %s: %s; discarding partial file.",
@@ -654,13 +657,14 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     pass
         return min(base_backoff * (backoff_mult ** (attempt - 1)), max_backoff)
 
-    try:
-        verify = verify_default
+    verify = verify_default
+    insecure_retry_used = False
 
-        for attempt in range(1, max_attempts + 1):
-            if rl:
-                rl.wait()
+    for attempt in range(1, max_attempts + 1):
+        if rl:
+            rl.wait()
 
+        try:
             with session.get(
                 url,
                 stream=True,
@@ -706,49 +710,59 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 response.raise_for_status()
                 if cb:
                     cb.record_success()
-                return _process_response(response)
+                return _process_response(
+                    response, is_insecure_retry=insecure_retry_used
+                )
 
-        logger.error(
-            "Giving up after %d attempts due to rate limiting for %s",
-            max_attempts,
-            url,
-        )
-        if cb:
-            cb.record_failure(provider or "unknown")
-        return None
-
-    except requests.exceptions.SSLError as e:
-        if ssl_policy == "retry_insecure_once":
-            logger.warning(
-                "SSL verify failed for %s; retrying once with verify=False due "
-                "to policy.",
-                url,
-            )
-            try:
-                with session.get(
+        except requests.exceptions.SSLError as e:
+            # Mirror make_request: retry once with verify=False when policy
+            # allows, consuming this attempt; abort on any further SSL error.
+            if ssl_policy == "retry_insecure_once" and verify:
+                logger.warning(
+                    "SSL verify failed for %s; retrying once with verify=False "
+                    "due to policy.",
                     url,
-                    stream=True,
-                    timeout=timeout,
-                    verify=False,
-                    headers=req_headers or None,
-                ) as response:
-                    response.raise_for_status()
-                    return _process_response(response, is_insecure_retry=True)
-            except Exception as ee:
-                logger.error("Insecure retry failed for %s: %s", url, ee)
-                return None
-        logger.error("SSL error downloading %s: %s", url, e)
-        return None
+                )
+                verify = False
+                insecure_retry_used = True
+                continue
+            logger.error("SSL error downloading %s: %s", url, e)
+            return None
 
-    except requests.exceptions.RequestException as e:
-        logger.error("Error downloading %s: %s", url, e)
-        if cb:
-            cb.record_failure(provider or "unknown")
-        return None
+        except requests.exceptions.RequestException as e:
+            # Transient network failures (timeouts, connection resets) are
+            # retried with backoff like make_request; previously any such
+            # error on the initial GET aborted the download outright, so the
+            # configured max_attempts never applied to the download path.
+            if attempt < max_attempts:
+                sleep_s = _calculate_backoff(attempt, None)
+                logger.warning(
+                    "Request error for %s: %s; sleeping %.1fs (attempt %d/%d)",
+                    url,
+                    e,
+                    sleep_s,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(sleep_s)
+                continue
+            logger.error("Error downloading %s: %s", url, e)
+            if cb:
+                cb.record_failure(provider or "unknown")
+            return None
 
-    except OSError as e:
-        logger.error("Error saving file to %s: %s", folder_path, e)
-        return None
+        except OSError as e:
+            logger.error("Error saving file to %s: %s", folder_path, e)
+            return None
+
+    logger.error(
+        "Giving up after %d attempts for %s",
+        max_attempts,
+        url,
+    )
+    if cb:
+        cb.record_failure(provider or "unknown")
+    return None
 
 
 def save_json(data: Any, folder_path: str, filename: str) -> str | None:

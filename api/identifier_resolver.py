@@ -125,6 +125,11 @@ def build_manifest_url(provider_key: str, identifier: str) -> list[str]:
             f"Provider '{provider_key}' does not support IIIF manifest "
             f"URL construction; use its native download function instead."
         )
+    if provider_key == "bnf_gallica":
+        # The Gallica template already carries the "ark:/12148/" prefix; a
+        # full ark identifier (accepted by IDENTIFIER_PATTERNS) would
+        # otherwise be doubled into ".../iiif/ark:/12148/ark:/12148/...".
+        identifier = re.sub(r"^ark:/12148/", "", identifier)
     template = MANIFEST_TEMPLATES.get(provider_key)
     if template is None:
         raise KeyError(

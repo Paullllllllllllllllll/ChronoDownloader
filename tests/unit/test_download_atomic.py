@@ -66,6 +66,44 @@ def test_midstream_abort_leaves_no_file(
     assert _objects_files(folder) == []
 
 
+def test_write_failure_refunds_all_booked_bytes(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """An OSError from the file write refunds every budget-booked chunk.
+
+    Each chunk is booked via ``add_bytes`` before it is written; when the
+    write itself fails, the just-booked chunk must be included in the refund
+    (pre-fix, ``bytes_written`` was incremented only after a successful
+    write, leaking the failing chunk into the budget).
+    """
+    payload = b"%PDF-1.4\n" + b"x" * 1024
+
+    def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload
+
+    resp = _make_response({"Content-Type": "application/pdf"}, good_iter)
+    session = _make_session(resp)
+    folder = str(tmp_path / "work")
+
+    failing_file = MagicMock()
+    failing_file.write.side_effect = OSError("disk full")
+    open_cm = MagicMock()
+    open_cm.__enter__ = MagicMock(return_value=failing_file)
+    open_cm.__exit__ = MagicMock(return_value=False)
+
+    dl_mod._BUDGET._exhausted = False
+    before = dl_mod._BUDGET.total_pdfs_bytes
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch("api.core.download.open", return_value=open_cm, create=True),
+    ):
+        result = dl_mod.download_file("https://example.org/book.pdf", folder, "book")
+
+    assert result is None
+    assert dl_mod._BUDGET.total_pdfs_bytes == before
+    assert _objects_files(folder) == []
+
+
 def test_content_length_short_read_discarded(
     tmp_path: Any, mock_config: dict[str, Any]
 ) -> None:
@@ -121,6 +159,49 @@ def test_content_encoded_stream_not_discarded_on_length_mismatch(
     assert result is not None
     with open(result, "rb") as fh:
         assert fh.read() == payload
+
+
+def test_transient_connection_error_retried(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """Connection errors on the initial GET are retried up to max_attempts.
+
+    Pre-fix, the try/except wrapped the whole retry loop, so the first
+    ConnectionError aborted the download and the configured max_attempts
+    never applied to the download path.
+    """
+    payload = b"%PDF-1.4\n" + b"x" * 1024
+
+    def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload
+
+    resp = _make_response(
+        {"Content-Type": "application/pdf", "Content-Length": str(len(payload))},
+        good_iter,
+    )
+    good_cm = MagicMock()
+    good_cm.__enter__ = MagicMock(return_value=resp)
+    good_cm.__exit__ = MagicMock(return_value=False)
+
+    session = MagicMock()
+    session.get.side_effect = [
+        requests.exceptions.ConnectionError("reset"),
+        requests.exceptions.Timeout("timed out"),
+        good_cm,
+    ]
+
+    folder = str(tmp_path / "work")
+    dl_mod._BUDGET._exhausted = False
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch("api.core.download.time.sleep"),
+    ):
+        result = dl_mod.download_file("https://example.org/book.pdf", folder, "book")
+
+    assert result is not None
+    assert session.get.call_count == 3
+    files = _objects_files(folder)
+    assert len(files) == 1
 
 
 def test_complete_download_promoted_atomically(

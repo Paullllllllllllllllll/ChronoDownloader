@@ -35,6 +35,13 @@ class TestBuildManifestUrl:
             "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k1511262r/manifest.json"
         ]
 
+    def test_bnf_gallica_full_ark_not_doubled(self) -> None:
+        """A full ark identifier must not double the template's ark prefix."""
+        urls = build_manifest_url("bnf_gallica", "ark:/12148/bpt6k1511262r")
+        assert urls == [
+            "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k1511262r/manifest.json"
+        ]
+
     def test_internet_archive(self) -> None:
         urls = build_manifest_url("internet_archive", "ThreeBooksOfCookery1575")
         assert urls == [
