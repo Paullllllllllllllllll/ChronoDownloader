@@ -561,7 +561,10 @@ def make_request(
                     max_attempts,
                 )
                 hit_rate_limit = True
-                time.sleep(sleep_s)
+                # No point sleeping out the backoff on the final attempt;
+                # the loop is about to give up anyway.
+                if attempt < max_attempts:
+                    time.sleep(sleep_s)
                 continue
 
             # Retry transient 5xx
@@ -578,11 +581,20 @@ def make_request(
                     max_attempts,
                 )
                 hit_server_error = True
-                time.sleep(sleep_s)
+                # No point sleeping out the backoff on the final attempt;
+                # the loop is about to give up anyway.
+                if attempt < max_attempts:
+                    time.sleep(sleep_s)
                 continue
 
             # Non-retryable client errors
             if resp.status_code in (400, 401, 403, 404, 410, 422):
+                # The server answered, so the transport is healthy: record the
+                # outcome, or a half-open probe spent on a dead URL would leave
+                # the breaker half-open and throttle a working provider to one
+                # request per cooldown.
+                if cb:
+                    cb.record_success()
                 logger.warning(
                     "Non-retryable HTTP %s for %s; not retrying", resp.status_code, url
                 )

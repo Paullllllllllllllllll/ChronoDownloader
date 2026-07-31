@@ -56,6 +56,12 @@ def atomic_write_text(
     try:
         with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
             f.write(data)
+            # os.replace makes the rename atomic, but on NTFS the file DATA is
+            # not journaled: without the fsync a crash shortly after the
+            # replace can leave a zero-length state file, which the loader
+            # then treats as corruption and resets.
+            f.flush()
+            os.fsync(f.fileno())
     except BaseException:
         with contextlib.suppress(OSError):
             os.remove(tmp_path)

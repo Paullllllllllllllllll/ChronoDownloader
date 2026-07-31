@@ -14,6 +14,7 @@ from api.core.network import (
     get_provider_for_url,
     is_provider_available,
     make_json_request,
+    make_request,
 )
 
 # ============================================================================
@@ -249,6 +250,48 @@ class TestGetProviderForUrlExtended:
         assert (
             get_provider_for_url("https://annas-archive.li/download") == "annas_archive"
         )
+
+
+# ============================================================================
+# make_request — non-retryable status + circuit breaker recovery
+# ============================================================================
+
+
+class TestMakeRequestNonRetryableRecordsSuccess:
+    """A non-retryable status (400/401/403/404/410/422) records success.
+
+    Pre-fix, aborting on a non-retryable status returned None without ever
+    touching the breaker, so a half-open probe spent on a permanently-dead
+    URL left the breaker stuck HALF_OPEN and throttled a working provider to
+    one request per cooldown indefinitely.
+    """
+
+    def setup_method(self) -> None:
+        _CIRCUIT_BREAKERS.clear()
+
+    def teardown_method(self) -> None:
+        _CIRCUIT_BREAKERS.clear()
+
+    def test_404_records_success_on_breaker(self) -> None:
+        mock_cb = MagicMock()
+        mock_cb.allow_request.return_value = True
+
+        resp = MagicMock()
+        resp.status_code = 404
+        resp.headers = {}
+
+        session = MagicMock()
+        session.get.return_value = resp
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=mock_cb),
+            patch("api.core.network.get_network_config", return_value={}),
+        ):
+            result = make_request("https://example.org/missing")
+
+        assert result is None
+        mock_cb.record_success.assert_called_once()
 
 
 # ============================================================================

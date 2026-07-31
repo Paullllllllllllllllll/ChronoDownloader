@@ -310,9 +310,15 @@ def _filename_from_content_disposition(cd: str | None) -> str | None:
 
 def _try_skip_existing(
     url: str, folder_path: str, filename: str, provider: str | None
-) -> str | None:
+) -> tuple[str | None, bool]:
+    """Return ``(existing_path, counts_as_success)`` for an already-present file.
+
+    The second element mirrors ``_determine_target_directory``: a file routed
+    to ``metadata/`` is not a successful object download, and the skip path
+    must report that exactly as the fresh-download path does.
+    """
     if overwrite_existing():
-        return None
+        return None, True
 
     predicted_ext = (
         Path(urlparse(url).path).suffix.lower()
@@ -320,16 +326,16 @@ def _try_skip_existing(
         or None
     )
     if not predicted_ext:
-        return None
+        return None, True
 
     dl_cfg = get_download_config()
     allowed_exts = dl_cfg.get("allowed_object_extensions", [])
     save_disallowed = dl_cfg.get("save_disallowed_to_metadata", True)
-    target_dir, _, _ = _determine_target_directory(
+    target_dir, _, counts_as_success = _determine_target_directory(
         folder_path, predicted_ext, allowed_exts, save_disallowed
     )
     if target_dir is None:
-        return None
+        return None, True
 
     stem = get_current_name_stem() or to_snake_case(filename) or "object"
     prov_slug = get_provider_slug(get_current_provider(), provider)
@@ -356,9 +362,9 @@ def _try_skip_existing(
     if os.path.exists(predicted_path):
         increment_counter(key)
         logger.info("File already exists (early check), skipping: %s", predicted_path)
-        return predicted_path
+        return predicted_path, counts_as_success
 
-    return None
+    return None, True
 
 
 def download_file(url: str, folder_path: str, filename: str) -> str | None:
@@ -377,9 +383,24 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     session = get_session()
     provider = get_provider_for_url(url)
 
-    existing = _try_skip_existing(url, folder_path, filename, provider)
+    existing, existing_counts = _try_skip_existing(
+        url, folder_path, filename, provider
+    )
     if existing is not None:
-        return existing
+        return existing if existing_counts else None
+
+    work_id = get_current_work()
+
+    # Budget guards run before the circuit-breaker check: a skipped download
+    # makes no request, so it must not consume the breaker's single half-open
+    # probe slot.
+    if _BUDGET.exhausted():
+        logger.warning("Download budget exhausted; skipping %s", url)
+        return None
+
+    if not _BUDGET.allow_new_file(provider, work_id):
+        logger.warning("Download budget stop-policy tripped; skipping %s", url)
+        return None
 
     # Consult the per-provider circuit breaker before downloading, mirroring
     # make_request: a provider tripped by 429/5xx storms is skipped until its
@@ -413,15 +434,6 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     )
 
     rl = get_rate_limiter(provider)
-    work_id = get_current_work()
-
-    if _BUDGET.exhausted():
-        logger.warning("Download budget exhausted; skipping %s", url)
-        return None
-
-    if not _BUDGET.allow_new_file(provider, work_id):
-        logger.warning("Download budget stop-policy tripped; skipping %s", url)
-        return None
 
     def _process_response(
         response: requests.Response, is_insecure_retry: bool = False
@@ -477,7 +489,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
 
         if not overwrite_existing() and os.path.exists(filepath):
             logger.info("File already exists, skipping: %s", filepath)
-            return filepath
+            return filepath if counts_as_success else None
 
         if not _BUDGET.allow_new_file(provider, work_id):
             logger.warning("Download budget stop-policy tripped; skipping %s", url)
@@ -562,6 +574,14 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             )
             _discard_partial()
             return None
+        except BaseException:
+            # Ctrl-C (KeyboardInterrupt) and SystemExit derive from
+            # BaseException, so they bypass the handler above. Without this
+            # clause the .part file survives inside objects/, and the shipped
+            # resume mode "skip_if_has_objects" then skips the work forever on
+            # the strength of a partial file holding no usable content.
+            _discard_partial()
+            raise
 
         if truncated:
             _discard_partial()
@@ -683,7 +703,10 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                         attempt,
                         max_attempts,
                     )
-                    time.sleep(sleep_s)
+                    # No point sleeping out the backoff on the final
+                    # attempt; the loop is about to give up anyway.
+                    if attempt < max_attempts:
+                        time.sleep(sleep_s)
                     continue
 
                 if response.status_code in (500, 502, 503, 504):
@@ -696,10 +719,19 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                         attempt,
                         max_attempts,
                     )
-                    time.sleep(sleep_s)
+                    # No point sleeping out the backoff on the final
+                    # attempt; the loop is about to give up anyway.
+                    if attempt < max_attempts:
+                        time.sleep(sleep_s)
                     continue
 
                 if response.status_code in (400, 401, 403, 404, 410, 422):
+                    # The server answered, so the transport is healthy: record
+                    # the outcome, or a half-open probe spent on a dead URL
+                    # would leave the breaker half-open and throttle a working
+                    # provider to one request per cooldown.
+                    if cb:
+                        cb.record_success()
                     logger.error(
                         "Non-retryable HTTP %s for %s; aborting download",
                         response.status_code,

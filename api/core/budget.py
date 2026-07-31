@@ -197,11 +197,13 @@ class DownloadBudget:
         if work_id and limits.max_work is not None:
             current_work = self._get(self.per_work, work_id, content_type)
             if (current_work + add_bytes) > limits.max_work:
+                # Deliberately does NOT set the global ``_exhausted`` flag even
+                # under the "stop" policy: that flag ends the whole run, so one
+                # oversized work would abort every remaining work. A per-work
+                # cap bounds the work, the global cap bounds the run.
                 logger.info(
                     "Per-work %s limit would be exceeded for %s", content_type, work_id
                 )
-                if limits.policy == "stop":
-                    self._exhausted = True
                 return False
 
         return True

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
+from typing import Any
 from unittest.mock import MagicMock, patch
+
+from api.core import download as dl_mod
+from api.core.context import reset_counters
 
 # ============================================================================
 # download_page_images
@@ -402,3 +407,100 @@ class TestParseContentLength:
         from api.core.download import _parse_content_length
 
         assert _parse_content_length("-5") is None
+
+
+# ============================================================================
+# _try_skip_existing / download_file — metadata-routed files never "succeed"
+# ============================================================================
+
+
+def _dh_make_session(response: MagicMock) -> MagicMock:
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=response)
+    cm.__exit__ = MagicMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = cm
+    return session
+
+
+def _dh_make_response(headers: dict[str, str], content: bytes) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.headers = headers
+    resp.iter_content = MagicMock(return_value=iter([content]))
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+class TestExistingFileSkipRouting:
+    """A skip-check hit on a file already routed to metadata/ must not be
+    reported as a successful download, matching a fresh download of the same
+    disallowed extension. Pre-fix, ``_try_skip_existing`` returned only the
+    path and any existing file counted as success, including one sitting in
+    metadata/.
+    """
+
+    def test_existing_metadata_routed_file_returns_none(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        folder = str(tmp_path / "work")
+        dl_cfg = {
+            "allowed_object_extensions": [".pdf"],
+            "save_disallowed_to_metadata": True,
+        }
+        resp = _dh_make_response(
+            {"Content-Type": ""}, b"<xml>not an allowed object type</xml>"
+        )
+        session = _dh_make_session(resp)
+
+        dl_mod._BUDGET._exhausted = False
+        with (
+            patch.object(dl_mod, "get_session", return_value=session),
+            patch("api.core.download.get_download_config", return_value=dl_cfg),
+        ):
+            # Fresh download: the .xml extension is not in the allowed list,
+            # so it is routed to metadata/ and does not count as success.
+            first = dl_mod.download_file(
+                "https://example.org/notes.xml", folder, "notes"
+            )
+            assert first is None
+            metadata_dir = os.path.join(folder, "metadata")
+            assert os.path.isdir(metadata_dir)
+            assert len(os.listdir(metadata_dir)) == 1
+
+            # Simulate a resumed run (counters reset, as work_context() does
+            # per work) hitting the same URL: the early skip-existing path
+            # must report the same non-success outcome as the fresh download.
+            reset_counters()
+            second = dl_mod.download_file(
+                "https://example.org/notes.xml", folder, "notes"
+            )
+            assert second is None
+            assert len(os.listdir(metadata_dir)) == 1
+
+    def test_existing_allowed_extension_still_returns_path(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Counterpart: an existing ALLOWED object extension still counts."""
+        folder = str(tmp_path / "work")
+        dl_cfg = {
+            "allowed_object_extensions": [".pdf"],
+            "save_disallowed_to_metadata": True,
+        }
+        payload = b"%PDF-1.4\n" + b"x" * 16
+        resp = _dh_make_response({"Content-Type": "application/pdf"}, payload)
+        session = _dh_make_session(resp)
+
+        dl_mod._BUDGET._exhausted = False
+        with (
+            patch.object(dl_mod, "get_session", return_value=session),
+            patch("api.core.download.get_download_config", return_value=dl_cfg),
+        ):
+            first = dl_mod.download_file("https://example.org/book.pdf", folder, "book")
+            assert first is not None
+
+            reset_counters()
+            second = dl_mod.download_file(
+                "https://example.org/book.pdf", folder, "book"
+            )
+            assert second == first

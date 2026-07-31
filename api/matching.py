@@ -67,12 +67,20 @@ def normalize_text(text: str | None) -> str:
 
     # Replace punctuation and separators with spaces
     s = re.sub(r"[\t\r\n]+", " ", s)
-    s = re.sub(r"[^0-9a-z]+", " ", s)
+    ascii_only = re.sub(r"[^0-9a-z]+", " ", s)
 
     # Collapse multiple spaces
-    s = re.sub(r"\s+", " ", s).strip()
+    normalized = re.sub(r"\s+", " ", ascii_only).strip()
+    if normalized:
+        return normalized
 
-    return s
+    # A title written in a non-Latin script (Cyrillic, Greek, ...) is erased
+    # entirely by the ASCII filter, so both scorers short-circuit to 0 and no
+    # such record can ever clear the selection gate -- even against a
+    # byte-identical query. Fall back to a Unicode-aware pass that strips
+    # punctuation but keeps the script's own letters and digits.
+    fallback = re.sub(r"[^\w\s]|_", " ", s)
+    return re.sub(r"\s+", " ", fallback).strip()
 
 
 def simple_ratio(a: str, b: str) -> int:

@@ -186,6 +186,32 @@ class TestBudgetLimits:
             fresh_budget.allow_content("images", "work_1", 500_000)
             assert fresh_budget.exhausted() is True
 
+    def test_per_work_stop_policy_does_not_set_exhausted(
+        self, fresh_budget: DownloadBudget
+    ) -> None:
+        """A per-work 'stop' limit blocks only that work; the run continues.
+
+        Contrasts with test_stop_policy_sets_exhausted above, which covers the
+        GLOBAL limit and must still set the exhausted flag: one oversized work
+        must not abort every remaining work in the run.
+        """
+        limits = {
+            "per_work": {"images_gb": 0.001},  # ~1MB
+            "on_exceed": "stop",
+        }
+        with patch("api.core.budget.get_download_limits", return_value=limits):
+            fresh_budget.record_download("images", "work_1", 1_000_000)
+
+            assert fresh_budget.allow_content("images", "work_1", 500_000) is False
+            assert (
+                fresh_budget.allow_bytes("ia", "work_1", 500_000, content_type="images")
+                is False
+            )
+            assert fresh_budget.exhausted() is False
+
+            # A different work is unaffected by work_1's per-work cap.
+            assert fresh_budget.allow_content("images", "work_2", 500_000) is True
+
 
 class TestGlobalBudget:
     """Tests for global budget functions."""

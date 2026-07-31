@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from api.core import download as dl_mod
@@ -230,3 +231,73 @@ def test_complete_download_promoted_atomically(
     assert not files[0].endswith(".part")
     with open(result, "rb") as fh:
         assert fh.read() == payload
+
+
+def test_keyboard_interrupt_midstream_leaves_no_file(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """Ctrl-C mid-stream discards the .part file and refunds booked bytes.
+
+    KeyboardInterrupt derives from BaseException, bypassing the
+    RequestException/OSError handler above it; the ``except BaseException``
+    clause must still call ``_discard_partial()`` before re-raising, or the
+    ``.part`` file survives inside ``objects/`` and a later
+    ``skip_if_has_objects`` resume run skips the work forever on the strength
+    of a partial file holding no usable content.
+    """
+
+    def interrupted_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield b"%PDF-1.4 partial data before the interrupt"
+        raise KeyboardInterrupt()
+
+    resp = _make_response({"Content-Type": "application/pdf"}, interrupted_iter)
+    session = _make_session(resp)
+    folder = str(tmp_path / "work")
+
+    dl_mod._BUDGET._exhausted = False
+    before = dl_mod._BUDGET.total_pdfs_bytes
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        dl_mod.download_file("https://example.org/book.pdf", folder, "book")
+
+    # No leftover .part file and no promoted object file at the final path.
+    assert _objects_files(folder) == []
+    # The bytes booked into the budget before the interrupt are refunded.
+    assert dl_mod._BUDGET.total_pdfs_bytes == before
+
+
+def test_non_retryable_status_records_success_on_breaker(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """A 404 during download_file must record success on the breaker.
+
+    Mirrors the make_request fix: the server answered, so the transport is
+    healthy. Without recording success here, a half-open probe spent on this
+    dead URL would leave the breaker stuck HALF_OPEN and throttle a working
+    provider to one request per cooldown.
+    """
+    resp = MagicMock()
+    resp.status_code = 404
+    resp.headers = {}
+
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=resp)
+    cm.__exit__ = MagicMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = cm
+
+    mock_cb = MagicMock()
+    mock_cb.allow_request.return_value = True
+
+    folder = str(tmp_path / "work")
+    dl_mod._BUDGET._exhausted = False
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch.object(dl_mod, "get_circuit_breaker", return_value=mock_cb),
+    ):
+        result = dl_mod.download_file("https://example.org/missing.pdf", folder, "book")
+
+    assert result is None
+    mock_cb.record_success.assert_called_once()

@@ -104,6 +104,24 @@ class TestNormalizeText:
         assert normalize_text("Kucharz doskonały") == "kucharz doskonaly"
 
 
+class TestNonLatinScriptNormalization:
+    """A title in a non-Latin script must not be erased by the ASCII filter.
+
+    Pre-fix, normalize_text's ASCII-only filter erased Cyrillic/Greek titles
+    entirely, so simple_ratio/token_set_ratio both short-circuited to 0 even
+    for byte-identical titles and no such record could ever clear the
+    selection gate.
+    """
+
+    def test_cyrillic_title_normalizes_and_scores_above_gate(self) -> None:
+        """Identical Cyrillic titles normalize non-empty and score at 100."""
+        assert normalize_text("Домострой") != ""
+        assert simple_ratio("Домострой", "Домострой") == 100
+        assert token_set_ratio("Домострой", "Домострой") == 100
+        # The genuinely punctuation-only fallback case is unaffected.
+        assert normalize_text("!@#$%^&*()") == ""
+
+
 class TestSimpleRatio:
     """Tests for simple_ratio function."""
 
