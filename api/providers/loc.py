@@ -4,6 +4,7 @@ import logging
 import urllib.parse
 from typing import Any, cast
 
+from ..core.budget import budget_exhausted
 from ..core.config import get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
@@ -108,7 +109,11 @@ def search_loc(
 
     if items:
         for item in items:
-            results.append(_item_to_search_result(item))
+            try:
+                results.append(_item_to_search_result(item))
+            except Exception:
+                logger.warning("LOC: skipping malformed record", exc_info=True)
+                continue
     return results
 
 
@@ -149,6 +154,7 @@ def download_loc_work(
         return False
 
     save_json(item_full_json, output_folder, f"loc_{item_id}_item_details")
+    renders = 0
     iiif_manifest_url = iiif_manifest_hint
     if (
         not iiif_manifest_url
@@ -171,7 +177,6 @@ def download_loc_work(
             save_json(iiif_manifest_data, output_folder, f"loc_{item_id}_iiif_manifest")
 
             # Prefer manifest-level renderings (PDF/EPUB) when available
-            renders = 0
             try:
                 renders = download_iiif_renderings(iiif_manifest_data, output_folder)
                 if renders > 0 and prefer_pdf_over_images():
@@ -205,6 +210,15 @@ def download_loc_work(
                 )
                 ok_any = False
                 for idx, svc in enumerate(to_download, start=1):
+                    if budget_exhausted():
+                        logger.warning(
+                            "Download budget exhausted; stopping LOC downloads "
+                            "at %d/%d pages for %s",
+                            idx - 1,
+                            len(to_download),
+                            item_id,
+                        )
+                        break
                     try:
                         fname = f"loc_{item_id}_p{idx:05d}.jpg"
                         if download_one_from_service(svc, output_folder, fname):
@@ -244,7 +258,12 @@ def download_loc_work(
             image_url = "https:" + image_url
         elif not image_url.startswith("http"):
             image_url = "https://www.loc.gov" + image_url
-        return bool(
-            download_file(image_url, output_folder, f"loc_{item_id}_sample_image.jpg")
+        return (
+            bool(
+                download_file(
+                    image_url, output_folder, f"loc_{item_id}_sample_image.jpg"
+                )
+            )
+            or renders > 0
         )
-    return False
+    return renders > 0

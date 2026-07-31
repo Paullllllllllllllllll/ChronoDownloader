@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..core.budget import budget_exhausted
 from ..core.config import get_max_pages, prefer_pdf_over_images
 from ..core.download import save_json
 from ..core.network import make_request
@@ -145,6 +146,15 @@ def download_bne_work(
     )
     ok_any = False
     for idx, svc in enumerate(to_download, start=1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping BNE downloads at "
+                "%d/%d pages for %s",
+                idx - 1,
+                len(to_download),
+                item_identifier,
+            )
+            break
         try:
             fname = f"bne_{item_identifier}_p{idx:05d}.jpg"
             if download_one_from_service(svc, output_folder, fname):

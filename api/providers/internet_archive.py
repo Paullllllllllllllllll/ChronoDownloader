@@ -81,7 +81,7 @@ def search_internet_archive(
                 "item_url": f"https://archive.org/details/{ia_identifier}"
                 if ia_identifier
                 else None,
-                "year": item.get("year", "N/A"),
+                "year": item.get("year"),
             }
             sr = convert_to_searchresult("Internet Archive", raw)
             results.append(sr)

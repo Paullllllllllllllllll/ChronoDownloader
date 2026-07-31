@@ -6,6 +6,7 @@ import logging
 import os
 from typing import Any
 
+from ..core.budget import budget_exhausted
 from ..core.config import get_api_key_envvar, get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
@@ -57,63 +58,69 @@ def search_dpla(
         return results
     if data.get("docs"):
         for doc in data["docs"]:
-            # Try to discover a IIIF manifest URL from common DPLA fields
-            def _extract_manifest(d: dict[str, Any]) -> str | None:
-                candidates = []
-                # Common top-level string fields
-                for k in ("object", "isShownAt", "isShownBy"):
-                    v = d.get(k)
-                    if isinstance(v, str):
-                        candidates.append(v)
-                # hasView may be list of dicts or strings
-                hv = d.get("hasView")
-                if isinstance(hv, list):
-                    for item in hv:
-                        if isinstance(item, str):
-                            candidates.append(item)
-                        elif isinstance(item, dict):
-                            for kk in ("@id", "id", "url"):
-                                if isinstance(item.get(kk), str):
-                                    candidates.append(item[kk])
-                elif isinstance(hv, dict):
-                    for kk in ("@id", "id", "url"):
-                        if isinstance(hv.get(kk), str):
-                            candidates.append(hv[kk])
-                # Pick the first that looks like a manifest
-                for u in candidates:
-                    if isinstance(u, str) and "manifest" in u and "iiif" in u:
-                        return u
-                return None
+            try:
+                # Try to discover a IIIF manifest URL from common DPLA fields
+                def _extract_manifest(d: dict[str, Any]) -> str | None:
+                    candidates = []
+                    # Common top-level string fields
+                    for k in ("object", "isShownAt", "isShownBy"):
+                        v = d.get(k)
+                        if isinstance(v, str):
+                            candidates.append(v)
+                    # hasView may be list of dicts or strings
+                    hv = d.get("hasView")
+                    if isinstance(hv, list):
+                        for item in hv:
+                            if isinstance(item, str):
+                                candidates.append(item)
+                            elif isinstance(item, dict):
+                                for kk in ("@id", "id", "url"):
+                                    if isinstance(item.get(kk), str):
+                                        candidates.append(item[kk])
+                    elif isinstance(hv, dict):
+                        for kk in ("@id", "id", "url"):
+                            if isinstance(hv.get(kk), str):
+                                candidates.append(hv[kk])
+                    # Pick the first that looks like a manifest
+                    for u in candidates:
+                        if isinstance(u, str) and "manifest" in u and "iiif" in u:
+                            return u
+                    return None
 
-            iiif_manifest = _extract_manifest(doc) if isinstance(doc, dict) else None
-            src = (
-                doc.get("sourceResource", {})
-                if isinstance(doc, dict)
-                and isinstance(doc.get("sourceResource", {}), dict)
-                else {}
-            )
-            title_text = src.get("title")
-            if isinstance(title_text, list):
-                title_text = title_text[0] if title_text else "N/A"
-            creators = src.get("creator") or []
-            if isinstance(creators, str):
-                creators = [creators]
-            raw = {
-                "title": title_text or "N/A",
-                # Coerce elements to str: DPLA occasionally returns structured
-                # (dict) creator entries that a bare join would choke on.
-                "creator": ", ".join(str(c) for c in creators),
-                "id": doc.get("id"),
-                "item_url": doc.get("isShownAt"),
-                "iiif_manifest": iiif_manifest,
-                # Keep additional discovery fields for auditing/fallback
-                "isShownAt": doc.get("isShownAt"),
-                "isShownBy": doc.get("isShownBy"),
-                "object": doc.get("object"),
-                "hasView": doc.get("hasView"),
-                "provider": (doc.get("provider", {}) or {}).get("name"),
-            }
-            results.append(convert_to_searchresult("DPLA", raw))
+                iiif_manifest = (
+                    _extract_manifest(doc) if isinstance(doc, dict) else None
+                )
+                src = (
+                    doc.get("sourceResource", {})
+                    if isinstance(doc, dict)
+                    and isinstance(doc.get("sourceResource", {}), dict)
+                    else {}
+                )
+                title_text = src.get("title")
+                if isinstance(title_text, list):
+                    title_text = title_text[0] if title_text else "N/A"
+                creators = src.get("creator") or []
+                if isinstance(creators, str):
+                    creators = [creators]
+                raw = {
+                    "title": title_text or "N/A",
+                    # Coerce elements to str: DPLA occasionally returns structured
+                    # (dict) creator entries that a bare join would choke on.
+                    "creator": ", ".join(str(c) for c in creators) or None,
+                    "id": doc.get("id"),
+                    "item_url": doc.get("isShownAt"),
+                    "iiif_manifest": iiif_manifest,
+                    # Keep additional discovery fields for auditing/fallback
+                    "isShownAt": doc.get("isShownAt"),
+                    "isShownBy": doc.get("isShownBy"),
+                    "object": doc.get("object"),
+                    "hasView": doc.get("hasView"),
+                    "provider": (doc.get("provider", {}) or {}).get("name"),
+                }
+                results.append(convert_to_searchresult("DPLA", raw))
+            except Exception:
+                logger.warning("DPLA: skipping malformed record", exc_info=True)
+                continue
 
     return results
 
@@ -219,6 +226,15 @@ def download_dpla_work(
                     item_id,
                 )
                 for idx, svc in enumerate(to_download, start=1):
+                    if budget_exhausted():
+                        logger.warning(
+                            "Download budget exhausted; stopping DPLA downloads "
+                            "at %d/%d pages for %s",
+                            idx - 1,
+                            len(to_download),
+                            item_id,
+                        )
+                        break
                     try:
                         fname = f"dpla_{item_id}_p{idx:05d}.jpg"
                         if download_one_from_service(svc, output_folder, fname):

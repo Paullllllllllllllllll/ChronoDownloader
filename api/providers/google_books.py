@@ -10,7 +10,9 @@ import re
 import urllib.parse
 from typing import Any, cast
 
+from ..core.budget import budget_exhausted, get_budget
 from ..core.config import get_api_key_envvar, get_provider_setting
+from ..core.context import get_current_work
 from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
@@ -426,6 +428,14 @@ def _download_page_images(
     max_consecutive_failures = 5  # Stop after 5 consecutive failures
 
     for page_num in range(1, max_pages + 1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping Google Books page image "
+                "downloads for %s",
+                volume_id,
+            )
+            break
+
         if consecutive_failures >= max_consecutive_failures:
             logger.info(
                 "Google Books: Stopping page extraction after %d consecutive failures",
@@ -464,8 +474,16 @@ def _download_page_images(
                         page_num,
                         downloaded_path,
                     )
+                    try:
+                        discarded_bytes = os.path.getsize(downloaded_path)
+                    except OSError:
+                        discarded_bytes = 0
                     with contextlib.suppress(Exception):
                         os.remove(downloaded_path)
+                    if discarded_bytes:
+                        get_budget().refund(
+                            "images", get_current_work(), discarded_bytes
+                        )
                     placeholder_count += 1
                     consecutive_placeholders += 1
                     # Don't count as downloaded, but don't count as failure either

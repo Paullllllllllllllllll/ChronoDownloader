@@ -135,6 +135,23 @@ class TestInternetArchiveProvider:
             assert results[0].creators == []
             assert results[1].raw["creator"] == "123, X"
 
+    def test_search_no_year_yields_none_not_na(self) -> None:
+        """An absent "year" must yield raw["year"] is None, not the retired
+        "N/A" sentinel that would leak into SearchResult.date."""
+        response = {
+            "response": {
+                "docs": [{"identifier": "x1", "title": "T1"}],
+            }
+        }
+        with patch(
+            "api.providers.internet_archive.make_request", return_value=response
+        ):
+            from api.providers.internet_archive import search_internet_archive
+
+            results = search_internet_archive("Title")
+
+            assert results[0].raw["year"] is None
+
 
 class TestGallicaProvider:
     """Integration tests for BnF Gallica provider."""
@@ -203,6 +220,64 @@ class TestLocProvider:
             results = search_loc("cookbook")
 
             assert results[0].raw["creator"] == "Chef Smith"
+
+    def test_search_malformed_record_does_not_discard_others(self) -> None:
+        """One malformed record must not discard already-parsed results."""
+        from api.model import convert_to_searchresult as real_convert
+        from api.providers import loc
+
+        mock_response = {
+            "results": [
+                {"id": "http://www.loc.gov/item/1/", "title": "Bad"},
+                {"id": "http://www.loc.gov/item/2/", "title": "Good"},
+            ]
+        }
+        calls = {"n": 0}
+
+        def flaky(provider: str, raw: dict[str, Any]) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ValueError("boom")
+            return real_convert(provider, raw)
+
+        with (
+            patch("api.providers.loc.make_request", return_value=mock_response),
+            patch("api.providers.loc.convert_to_searchresult", side_effect=flaky),
+        ):
+            results = loc.search_loc("cookbook")
+
+            assert len(results) == 1
+            assert results[0].raw["id"] == "2"
+
+    def test_rendering_survives_failed_image_fallback(
+        self, temp_output_dir: str
+    ) -> None:
+        """A successful manifest-level PDF/EPUB rendering must not be
+        discarded when the manifest has no IIIF image services and the
+        subsequent sample-image fallback download also fails."""
+        item_json = {
+            "item": {
+                "resources": [{"iiif_manifest": "https://example.org/manifest.json"}],
+                "image_url": "https://example.org/sample.jpg",
+            }
+        }
+        manifest = {"@id": "m"}
+        with (
+            patch("api.providers.loc.make_request", side_effect=[item_json, manifest]),
+            patch("api.providers.loc.save_json", return_value=None),
+            patch("api.providers.loc.download_iiif_renderings", return_value=1),
+            patch("api.providers.loc.prefer_pdf_over_images", return_value=False),
+            patch("api.providers.loc.extract_image_service_bases", return_value=[]),
+            patch("api.providers.loc.download_file", return_value=None),
+        ):
+            from api.providers.loc import download_loc_work
+
+            result = download_loc_work(
+                {"item_url": "https://www.loc.gov/item/1/", "id": "1"},
+                temp_output_dir,
+            )
+
+            assert result is True
 
 
 class TestMdzProvider:
@@ -480,6 +555,83 @@ class TestDdbProvider:
             assert results[1].raw["title"] == "Backbuch"
 
 
+class TestDplaProvider:
+    """Integration tests for the DPLA provider."""
+
+    def test_search_malformed_record_does_not_discard_others(self) -> None:
+        """One malformed record must not discard already-parsed results."""
+        from api.model import convert_to_searchresult as real_convert
+        from api.providers import dpla
+
+        response = {
+            "docs": [
+                {"id": "bad", "sourceResource": {"title": "Bad"}},
+                {"id": "good", "sourceResource": {"title": "Good"}},
+            ]
+        }
+        calls = {"n": 0}
+
+        def flaky(provider: str, raw: dict[str, Any]) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ValueError("boom")
+            return real_convert(provider, raw)
+
+        with (
+            patch("api.providers.dpla._api_key", return_value="KEY"),
+            patch("api.providers.dpla.make_request", return_value=response),
+            patch("api.providers.dpla.convert_to_searchresult", side_effect=flaky),
+        ):
+            results = dpla.search_dpla("cookbook")
+
+            assert len(results) == 1
+            assert results[0].raw["id"] == "good"
+
+    def test_search_empty_creators_yields_none_not_empty_string(self) -> None:
+        """An item with no creators must yield raw["creator"] is None, not
+        the empty-string artifact of joining an empty list."""
+        response = {
+            "docs": [{"id": "x1", "sourceResource": {"title": "T1", "creator": []}}]
+        }
+        with (
+            patch("api.providers.dpla._api_key", return_value="KEY"),
+            patch("api.providers.dpla.make_request", return_value=response),
+        ):
+            from api.providers.dpla import search_dpla
+
+            results = search_dpla("cookbook")
+
+            assert results[0].raw["creator"] is None
+
+
+class TestBudgetGuards:
+    """Regression tests for missing download-budget guards on IIIF page loops."""
+
+    def test_bne_image_loop_stops_on_exhausted_budget(
+        self, temp_output_dir: str
+    ) -> None:
+        """The BNE page-image loop must respect the global download budget."""
+        manifest = {"@id": "m"}
+        with (
+            patch("api.providers.bne.make_request", return_value=manifest),
+            patch("api.providers.bne.save_json", return_value=None),
+            patch("api.providers.bne.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.bne.extract_image_service_bases",
+                return_value=["https://svc/1", "https://svc/2"],
+            ),
+            patch("api.providers.bne.get_max_pages", return_value=0),
+            patch("api.providers.bne.budget_exhausted", return_value=True),
+            patch("api.providers.bne.download_one_from_service") as mock_dl,
+        ):
+            from api.providers.bne import download_bne_work
+
+            result = download_bne_work({"id": "item1"}, temp_output_dir)
+
+            assert result is False
+            mock_dl.assert_not_called()
+
+
 class TestGoogleBooksProvider:
     """Integration tests for the Google Books provider."""
 
@@ -603,6 +755,27 @@ class TestBritishLibraryProvider:
 
             assert len(results) == 1
             assert results[0].source_id == "vdc_B"
+
+    def test_sru_record_without_creator_has_none_not_na(self) -> None:
+        """An SRU record with no <dc:creator> element must yield
+        raw["creator"] is None, not the retired "N/A" sentinel."""
+        xml = (
+            '<?xml version="1.0"?>'
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            "<records><record><recordData>"
+            '<dc xmlns="http://purl.org/dc/elements/1.1/">'
+            "<title>Cookery</title>"
+            "<identifier>ark:/81055/vdc_X</identifier>"
+            "</dc></recordData></record></records>"
+            "</searchRetrieveResponse>"
+        )
+        with patch("api.providers.british_library.make_request", return_value=xml):
+            from api.providers.british_library import search_british_library
+
+            results = search_british_library("Cookery")
+
+            assert len(results) == 1
+            assert results[0].raw["creator"] is None
 
 
 class TestERaraProvider:

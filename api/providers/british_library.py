@@ -7,6 +7,7 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
+from ..core.budget import budget_exhausted
 from ..core.config import get_max_pages, prefer_pdf_over_images
 from ..core.download import save_json
 from ..core.network import make_request
@@ -101,7 +102,7 @@ def _search_bnb_sparql(
             if ark:
                 raw = {
                     "title": title_v or "N/A",
-                    "creator": creator_v or (creator or "N/A"),
+                    "creator": creator_v or creator or None,
                     "identifier": ark,
                     "source": "bnb_sparql",
                 }
@@ -176,7 +177,7 @@ def search_british_library(
 
                     raw = {
                         "title": title_el.text if title_el is not None else "N/A",
-                        "creator": creator_el.text if creator_el is not None else "N/A",
+                        "creator": creator_el.text if creator_el is not None else None,
                         "date": date_el.text if date_el is not None else None,
                         "identifier": identifier,
                     }
@@ -281,6 +282,15 @@ def download_british_library_work(
     )
     ok_any = False
     for idx, svc in enumerate(to_download, start=1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping British Library downloads "
+                "at %d/%d pages for %s",
+                idx - 1,
+                len(to_download),
+                identifier,
+            )
+            break
         try:
             fname = f"bl_{identifier}_p{idx:05d}.jpg"
             if download_one_from_service(svc, output_folder, fname):

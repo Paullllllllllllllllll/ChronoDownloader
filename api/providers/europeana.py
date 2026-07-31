@@ -4,6 +4,7 @@ import logging
 import os
 from typing import Any
 
+from ..core.budget import budget_exhausted
 from ..core.config import get_api_key_envvar, get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
@@ -246,6 +247,15 @@ def download_europeana_work(
             item_id,
         )
         for idx, svc in enumerate(to_download, start=1):
+            if budget_exhausted():
+                logger.warning(
+                    "Download budget exhausted; stopping Europeana downloads "
+                    "at %d/%d pages for %s",
+                    idx - 1,
+                    len(to_download),
+                    item_id,
+                )
+                break
             try:
                 fname = f"europeana_{item_id}_p{idx:05d}.jpg"
                 if download_one_from_service(svc, output_folder, fname):
@@ -272,6 +282,15 @@ def download_europeana_work(
                 item_id,
             )
             for idx, url in enumerate(to_download, start=1):
+                if budget_exhausted():
+                    logger.warning(
+                        "Download budget exhausted; stopping Europeana "
+                        "direct-image downloads at %d/%d pages for %s",
+                        idx - 1,
+                        len(to_download),
+                        item_id,
+                    )
+                    break
                 try:
                     fname = f"europeana_{item_id}_p{idx:05d}"
                     if download_file(url, output_folder, fname):
