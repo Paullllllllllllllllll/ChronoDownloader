@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -451,44 +452,55 @@ def _run_sequential(
     direct_iiif_count = 0
 
     for index, row in works_df.iterrows():
-        parsed = _parse_work_row(row, index, logger)
-        if parsed is None:
-            skipped += 1
-            continue
-        title, creator, entry_id, direct_link, title_missing = parsed
+        try:
+            parsed = _parse_work_row(row, index, logger)
+            if parsed is None:
+                skipped += 1
+                continue
+            title, creator, entry_id, direct_link, title_missing = parsed
 
-        if direct_link:
-            logger.info(
-                "Direct IIIF link detected for '%s': %s",
-                title if not title_missing else entry_id,
-                direct_link,
-            )
-            direct_iiif_count += 1
-            result = process_direct_iiif(
-                manifest_url=direct_link,
-                output_dir=output_dir,
-                entry_id=str(entry_id),
-                title=None if title_missing else str(title),
-                creator=None if pd.isna(creator) else str(creator),
-                dry_run=dry_run,
-            )
-        else:
-            # Standard search-based download
-            result = (
-                pipeline.process_work(
-                    str(title),
-                    None if pd.isna(creator) else str(creator),
-                    str(entry_id),
-                    output_dir,
+            if direct_link:
+                logger.info(
+                    "Direct IIIF link detected for '%s': %s",
+                    title if not title_missing else entry_id,
+                    direct_link,
+                )
+                direct_iiif_count += 1
+                result = process_direct_iiif(
+                    manifest_url=direct_link,
+                    output_dir=output_dir,
+                    entry_id=str(entry_id),
+                    title=None if title_missing else str(title),
+                    creator=None if pd.isna(creator) else str(creator),
                     dry_run=dry_run,
                 )
-                or {}
-            )
+            else:
+                # Standard search-based download
+                result = (
+                    pipeline.process_work(
+                        str(title),
+                        None if pd.isna(creator) else str(creator),
+                        str(entry_id),
+                        output_dir,
+                        dry_run=dry_run,
+                    )
+                    or {}
+                )
+        except Exception:
+            # One malformed row must not abort the whole batch; later rows
+            # would otherwise stay unprocessed and unmarked.
+            logger.exception("Unhandled error processing row %s; skipping", index)
+            skipped += 1
+            continue
 
-        # Update CSV status if path provided
-        if csv_path and not dry_run and result and isinstance(result, dict):
-            status = result.get("status", "")
-            if status == "completed":
+        # Count outcomes regardless of CSV availability or dry_run: the
+        # returned statistics must reflect what actually happened, not
+        # whether a status column could be written.
+        status = result.get("status", "") if isinstance(result, dict) else ""
+        write_csv = csv_path is not None and not dry_run and bool(result)
+        if status == "completed":
+            succeeded += 1
+            if write_csv and csv_path:
                 # Success - result contains item_url and provider
                 item_url = result.get("item_url", "")
                 provider = result.get("provider", "")
@@ -498,22 +510,21 @@ def _run_sequential(
                     logger.warning(
                         "Failed to mark entry %s as success in source CSV", entry_id
                     )
-                succeeded += 1
-            elif status == "failed":
-                # Explicit failure
+        elif status == "failed":
+            failed += 1
+            if write_csv and csv_path:
                 if mark_failed(csv_path, str(entry_id)):
                     logger.debug("Marked entry %s as failed in source CSV", entry_id)
                 else:
                     logger.warning(
                         "Failed to mark entry %s as failed in source CSV", entry_id
                     )
-                failed += 1
-            elif status == "deferred":
-                # Quota deferral: mark retriable (mirrors parallel mode) rather
-                # than leaving the row silently pending.
-                if mark_deferred(csv_path, str(entry_id)):
-                    logger.debug("Marked entry %s as deferred in source CSV", entry_id)
-            # Other statuses (dry_run, no_match) - don't update CSV
+        elif status == "deferred" and write_csv and csv_path:
+            # Quota deferral: mark retriable (mirrors parallel mode) rather
+            # than leaving the row silently pending.
+            if mark_deferred(csv_path, str(entry_id)):
+                logger.debug("Marked entry %s as deferred in source CSV", entry_id)
+        # Other statuses (dry_run, no_match) - don't update CSV
         # result is None means skipped (resume) - don't update CSV
 
         processed += 1
@@ -526,7 +537,9 @@ def _run_sequential(
                 )
                 break
         except Exception:
-            pass
+            logger.exception(
+                "Budget check failed; continuing without the budget guard."
+            )
 
     logger.info("All works processed.")
     return {
@@ -664,6 +677,14 @@ def _run_parallel(
         provider_concurrency or "default",
     )
 
+    # A single deadline shared between the batch wait and the final shutdown:
+    # worker_timeout_s is documented as a TOTAL ceiling for the batch wait, so
+    # the shutdown in the finally block must consume the remainder of the same
+    # budget rather than starting a fresh one (which doubled the ceiling).
+    # Set when the phase-2 wait begins.
+    deadline: float | None = None
+    interrupted = False
+
     try:
         # Phase 1: Search and queue downloads
         for index, row in works_df.iterrows():
@@ -675,9 +696,16 @@ def _run_parallel(
                     )
                     break
             except Exception:
-                pass
+                logger.exception(
+                    "Budget check failed; continuing without the budget guard."
+                )
 
-            parsed = _parse_work_row(row, index, logger)
+            try:
+                parsed = _parse_work_row(row, index, logger)
+            except Exception:
+                logger.exception("Unhandled error parsing row %s; skipping", index)
+                skipped_count += 1
+                continue
             if parsed is None:
                 skipped_count += 1
                 continue
@@ -690,13 +718,25 @@ def _run_parallel(
                     title if not title_missing else entry_id,
                     direct_link,
                 )
-                dl_result = process_direct_iiif(
-                    manifest_url=direct_link,
-                    output_dir=output_dir,
-                    entry_id=str(entry_id),
-                    title=None if title_missing else str(title),
-                    creator=None if pd.isna(creator) else str(creator),
-                )
+                try:
+                    dl_result = process_direct_iiif(
+                        manifest_url=direct_link,
+                        output_dir=output_dir,
+                        entry_id=str(entry_id),
+                        title=None if title_missing else str(title),
+                        creator=None if pd.isna(creator) else str(creator),
+                    )
+                except Exception:
+                    # One failing row must not abort the whole batch; the row
+                    # stays pending in the CSV for a later retry.
+                    logger.exception(
+                        "Unhandled error in direct IIIF download for row %s; "
+                        "skipping",
+                        index,
+                    )
+                    direct_iiif_failed += 1
+                    actual_submitted[0] += 1
+                    continue
 
                 # Fold this synchronous outcome into the batch stats. Mirror
                 # the CSV policy: only "completed"/"failed" count; a "partial"
@@ -739,12 +779,21 @@ def _run_parallel(
                 actual_submitted[0] += 1
             else:
                 # Search and select (runs in main thread)
-                task = pipeline.search_and_select(
-                    str(title),
-                    None if pd.isna(creator) else str(creator),
-                    None if pd.isna(entry_id) else str(entry_id),
-                    output_dir,
-                )
+                try:
+                    task = pipeline.search_and_select(
+                        str(title),
+                        None if pd.isna(creator) else str(creator),
+                        None if pd.isna(entry_id) else str(entry_id),
+                        output_dir,
+                    )
+                except Exception:
+                    # One failing row must not abort the whole batch; the row
+                    # stays pending in the CSV for a later retry.
+                    logger.exception(
+                        "Unhandled error searching for row %s; skipping", index
+                    )
+                    skipped_count += 1
+                    continue
 
                 if task:
                     # Submit download to worker pool
@@ -772,6 +821,8 @@ def _run_parallel(
 
             # wait_all catches its own TimeoutError internally and always
             # returns normally (with whatever completed within the deadline).
+            if worker_timeout:
+                deadline = time.monotonic() + worker_timeout
             scheduler.wait_all(timeout=worker_timeout)
 
             stats = scheduler.get_stats()
@@ -783,24 +834,34 @@ def _run_parallel(
 
     except KeyboardInterrupt:
         logger.warning("Interrupt received; shutting down scheduler...")
+        interrupted = True
         scheduler.request_shutdown()
 
-        # Wait briefly for in-progress downloads
+        # Wait briefly for in-progress downloads. wait_all handles its own
+        # timeout internally and always returns normally.
         pending = scheduler.pending_count
         if pending > 0:
             logger.info("Waiting for %d in-progress download(s) to finish...", pending)
-            try:
-                scheduler.wait_all(timeout=30)
-            except TimeoutError:
-                logger.warning(
-                    "Timeout waiting for in-progress downloads after interrupt"
-                )
+            scheduler.wait_all(timeout=30)
+
+        # Propagate the interrupt (after the bounded shutdown in the finally
+        # block) so the CLI reports "cancelled" (exit 130) instead of a
+        # normally completed run.
+        raise
 
     finally:
-        # Bound the shutdown wait by the same worker timeout used for wait_all
-        # so a stuck in-flight batch cannot block the process indefinitely;
-        # None preserves the wait-forever default.
-        scheduler.shutdown(wait=True, timeout=worker_timeout)
+        # Bound the shutdown wait: after an interrupt use a short fixed
+        # deadline (queued tasks are cancelled; in-flight ones cannot be
+        # preempted); otherwise consume the remainder of the single
+        # worker-timeout budget started before phase 2. None preserves the
+        # wait-forever default.
+        if interrupted:
+            shutdown_timeout: float | None = 30.0
+        elif deadline is not None:
+            shutdown_timeout = max(0.0, deadline - time.monotonic())
+        else:
+            shutdown_timeout = None
+        scheduler.shutdown(wait=True, timeout=shutdown_timeout)
         stats = scheduler.get_stats()
         logger.info(
             "Scheduler shutdown. Final stats: %d completed (%d succeeded, %d failed)",

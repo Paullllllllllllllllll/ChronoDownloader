@@ -71,7 +71,13 @@ def _run_with_timeout(
 def call_search_function(
     search_func: Callable[..., Any], title: str, creator: str | None, max_results: int
 ) -> list[Any]:
-    """Call a search function with varying signatures robustly.
+    """Call a provider search function with the registry's uniform signature.
+
+    Every registered provider exposes ``search_*(title, creator=None,
+    max_results=3)``, so the arguments are passed directly. The former
+    ``except TypeError`` probing chain is gone: it misinterpreted a
+    TypeError raised *inside* a provider (e.g. on a malformed API response)
+    as a signature mismatch and re-ran the same search up to four times.
 
     Args:
         search_func: Provider search function
@@ -82,22 +88,9 @@ def call_search_function(
     Returns:
         List of search results from the provider
     """
-    try:
-        return cast(
-            list[Any], search_func(title, creator=creator, max_results=max_results)
-        )
-    except TypeError:
-        try:
-            return cast(list[Any], search_func(title, max_results=max_results))
-        except TypeError:
-            try:
-                if creator is not None:
-                    return cast(list[Any], search_func(title, creator=creator))
-                return cast(list[Any], search_func(title))
-            except TypeError:
-                return cast(list[Any], search_func(title))
-    except Exception:
-        raise
+    return cast(
+        list[Any], search_func(title, creator=creator, max_results=max_results)
+    )
 
 
 def prepare_search_result(

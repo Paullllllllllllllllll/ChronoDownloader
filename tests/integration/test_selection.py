@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from api.model import SearchResult
 
 
@@ -265,14 +267,22 @@ class TestCallSearchFunction:
         call_args = mock_search.call_args
         assert call_args[0][0] == "Title"  # title
 
-    def test_handles_typeerror_fallbacks(self) -> None:
-        """Test that TypeError triggers fallback signatures."""
+    def test_provider_internal_typeerror_propagates(self) -> None:
+        """A TypeError raised inside the provider is not retried or hidden.
+
+        The former signature-probing chain misread it as a signature
+        mismatch and re-ran the same search up to four times.
+        """
         from main.orchestration.selection import call_search_function
 
-        # Search function that only accepts title
-        def simple_search(title: str) -> list[dict[str, str]]:
-            return [{"title": title}]
+        calls = {"n": 0}
 
-        result = call_search_function(simple_search, "Title", "Creator", 5)
+        def broken_search(
+            title: str, creator: str | None = None, max_results: int = 3
+        ) -> list[dict[str, str]]:
+            calls["n"] += 1
+            raise TypeError("malformed API response")
 
-        assert len(result) == 1
+        with pytest.raises(TypeError, match="malformed API response"):
+            call_search_function(broken_search, "Title", "Creator", 5)
+        assert calls["n"] == 1

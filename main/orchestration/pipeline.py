@@ -516,7 +516,19 @@ def _run_download_with_fallback(
                 raw_data=selected.raw,
             )
     except Exception:
+        # A raising download function is the same failure mode as one that
+        # returns False (HTTP error, malformed manifest, parse failure), so
+        # the ranked fallback chain must run here too.
         logger.exception("Error during download for %s:%s", pkey, selected.source_id)
+        download_succeeded = _try_ranked_fallbacks(
+            selected,
+            pkey,
+            work_dir,
+            all_candidates,
+            provider_list,
+            provider_map,
+            sel_cfg,
+        )
 
     download_strategy = (sel_cfg.get("download_strategy") or "selected_only").lower()
     if download_strategy == "all":
@@ -826,6 +838,22 @@ def search_and_select(
     if not prep.selected or not prep.selected_provider_tuple:
         update_work_status(prep.work_json_path, "no_match")
         logger.info("No matching candidate found for '%s'.", title)
+        # Write the no_match row to index.csv, mirroring process_work
+        # (sequential mode); without it the ledger diverges between the two
+        # modes for the same corpus.
+        row = build_index_row(
+            work_id=prep.work_id,
+            entry_id=entry_id,
+            work_dir=prep.work_dir,
+            title=title,
+            creator=creator,
+            selected=None,
+            selected_source_id=prep.selected_source_id,
+            work_json_path=prep.work_json_path,
+            status="no_match",
+            item_url=None,
+        )
+        update_index_csv(base_output_dir, row)
         return None
 
     task = DownloadTask(
@@ -932,12 +960,12 @@ def execute_download(task: DownloadTask, dry_run: bool = False) -> bool:
     )
     update_index_csv(task.base_output_dir, row)
 
-    try:
-        task.status = final_status
-        task.item_url = selected.item_url
-        task.provider = selected.provider
-    except Exception:
-        pass
+    # Plain dataclass assignments cannot raise; wrapped_complete depends on
+    # task.status to distinguish deferred from failed, so a silent failure
+    # here (the old except-pass wrapper) would mis-mark CSV rows.
+    task.status = final_status
+    task.item_url = selected.item_url
+    task.provider = selected.provider
 
     if download_succeeded:
         logger.info(

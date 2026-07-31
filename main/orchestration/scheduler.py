@@ -374,6 +374,7 @@ class DownloadScheduler:
         provider = task.provider_key
         error: Exception | None = None
         success = False
+        skipped_after_wait = False
 
         try:
             # Acquire provider semaphore (blocks if at limit)
@@ -382,6 +383,19 @@ class DownloadScheduler:
             logger.debug("Acquired semaphore for %s", provider)
 
             try:
+                # Re-check shutdown after the (potentially long) semaphore
+                # wait: with a per-provider limit of 1 and several workers
+                # queued on the semaphore, a shutdown requested during the
+                # wait must stop those workers from starting fresh downloads
+                # as slots free up.
+                if self._shutdown_event.is_set():
+                    logger.debug(
+                        "Shutdown during semaphore wait; skipping task for '%s'",
+                        task.title,
+                    )
+                    skipped_after_wait = True
+                    return False
+
                 # Set thread-local context for this work
                 set_current_work(task.work_id)
                 set_current_entry(task.entry_id)
@@ -411,17 +425,22 @@ class DownloadScheduler:
             error = e
             success = False
         finally:
-            # Update statistics
+            # Update statistics. A task skipped after the semaphore wait
+            # mirrors the pre-acquire shutdown skip: reclaim the pending
+            # count only, and do not invoke on_complete, so its source-CSV
+            # row stays pending for the next run instead of being recorded
+            # as a failure.
             with self._lock:
                 self._pending_count -= 1
-                self._completed_count += 1
-                if success:
-                    self._success_count += 1
-                else:
-                    self._failure_count += 1
+                if not skipped_after_wait:
+                    self._completed_count += 1
+                    if success:
+                        self._success_count += 1
+                    else:
+                        self._failure_count += 1
 
             # Call completion callback
-            if self._on_complete:
+            if self._on_complete and not skipped_after_wait:
                 try:
                     self._on_complete(task, success, error)
                 except Exception as e:
@@ -535,6 +554,10 @@ class DownloadScheduler:
                     self._executor.shutdown(wait=wait)
             else:
                 self._executor.shutdown(wait=wait)
+            # Drop any leftover future references so a restarted scheduler
+            # cannot replay stale results through wait_all.
+            with self._lock:
+                self._futures.clear()
             self._executor = None
             if get_active_semaphore_manager() is self._semaphores:
                 _set_active_semaphore_manager(None)

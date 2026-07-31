@@ -102,10 +102,14 @@ def _load_rows_for_update(index_path: str) -> list[dict[str, str]]:
 
 
 def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
-    """Thread-safe upsert of a row into index.csv keyed by ``work_id``.
+    """Thread-safe upsert of a row into index.csv keyed by (work_id, entry_id).
 
-    Existing rows are preserved; a row with a matching ``work_id`` is replaced
-    in place, otherwise the row is appended. The full stable header is always
+    Existing rows are preserved; a row matching on both ``work_id`` and
+    ``entry_id`` is replaced in place, otherwise the row is appended. The
+    ``entry_id`` participates in the key because ``work_id`` hashes only
+    title+creator: two CSV rows for different editions of the same work share
+    a work_id but get separate work directories, and one edition's ledger row
+    must not silently overwrite the other's. The full stable header is always
     written and the file is rewritten atomically.
 
     Args:
@@ -119,22 +123,26 @@ def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
 
             rows = _load_rows_for_update(index_path)
             work_id = str(row.get("work_id", "") or "")
+            entry_id = str(row.get("entry_id", "") or "")
 
             normalized = {col: _cell(row.get(col)) for col in INDEX_COLUMNS}
 
             replaced = False
             if work_id:
                 for i, existing in enumerate(rows):
-                    if str(existing.get("work_id", "")) == work_id:
-                        merged = {
-                            col: normalized[col]
-                            if row.get(col) is not None
-                            else _cell(existing.get(col))
-                            for col in INDEX_COLUMNS
-                        }
-                        rows[i] = merged
-                        replaced = True
-                        break
+                    if str(existing.get("work_id", "")) != work_id:
+                        continue
+                    if str(existing.get("entry_id", "") or "") != entry_id:
+                        continue
+                    merged = {
+                        col: normalized[col]
+                        if row.get(col) is not None
+                        else _cell(existing.get(col))
+                        for col in INDEX_COLUMNS
+                    }
+                    rows[i] = merged
+                    replaced = True
+                    break
             if not replaced:
                 rows.append(normalized)
 

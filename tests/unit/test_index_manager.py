@@ -251,6 +251,45 @@ class TestReadIndexCsv:
         assert len(df) == 0
 
 
+class TestUpsertKeyedOnEntryId:
+    """The upsert key is (work_id, entry_id), not work_id alone."""
+
+    def test_same_work_id_different_entry_ids_coexist(
+        self, temp_output_dir: str
+    ) -> None:
+        """Two editions sharing title+creator (same work_id) keep separate rows."""
+        update_index_csv(
+            temp_output_dir,
+            {"work_id": "abc123", "entry_id": "E0001", "status": "completed"},
+        )
+        update_index_csv(
+            temp_output_dir,
+            {"work_id": "abc123", "entry_id": "E0002", "status": "failed"},
+        )
+
+        df = read_index_csv(temp_output_dir)
+        assert df is not None
+        assert len(df) == 2
+        by_entry = {str(r["entry_id"]): str(r["status"]) for _, r in df.iterrows()}
+        assert by_entry == {"E0001": "completed", "E0002": "failed"}
+
+    def test_same_work_and_entry_id_upserts(self, temp_output_dir: str) -> None:
+        """A matching (work_id, entry_id) pair still updates in place."""
+        update_index_csv(
+            temp_output_dir,
+            {"work_id": "abc123", "entry_id": "E0001", "status": "failed"},
+        )
+        update_index_csv(
+            temp_output_dir,
+            {"work_id": "abc123", "entry_id": "E0001", "status": "completed"},
+        )
+
+        df = read_index_csv(temp_output_dir)
+        assert df is not None
+        assert len(df) == 1
+        assert str(df.iloc[0]["status"]) == "completed"
+
+
 class TestGetProcessedWorkIds:
     """Tests for get_processed_work_ids function."""
 
