@@ -29,20 +29,20 @@ class TestCollectCandidatesSequential:
             ("provider2", mock_search_2, lambda x, y: True, "Provider 2"),
         ]
 
-        with patch(
-            "main.orchestration.selection.get_max_results_for_provider", return_value=5
-        ), patch(
-            "main.orchestration.selection.get_min_title_score", return_value=0
+        with (
+            patch(
+                "main.orchestration.selection.get_max_results_for_provider",
+                return_value=5,
+            ),
+            patch("main.orchestration.selection.get_min_title_score", return_value=0),
         ):
-            all_candidates, selected, selected_tuple = (
-                collect_candidates_sequential(
-                    providers,
-                    "Test Title",
-                    None,
-                    min_title_score=0,
-                    creator_weight=0.2,
-                    max_candidates_per_provider=5,
-                )
+            all_candidates, selected, selected_tuple = collect_candidates_sequential(
+                providers,
+                "Test Title",
+                None,
+                min_title_score=0,
+                creator_weight=0.2,
+                max_candidates_per_provider=5,
             )
 
         # Should have collected candidates from first provider that matches
@@ -67,10 +67,12 @@ class TestCollectCandidatesSequential:
             ("provider2", mock_search_2, lambda x, y: True, "Provider 2"),
         ]
 
-        with patch(
-            "main.orchestration.selection.get_max_results_for_provider", return_value=5
-        ), patch(
-            "main.orchestration.selection.get_min_title_score", return_value=80
+        with (
+            patch(
+                "main.orchestration.selection.get_max_results_for_provider",
+                return_value=5,
+            ),
+            patch("main.orchestration.selection.get_min_title_score", return_value=80),
         ):
             collect_candidates_sequential(
                 providers,

@@ -109,9 +109,7 @@ def _iter_v2_resources(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                         continue
                     resources.append(_unwrap_v2_choice(images[0].get("resource", {})))
                 except Exception:
-                    logger.debug(
-                        "Skipping unparseable v2 canvas", exc_info=True
-                    )
+                    logger.debug("Skipping unparseable v2 canvas", exc_info=True)
                     continue
     except Exception:
         logger.debug("Failed to walk v2 manifest sequences", exc_info=True)
@@ -144,9 +142,7 @@ def _iter_v3_bodies(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                     body = _unwrap_v3_choice(body)
                     bodies.append(body)
                 except Exception:
-                    logger.debug(
-                        "Skipping unparseable v3 canvas", exc_info=True
-                    )
+                    logger.debug("Skipping unparseable v3 canvas", exc_info=True)
                     continue
     except Exception:
         logger.debug("Failed to walk v3 manifest items", exc_info=True)

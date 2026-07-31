@@ -320,9 +320,7 @@ class DownloadBudget:
 
         return True
 
-    def refund(
-        self, content_type: str, work_id: str | None, n: int
-    ) -> None:
+    def refund(self, content_type: str, work_id: str | None, n: int) -> None:
         """Return bytes previously booked via ``add_bytes`` for a discarded file.
 
         ``add_bytes`` records every accepted chunk into the budget *before* the

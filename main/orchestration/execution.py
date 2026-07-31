@@ -735,8 +735,7 @@ def _run_parallel(
                     # One failing row must not abort the whole batch; the row
                     # stays pending in the CSV for a later retry.
                     logger.exception(
-                        "Unhandled error in direct IIIF download for row %s; "
-                        "skipping",
+                        "Unhandled error in direct IIIF download for row %s; skipping",
                         index,
                     )
                     direct_iiif_failed += 1

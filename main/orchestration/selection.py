@@ -88,9 +88,7 @@ def call_search_function(
     Returns:
         List of search results from the provider
     """
-    return cast(
-        list[Any], search_func(title, creator=creator, max_results=max_results)
-    )
+    return cast(list[Any], search_func(title, creator=creator, max_results=max_results))
 
 
 def prepare_search_result(

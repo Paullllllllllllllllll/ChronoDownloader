@@ -113,8 +113,7 @@ class InteractiveWorkflow:
                     limits_cfg.get("total", {}) if isinstance(limits_cfg, dict) else {}
                 )
                 if isinstance(total_limits, dict) and any(
-                    isinstance(v, (int, float)) and v > 0
-                    for v in total_limits.values()
+                    isinstance(v, (int, float)) and v > 0 for v in total_limits.values()
                 ):
                     notes.append("download limits set")
 

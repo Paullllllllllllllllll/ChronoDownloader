@@ -140,9 +140,7 @@ def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
                     # so a value-based test left a stale provider, source id
                     # and item URL on a row that had become no_match.
                     merged = {
-                        col: normalized[col]
-                        if col in row
-                        else _cell(existing.get(col))
+                        col: normalized[col] if col in row else _cell(existing.get(col))
                         for col in INDEX_COLUMNS
                     }
                     rows[i] = merged
