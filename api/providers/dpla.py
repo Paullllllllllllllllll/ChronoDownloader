@@ -179,6 +179,7 @@ def download_dpla_work(
         manifest_url = None
 
     ok_any = False
+    renders = 0
     if manifest_url:
         manifest = make_request(manifest_url)
         if isinstance(manifest, dict):
@@ -237,6 +238,7 @@ def download_dpla_work(
         return True
 
     # Fallbacks when we have no manifest or no images from manifest:
+    # (a rendering downloaded above still counts as success; see final return)
     # Try isShownBy (often a direct media resource), then hasView entries,
     # then object (thumbnail).
     def _as_list(v: Any) -> list[Any]:
@@ -279,4 +281,4 @@ def download_dpla_work(
                     ok_any = True
                     break
 
-    return ok_any
+    return ok_any or renders > 0

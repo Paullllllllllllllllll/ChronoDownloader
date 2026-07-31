@@ -65,18 +65,27 @@ def search_gallica(
         logger.warning("Gallica SRU request did not return valid XML text.")
         return []
     results: list[SearchResult] = []
+    namespaces = {
+        "sru": "http://www.loc.gov/zing/srw/",
+        "dc": "http://purl.org/dc/elements/1.1/",
+        "oai_dc": "http://www.openarchives.org/OAI/2.0/oai_dc/",
+    }
+    root = None
     try:
-        namespaces = {
-            "sru": "http://www.loc.gov/zing/srw/",
-            "dc": "http://purl.org/dc/elements/1.1/",
-            "oai_dc": "http://www.openarchives.org/OAI/2.0/oai_dc/",
-        }
         root = ET.fromstring(response_text)
-        for record in root.findall(".//sru:recordData/oai_dc:dc", namespaces):
+    except ET.ParseError as e:
+        logger.error("Error parsing Gallica SRU XML response: %s", e)
+        logger.debug("Gallica response snippet: %s", response_text[:500])
+    except Exception as e:
+        logger.exception("Unexpected error during Gallica XML parsing: %s", e)
+    if root is None:
+        return results
+    for record in root.findall(".//sru:recordData/oai_dc:dc", namespaces):
+        try:
             title_elements = record.findall("dc:title", namespaces)
             item_title = title_elements[0].text if title_elements else "N/A"
             creator_elements = record.findall("dc:creator", namespaces)
-            item_creator = creator_elements[0].text if creator_elements else "N/A"
+            item_creator = creator_elements[0].text if creator_elements else None
             ark_id = None
             for identifier_el in record.findall("dc:identifier", namespaces):
                 if identifier_el.text and "ark:/" in identifier_el.text:
@@ -91,11 +100,9 @@ def search_gallica(
                     "ark_id": ark_id,
                 }
                 results.append(convert_to_searchresult("BnF Gallica", raw))
-    except ET.ParseError as e:
-        logger.error("Error parsing Gallica SRU XML response: %s", e)
-        logger.debug("Gallica response snippet: %s", response_text[:500])
-    except Exception as e:
-        logger.exception("Unexpected error during Gallica XML parsing: %s", e)
+        except Exception:
+            logger.warning("Gallica: skipping malformed SRU record", exc_info=True)
+            continue
     return results
 
 
@@ -186,4 +193,4 @@ def download_gallica_work(
                 "Error downloading Gallica image for %s from %s", ark_id, svc
             )
 
-    return success_any
+    return success_any or renders > 0

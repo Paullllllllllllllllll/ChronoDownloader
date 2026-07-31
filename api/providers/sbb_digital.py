@@ -63,13 +63,22 @@ def search_sbb_digital(
         if not isinstance(response_text, str):
             continue
 
+        ns = {
+            "srw": "http://www.loc.gov/zing/srw/",
+            "mods": "http://www.loc.gov/mods/v3",
+        }
+        root = None
         try:
-            ns = {
-                "srw": "http://www.loc.gov/zing/srw/",
-                "mods": "http://www.loc.gov/mods/v3",
-            }
             root = ET.fromstring(response_text)
-            for record in root.findall(".//srw:record", ns):
+        except ET.ParseError as e:
+            logger.error("StaBiKat SRU XML parse error: %s", e)
+        except Exception:
+            logger.exception("Unexpected error during StaBiKat SRU parsing")
+        if root is None:
+            continue
+
+        for record in root.findall(".//srw:record", ns):
+            try:
                 mods = record.find(".//mods:mods", ns)
                 if mods is None:
                     continue
@@ -90,7 +99,7 @@ def search_sbb_digital(
                 item_creator = (
                     creator_el.text.strip()
                     if creator_el is not None and creator_el.text
-                    else "N/A"
+                    else None
                 )
 
                 record_id = None
@@ -124,22 +133,18 @@ def search_sbb_digital(
                 results.append(convert_to_searchresult("SBB Digital Collections", raw))
                 if len(results) >= max_results:
                     break
+            except Exception:
+                logger.warning("StaBiKat: skipping malformed SRU record", exc_info=True)
+                continue
 
-            if results:
-                return results
-        except ET.ParseError as e:
-            logger.error("StaBiKat SRU XML parse error: %s", e)
-        except Exception:
-            logger.exception("Unexpected error during StaBiKat SRU parsing")
+        if results:
+            return results
 
     return results
 
 
 def _collect_mets_urls(mets_xml: str) -> tuple[list[str], list[str]]:
-    ns = {
-        "mets": "http://www.loc.gov/METS/",
-        "xlink": "http://www.w3.org/1999/xlink",
-    }
+    ns = {"mets": "http://www.loc.gov/METS/"}
     root = ET.fromstring(mets_xml)
     pdf_urls: list[str] = []
     image_urls: list[str] = []
@@ -195,14 +200,26 @@ def download_sbb_digital_work(
         logger.exception("Failed to parse METS for %s", ppn)
         return False
 
+    max_pages = get_max_pages("sbb_digital")
+
     ok_any = False
-    for url in pdf_urls:
+    # Per-page PDF filegroups can hold one PDF per page, so the same page cap
+    # and budget guard as the image loop apply here.
+    pdfs_to_download = pdf_urls[:max_pages] if max_pages and max_pages > 0 else pdf_urls
+    for idx, url in enumerate(pdfs_to_download, start=1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping SBB PDF downloads at %d/%d for %s",
+                idx - 1,
+                len(pdfs_to_download),
+                ppn,
+            )
+            break
         if download_file(url, output_folder, f"sbb_{ppn}_content"):
             ok_any = True
             if prefer_pdf_over_images():
                 return True
 
-    max_pages = get_max_pages("sbb_digital")
     to_download = image_urls[:max_pages] if max_pages and max_pages > 0 else image_urls
     for idx, url in enumerate(to_download, start=1):
         if budget_exhausted():

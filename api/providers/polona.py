@@ -58,7 +58,7 @@ def search_polona(
                         title_text = a.get("title") or a.get_text(strip=True) or "N/A"
                         raw = {
                             "title": title_text,
-                            "creator": creator or "N/A",
+                            "creator": creator or None,
                             "id": item_id,
                             "item_url": f"https://polona.pl/item/{item_id}",
                         }
@@ -66,6 +66,9 @@ def search_polona(
                         if len(results) >= max_results:
                             break
             except Exception:
+                logger.debug(
+                    "Polona: skipping unparsable item link %r", href, exc_info=True
+                )
                 continue
     return results
 
@@ -138,4 +141,4 @@ def download_polona_work(
             logger.exception(
                 "Error downloading Polona image for %s from %s", item_id, svc
             )
-    return ok_any
+    return ok_any or renders > 0

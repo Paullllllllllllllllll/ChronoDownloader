@@ -14,6 +14,7 @@ from api.identifier_resolver import (
     download_by_native_provider,
     resolve_identifier,
 )
+from api.model import QuotaDeferredException
 
 # ============================================================================
 # build_manifest_url
@@ -237,6 +238,19 @@ class TestDownloadByNativeProvider:
         with patch("api.identifier_resolver.PROVIDERS", fake_providers):
             result = download_by_native_provider("vol_id", "google_books", temp_dir)
         assert result is False
+
+    def test_quota_deferral_propagates(self, temp_dir: str) -> None:
+        """A quota deferral must not be swallowed by the broad handler and
+        reported as an ordinary download failure."""
+        mock_download = MagicMock(side_effect=QuotaDeferredException("annas_archive"))
+        fake_providers = {
+            "annas_archive": (MagicMock(), mock_download, "Anna's Archive"),
+        }
+        with (
+            patch("api.identifier_resolver.PROVIDERS", fake_providers),
+            pytest.raises(QuotaDeferredException),
+        ):
+            download_by_native_provider("abc123", "annas_archive", temp_dir)
 
     def test_unknown_provider_raises(self, temp_dir: str) -> None:
         with pytest.raises(KeyError, match="Unknown provider key"):

@@ -33,7 +33,8 @@ def _build_query(title: str, creator: str | None) -> str:
         parts.append(f'"{escape_sru_literal(title)}"')
     if creator:
         parts.append(f'"{escape_sru_literal(creator)}"')
-    return " ".join(parts).strip()
+    # CQL requires an explicit boolean between terms; a bare space is invalid.
+    return " and ".join(parts).strip()
 
 
 def search_e_rara(
@@ -57,14 +58,23 @@ def search_e_rara(
         return []
 
     results: list[SearchResult] = []
+    ns = {
+        "srw": "http://www.loc.gov/zing/srw/",
+        "mods": "http://www.loc.gov/mods/v3",
+        "vl": "http://visuallibrary.net/vl",
+    }
+    root = None
     try:
-        ns = {
-            "srw": "http://www.loc.gov/zing/srw/",
-            "mods": "http://www.loc.gov/mods/v3",
-            "vl": "http://visuallibrary.net/vl",
-        }
         root = ET.fromstring(response_text)
-        for record in root.findall(".//srw:record", ns):
+    except ET.ParseError as e:
+        logger.error("e-rara SRU XML parse error: %s", e)
+    except Exception:
+        logger.exception("Unexpected error during e-rara SRU parsing")
+    if root is None:
+        return results
+
+    for record in root.findall(".//srw:record", ns):
+        try:
             mods = record.find(".//mods:mods", ns)
             extra = record.find(".//srw:extraRecordData", ns)
             if mods is None:
@@ -83,7 +93,7 @@ def search_e_rara(
             item_creator = (
                 creator_el.text.strip()
                 if creator_el is not None and creator_el.text
-                else "N/A"
+                else None
             )
 
             vlid = None
@@ -112,10 +122,9 @@ def search_e_rara(
             results.append(convert_to_searchresult("e-rara", raw))
             if len(results) >= max_results:
                 break
-    except ET.ParseError as e:
-        logger.error("e-rara SRU XML parse error: %s", e)
-    except Exception:
-        logger.exception("Unexpected error during e-rara SRU parsing")
+        except Exception:
+            logger.warning("e-rara: skipping malformed SRU record", exc_info=True)
+            continue
 
     return results
 

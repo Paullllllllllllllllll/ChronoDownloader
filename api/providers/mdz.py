@@ -69,9 +69,9 @@ def search_mdz(
                 title_text = re.sub(r"<[^>]+>", "", str(title_html))
                 authors = doc.get("authors") or []
                 creator_text = (
-                    ", ".join(authors)
+                    (", ".join(authors) or None)
                     if isinstance(authors, list)
-                    else (authors or "N/A")
+                    else (authors or None)
                 )
                 raw = {
                     "title": title_text,
@@ -104,7 +104,7 @@ def search_mdz(
             title_text = a.get_text(strip=True) or title
             raw = {
                 "title": title_text,
-                "creator": creator or "N/A",
+                "creator": creator or None,
                 "id": obj_id,
                 "item_url": f"https://www.digitale-sammlungen.de/view/{obj_id}",
             }
@@ -170,4 +170,7 @@ def download_mdz_work(
         logger.info("No IIIF image services found in MDZ manifest for %s", object_id)
         return renderings_downloaded > 0
 
-    return download_page_images(image_service_bases, output_folder, "mdz", object_id)
+    return (
+        download_page_images(image_service_bases, output_folder, "mdz", object_id)
+        or renderings_downloaded > 0
+    )

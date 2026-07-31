@@ -66,13 +66,13 @@ def search_internet_archive(
             ia_identifier = item.get("identifier")
             # The IA API returns creator as either a single string or a list;
             # joining a bare string would split it into individual characters.
-            # ``or ["N/A"]`` also covers a present-but-null "creator" field,
-            # which the two-arg .get() default would not (join(None) raises).
-            creator_val = item.get("creator") or ["N/A"]
+            # An absent or null "creator" must stay None so that the record
+            # yields no creators at all rather than a literal sentinel.
+            creator_val = item.get("creator")
             creator_str = (
                 creator_val
                 if isinstance(creator_val, str)
-                else ", ".join(str(c) for c in creator_val)
+                else (", ".join(str(c) for c in creator_val) if creator_val else None)
             )
             raw = {
                 "title": item.get("title", "N/A"),
@@ -134,10 +134,9 @@ def download_ia_work(
         files = metadata.get("files")
         preferred_exts = [".pdf", ".epub", ".djvu"]
 
-        def _download_from_list(fl: list[Any]) -> tuple[bool, bool]:
+        def _download_from_list(fl: list[Any]) -> bool:
             """Try to download primary content from file list."""
             ok = False
-            got_primary = False
             # Try preferred formats first
             for ext in preferred_exts:
                 for f in fl:
@@ -159,7 +158,6 @@ def download_ia_work(
                             file_url, output_folder, f"ia_{identifier}_content"
                         ):
                             ok = True
-                            got_primary = True
                             logger.info(
                                 "IA: Successfully downloaded %s for %s",
                                 name,
@@ -168,12 +166,11 @@ def download_ia_work(
                             break
                 if ok and prefer_pdf:
                     # If we got a primary object and prefer that, we can return early
-                    return True, got_primary
-            return ok, got_primary
+                    return True
+            return ok
 
         if isinstance(files, list):
-            _ok, got_primary = _download_from_list(files)
-            if got_primary:
+            if _download_from_list(files):
                 primary_obtained = True
                 content_downloaded = True
 

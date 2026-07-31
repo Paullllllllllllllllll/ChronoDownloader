@@ -66,7 +66,7 @@ def search_bne(
             if item_id:
                 raw = {
                     "title": item_title or "N/A",
-                    "creator": item_creator or "N/A",
+                    "creator": item_creator or None,
                     "id": item_id,
                     "item_url": item_id
                     if item_id.startswith("http")
@@ -155,4 +155,4 @@ def download_bne_work(
             logger.exception(
                 "Error downloading BNE image for %s from %s", item_identifier, svc
             )
-    return ok_any
+    return ok_any or renders > 0

@@ -121,7 +121,15 @@ def search_hathitrust(
                     if isinstance(it, dict):
                         rec_key = str(it.get("fromRecord"))
                         items_by_record.setdefault(rec_key, []).append(it)
-            for rec_id, rec in recs.items():
+        except Exception:
+            logger.exception("HathiTrust: error parsing Bibliographic API response")
+            return out
+
+        if not isinstance(recs, dict):
+            return out
+
+        for rec_id, rec in recs.items():
+            try:
                 titles = rec.get("titles") or rec.get("title") or []
                 if isinstance(titles, list):
                     title_text = titles[0] if titles else (title or "N/A")
@@ -166,8 +174,13 @@ def search_hathitrust(
                 )
                 if len(out) >= max_results:
                     break
-        except Exception:
-            logger.exception("HathiTrust: error parsing Bibliographic API response")
+            except Exception:
+                logger.warning(
+                    "HathiTrust: skipping malformed bib record %s",
+                    rec_id,
+                    exc_info=True,
+                )
+                continue
         return out
 
     order = ["htid", "oclc", "isbn", "lccn", "issn"]

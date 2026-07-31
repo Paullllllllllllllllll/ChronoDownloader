@@ -112,7 +112,9 @@ class TestInternetArchiveProvider:
 
     def test_search_handles_null_creator(self) -> None:
         """A present-but-null creator must not raise (join(None) -> TypeError)
-        and non-string list entries are coerced rather than crashing."""
+        and non-string list entries are coerced rather than crashing. An absent
+        creator yields None (no creators), not a literal "N/A" sentinel that
+        creator_score would match against."""
         response = {
             "response": {
                 "docs": [
@@ -129,7 +131,8 @@ class TestInternetArchiveProvider:
             results = search_internet_archive("Title")
 
             assert len(results) == 2
-            assert results[0].raw["creator"] == "N/A"
+            assert results[0].raw["creator"] is None
+            assert results[0].creators == []
             assert results[1].raw["creator"] == "123, X"
 
 
@@ -255,6 +258,131 @@ class TestEuropeanaProvider:
             assert results[0].raw["title"] == "N/A"
             assert results[0].raw["creator"] == "Solo Author"
             assert results[1].raw["title"] == "Good Title"
+            assert results[1].raw["creator"] is None
+
+    def test_search_result_manifest_url_carries_no_api_key(self) -> None:
+        """The wskey must not be persisted in search results (it would leak
+        into work.json, index.csv and --search output)."""
+        response = {"success": True, "items": [{"id": "/1/x", "title": ["T"]}]}
+        with (
+            patch("api.providers.europeana._api_key", return_value="SECRET"),
+            patch("api.providers.europeana.make_request", return_value=response),
+        ):
+            from api.providers.europeana import search_europeana
+
+            results = search_europeana("cookbook")
+
+            manifest = results[0].raw["iiif_manifest"]
+            assert manifest == (
+                "https://iiif.europeana.eu/presentation/1/x/manifest?format=3"
+            )
+            assert "SECRET" not in manifest
+
+    def test_download_appends_api_key_at_fetch_time(self, temp_output_dir: str) -> None:
+        """The key-less stored manifest URL must still be authenticated when
+        actually fetched."""
+        with (
+            patch("api.providers.europeana._api_key", return_value="SECRET"),
+            patch("api.providers.europeana.save_json", return_value=None),
+            patch(
+                "api.providers.europeana.make_request", return_value=None
+            ) as mock_req,
+        ):
+            from api.providers.europeana import download_europeana_work
+
+            download_europeana_work(
+                {
+                    "id": "/1/x",
+                    "iiif_manifest": (
+                        "https://iiif.europeana.eu/presentation/1/x/manifest?format=3"
+                    ),
+                },
+                temp_output_dir,
+            )
+
+            fetched = mock_req.call_args[0][0]
+            assert fetched == (
+                "https://iiif.europeana.eu/presentation/1/x/manifest"
+                "?format=3&wskey=SECRET"
+            )
+
+    def test_download_leaves_foreign_manifest_urls_untouched(
+        self, temp_output_dir: str
+    ) -> None:
+        """A provider-hosted manifest neither needs nor understands wskey."""
+        with (
+            patch("api.providers.europeana._api_key", return_value="SECRET"),
+            patch("api.providers.europeana.save_json", return_value=None),
+            patch(
+                "api.providers.europeana.make_request", return_value=None
+            ) as mock_req,
+        ):
+            from api.providers.europeana import download_europeana_work
+
+            download_europeana_work(
+                {
+                    "id": "/1/x",
+                    "iiif_manifest": "https://example.org/iiif/1/manifest",
+                },
+                temp_output_dir,
+            )
+
+            assert mock_req.call_args[0][0] == "https://example.org/iiif/1/manifest"
+
+
+class TestSbbDigitalProvider:
+    """Integration tests for the SBB (Staatsbibliothek zu Berlin) provider."""
+
+    def test_pdf_loop_honours_max_pages(self, temp_output_dir: str) -> None:
+        """Per-page PDF filegroups can hold one PDF per page, so the PDF loop
+        must apply the same max_pages cap as the image loop."""
+        with (
+            patch("api.providers.sbb_digital.make_request", return_value="<mets/>"),
+            patch("api.providers.sbb_digital.save_json", return_value=None),
+            patch(
+                "api.providers.sbb_digital._collect_mets_urls",
+                return_value=(["p1", "p2", "p3", "p4"], []),
+            ),
+            patch("api.providers.sbb_digital.get_max_pages", return_value=2),
+            patch("api.providers.sbb_digital.budget_exhausted", return_value=False),
+            patch(
+                "api.providers.sbb_digital.prefer_pdf_over_images", return_value=False
+            ),
+            patch(
+                "api.providers.sbb_digital.download_file", return_value="/x/f.pdf"
+            ) as mock_dl,
+        ):
+            from api.providers.sbb_digital import download_sbb_digital_work
+
+            result = download_sbb_digital_work({"id": "PPN123"}, temp_output_dir)
+
+            assert result is True
+            assert mock_dl.call_count == 2
+
+    def test_pdf_loop_stops_on_exhausted_budget(self, temp_output_dir: str) -> None:
+        """The PDF loop must respect the global download budget."""
+        with (
+            patch("api.providers.sbb_digital.make_request", return_value="<mets/>"),
+            patch("api.providers.sbb_digital.save_json", return_value=None),
+            patch(
+                "api.providers.sbb_digital._collect_mets_urls",
+                return_value=(["p1", "p2"], []),
+            ),
+            patch("api.providers.sbb_digital.get_max_pages", return_value=0),
+            patch("api.providers.sbb_digital.budget_exhausted", return_value=True),
+            patch(
+                "api.providers.sbb_digital.prefer_pdf_over_images", return_value=False
+            ),
+            patch(
+                "api.providers.sbb_digital.download_file", return_value="/x/f.pdf"
+            ) as mock_dl,
+        ):
+            from api.providers.sbb_digital import download_sbb_digital_work
+
+            result = download_sbb_digital_work({"id": "PPN123"}, temp_output_dir)
+
+            assert result is False
+            mock_dl.assert_not_called()
 
 
 class TestHathiTrustProvider:
@@ -327,6 +455,30 @@ class TestDdbProvider:
             assert results[0].raw["creator"] is None
             assert results[1].raw["creator"] is None
 
+    def test_search_handles_list_label(self) -> None:
+        """A list-valued label/title must not make .replace raise AttributeError."""
+        response = {
+            "results": [
+                {
+                    "docs": [
+                        {"id": "abc", "label": ["<match>Koch</match>buch"]},
+                        {"id": "def", "label": [], "title": "Backbuch"},
+                    ]
+                }
+            ]
+        }
+        with (
+            patch("api.providers.ddb._api_key", return_value="KEY"),
+            patch("api.providers.ddb.make_request", return_value=response),
+        ):
+            from api.providers.ddb import search_ddb
+
+            results = search_ddb("cookbook")
+
+            assert len(results) == 2
+            assert results[0].raw["title"] == "Kochbuch"
+            assert results[1].raw["title"] == "Backbuch"
+
 
 class TestGoogleBooksProvider:
     """Integration tests for the Google Books provider."""
@@ -344,6 +496,130 @@ class TestGoogleBooksProvider:
             first_q = mock.call_args_list[0].kwargs["params"]["q"]
             assert "+inauthor" not in first_q
             assert 'inauthor:"Glasse"' in first_q
+
+    def test_search_handles_null_and_non_string_authors(self) -> None:
+        """A present-but-null "authors" (or one holding non-strings) must not
+        make the join raise TypeError and abort the whole search."""
+        response = {
+            "items": [
+                {
+                    "id": "g1",
+                    "volumeInfo": {"title": "T1", "authors": None},
+                    "accessInfo": {"publicDomain": True},
+                },
+                {
+                    "id": "g2",
+                    "volumeInfo": {"title": "T2", "authors": [123, "X"]},
+                    "accessInfo": {"publicDomain": True},
+                },
+            ]
+        }
+        with patch("api.providers.google_books.make_request", return_value=response):
+            from api.providers.google_books import search_google_books
+
+            results = search_google_books("Cookery")
+
+            assert len(results) == 2
+            assert results[0].raw["creator"] == ""
+            assert results[1].raw["creator"] == "123, X"
+
+
+class TestBritishLibraryProvider:
+    """Integration tests for the British Library provider."""
+
+    SRU_NO_ARK = (
+        '<?xml version="1.0"?>'
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        "<records><record><recordData>"
+        '<dc xmlns="http://purl.org/dc/elements/1.1/">'
+        "<title>Cookery</title><creator>Anon</creator>"
+        "<identifier>http://example.org/not-an-ark</identifier>"
+        "</dc></recordData></record></records>"
+        "</searchRetrieveResponse>"
+    )
+
+    def test_sru_records_without_ark_fall_through_to_sparql(self) -> None:
+        """An identifier-less SRU record is undownloadable (source_id=None) and
+        must not suppress the BNB SPARQL fallback."""
+        sparql_response = {
+            "results": {
+                "bindings": [
+                    {
+                        "title": {"value": "Cookery"},
+                        "same": {"value": "http://bnb.example/ark:/81055/vdc_0001"},
+                    }
+                ]
+            }
+        }
+        with patch(
+            "api.providers.british_library.make_request",
+            side_effect=[self.SRU_NO_ARK, sparql_response],
+        ):
+            from api.providers.british_library import search_british_library
+
+            results = search_british_library("Cookery")
+
+            assert len(results) == 1
+            assert results[0].raw["source"] == "bnb_sparql"
+            assert results[0].source_id == "vdc_0001"
+
+    def test_malformed_record_does_not_discard_earlier_results(self) -> None:
+        """One bad record must not throw away records already parsed."""
+        from api.providers import british_library
+
+        good = (
+            '<?xml version="1.0"?>'
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            "<records>"
+            "<record><recordData>"
+            '<dc xmlns="http://purl.org/dc/elements/1.1/">'
+            "<title>A</title><identifier>ark:/81055/vdc_A</identifier>"
+            "</dc></recordData></record>"
+            "<record><recordData>"
+            '<dc xmlns="http://purl.org/dc/elements/1.1/">'
+            "<title>B</title><identifier>ark:/81055/vdc_B</identifier>"
+            "</dc></recordData></record>"
+            "</records></searchRetrieveResponse>"
+        )
+
+        from api.model import convert_to_searchresult as real_convert
+
+        calls = {"n": 0}
+
+        def flaky(provider: str, raw: dict[str, Any]) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ValueError("boom")
+            return real_convert(provider, raw)
+
+        with (
+            patch("api.providers.british_library.make_request", return_value=good),
+            patch(
+                "api.providers.british_library.convert_to_searchresult",
+                side_effect=flaky,
+            ),
+        ):
+            results = british_library.search_british_library("Cookery")
+
+            assert len(results) == 1
+            assert results[0].source_id == "vdc_B"
+
+
+class TestERaraProvider:
+    """Integration tests for the e-rara provider."""
+
+    def test_build_query_joins_terms_with_and(self) -> None:
+        """Two quoted CQL terms separated by a bare space are invalid CQL."""
+        from api.providers.e_rara import _build_query
+
+        query = _build_query("Kochbuch", "Rumpolt")
+
+        assert query == '"Kochbuch" and "Rumpolt"'
+
+    def test_build_query_single_term_unchanged(self) -> None:
+        from api.providers.e_rara import _build_query
+
+        assert _build_query("Kochbuch", None) == '"Kochbuch"'
 
 
 class TestProviderRegistry:
@@ -552,6 +828,62 @@ class TestDownloadFunctions:
             result = download_gallica_work({"ark_id": "bpt6k123"}, temp_output_dir)
 
             assert result is True
+
+    def test_gallica_rendering_survives_failed_image_downloads(
+        self, temp_output_dir: str
+    ) -> None:
+        """A successfully downloaded PDF/EPUB rendering must not be discarded
+        when the subsequent image downloads all fail."""
+        manifest = {"@id": "m"}
+        with (
+            patch("api.providers.bnf_gallica.make_request", return_value=manifest),
+            patch("api.providers.bnf_gallica.save_json", return_value=None),
+            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=1),
+            patch(
+                "api.providers.bnf_gallica.extract_image_service_bases",
+                return_value=["https://svc/1", "https://svc/2"],
+            ),
+            patch(
+                "api.providers.bnf_gallica.prefer_pdf_over_images", return_value=False
+            ),
+            patch(
+                "api.providers.bnf_gallica.download_one_from_service",
+                return_value=False,
+            ),
+        ):
+            from api.providers.bnf_gallica import download_gallica_work
+
+            result = download_gallica_work({"ark_id": "bpt6k123"}, temp_output_dir)
+
+            assert result is True
+
+    def test_loc_fallback_handles_list_image_url(self, temp_output_dir: str) -> None:
+        """LoC commonly returns image_url as a list ordered by increasing
+        resolution; the last entry must be used rather than the list ignored."""
+        item_json = {
+            "item": {
+                "image_url": [
+                    "//tile.loc.gov/image/small.jpg",
+                    "//tile.loc.gov/image/large.jpg",
+                ]
+            }
+        }
+        with (
+            patch("api.providers.loc.make_request", return_value=item_json),
+            patch("api.providers.loc.save_json", return_value=None),
+            patch(
+                "api.providers.loc.download_file", return_value="/x/img.jpg"
+            ) as mock_dl,
+        ):
+            from api.providers.loc import download_loc_work
+
+            result = download_loc_work(
+                {"item_url": "https://www.loc.gov/item/1/", "id": "1"},
+                temp_output_dir,
+            )
+
+            assert result is True
+            assert mock_dl.call_args[0][0] == "https://tile.loc.gov/image/large.jpg"
 
     def test_hathitrust_download_without_api_key_returns_false(
         self, temp_output_dir: str

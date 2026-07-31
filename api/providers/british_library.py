@@ -71,6 +71,7 @@ def _search_bnb_sparql(
             headers={"Accept": "application/sparql-results+json"},
         )
     except Exception:
+        logger.warning("BNB SPARQL request failed", exc_info=True)
         data = None
     results: list[SearchResult] = []
     try:
@@ -139,35 +140,50 @@ def search_british_library(
 
     results: list[SearchResult] = []
     if isinstance(response_text, str):
+        namespaces = {
+            "srw": "http://www.loc.gov/zing/srw/",
+            "dc": "http://purl.org/dc/elements/1.1/",
+        }
+        root = None
         try:
-            namespaces = {
-                "srw": "http://www.loc.gov/zing/srw/",
-                "dc": "http://purl.org/dc/elements/1.1/",
-            }
             root = ET.fromstring(response_text)
-            for record in root.findall(".//srw:recordData", namespaces):
-                dc = record.find("dc:dc", namespaces)
-                if dc is None:
-                    continue
-                title_el = dc.find("dc:title", namespaces)
-                creator_el = dc.find("dc:creator", namespaces)
-                date_el = dc.find("dc:date", namespaces)
-                identifier_el = dc.find("dc:identifier", namespaces)
-                identifier = None
-                if identifier_el is not None and identifier_el.text:
-                    match = re.search(r"ark:/81055/(.*)", identifier_el.text)
-                    if match:
-                        identifier = match.group(1)
-
-                raw = {
-                    "title": title_el.text if title_el is not None else "N/A",
-                    "creator": creator_el.text if creator_el is not None else "N/A",
-                    "date": date_el.text if date_el is not None else None,
-                    "identifier": identifier,
-                }
-                results.append(convert_to_searchresult("British Library", raw))
         except ET.ParseError as e:
             logger.error("Error parsing BL SRU XML: %s", e)
+        if root is not None:
+            for record in root.findall(".//srw:recordData", namespaces):
+                try:
+                    dc = record.find("dc:dc", namespaces)
+                    if dc is None:
+                        continue
+                    title_el = dc.find("dc:title", namespaces)
+                    creator_el = dc.find("dc:creator", namespaces)
+                    date_el = dc.find("dc:date", namespaces)
+                    identifier_el = dc.find("dc:identifier", namespaces)
+                    identifier = None
+                    if identifier_el is not None and identifier_el.text:
+                        match = re.search(r"ark:/81055/(.*)", identifier_el.text)
+                        if match:
+                            identifier = match.group(1)
+
+                    # Without an ARK the record cannot be downloaded; keeping it
+                    # would also suppress the BNB SPARQL fallback below.
+                    if not identifier:
+                        logger.debug(
+                            "BL: skipping SRU record without an ARK identifier (%s)",
+                            title_el.text if title_el is not None else "unknown title",
+                        )
+                        continue
+
+                    raw = {
+                        "title": title_el.text if title_el is not None else "N/A",
+                        "creator": creator_el.text if creator_el is not None else "N/A",
+                        "date": date_el.text if date_el is not None else None,
+                        "identifier": identifier,
+                    }
+                    results.append(convert_to_searchresult("British Library", raw))
+                except Exception:
+                    logger.warning("BL: skipping malformed SRU record", exc_info=True)
+                    continue
 
     if results:
         return results
@@ -275,4 +291,4 @@ def download_british_library_work(
             logger.exception(
                 "Error downloading BL image for %s from %s", identifier, svc
             )
-    return ok_any
+    return ok_any or renders > 0

@@ -43,13 +43,13 @@ def _extract_title(item: dict[str, Any]) -> str:
     return title or "N/A"
 
 
-def _extract_creator(item: dict[str, Any]) -> str:
+def _extract_creator(item: dict[str, Any]) -> str | None:
     contrib = item.get("contributor") or []
     if isinstance(contrib, list):
         for c in contrib:
             if isinstance(c, dict) and c.get("name"):
                 return str(c.get("name"))
-    return "N/A"
+    return None
 
 
 def _extract_record_id(item: dict[str, Any]) -> str | None:

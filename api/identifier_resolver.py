@@ -11,7 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from .model import SearchResult
+from .model import QuotaDeferredException, SearchResult
 from .providers import PROVIDERS
 
 logger = logging.getLogger(__name__)
@@ -252,6 +252,9 @@ def download_by_native_provider(
 
     Raises:
         KeyError: If the provider key is not in the registry.
+        QuotaDeferredException: If the provider deferred the download because
+            its quota is exhausted; propagated so callers can distinguish a
+            deferral from an ordinary failure.
     """
     if provider_key not in PROVIDERS:
         raise KeyError(f"Unknown provider key '{provider_key}'.")
@@ -273,6 +276,8 @@ def download_by_native_provider(
     )
     try:
         return bool(download_fn(sr, output_folder))
+    except QuotaDeferredException:
+        raise
     except Exception:
         logger.exception(
             "Native download failed for '%s' via %s",

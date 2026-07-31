@@ -108,9 +108,14 @@ def search_ddb(
         for result_group in data["results"]:
             docs = result_group.get("docs", [])
             for item in docs:
-                # Clean title by removing <match> tags
+                # Clean title by removing <match> tags. DDB may return a
+                # list-valued label/title, on which .replace would raise.
                 item_title = item.get("label") or item.get("title") or "N/A"
-                item_title = item_title.replace("<match>", "").replace("</match>", "")
+                if isinstance(item_title, list):
+                    item_title = item_title[0] if item_title else "N/A"
+                item_title = (
+                    str(item_title).replace("<match>", "").replace("</match>", "")
+                )
 
                 # Extract creator from view array if available. The DDB API may
                 # return a dict or a shorter list here; only index when it is a
@@ -269,4 +274,4 @@ def download_ddb_work(
         except Exception:
             logger.exception("Error downloading DDB image for %s from %s", item_id, svc)
 
-    return ok_any
+    return ok_any or renders > 0

@@ -245,7 +245,7 @@ def _build_annas_result(
     """
     raw = {
         "title": best_title,
-        "creator": creator or "N/A",
+        "creator": creator or None,
         "creators": creators,
         "md5": md5,
         "id": md5,

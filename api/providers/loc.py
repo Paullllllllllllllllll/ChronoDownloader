@@ -84,12 +84,13 @@ def search_loc(
         # bare string (where [0] would take just the first character) and an
         # absent/empty field.
         contributors = item.get("contributor_names")
+        creator: str | None
         if isinstance(contributors, list) and contributors:
             creator = str(contributors[0])
         elif isinstance(contributors, str) and contributors:
             creator = contributors
         else:
-            creator = "N/A"
+            creator = None
         raw = {
             "title": item.get("title", "N/A"),
             "creator": creator,
@@ -170,6 +171,7 @@ def download_loc_work(
             save_json(iiif_manifest_data, output_folder, f"loc_{item_id}_iiif_manifest")
 
             # Prefer manifest-level renderings (PDF/EPUB) when available
+            renders = 0
             try:
                 renders = download_iiif_renderings(iiif_manifest_data, output_folder)
                 if renders > 0 and prefer_pdf_over_images():
@@ -213,7 +215,7 @@ def download_loc_work(
                         logger.exception(
                             "Error downloading LOC image for %s from %s", item_id, svc
                         )
-                return ok_any
+                return ok_any or renders > 0
             else:
                 logger.info(
                     "No IIIF image services in manifest for LOC item %s; "
@@ -228,12 +230,15 @@ def download_loc_work(
     # Fallback: try downloading a single representative image
     image_url = None
     if item_full_json.get("item") and item_full_json["item"].get("image_url"):
-        if isinstance(item_full_json["item"]["image_url"], dict):
-            image_url = item_full_json["item"]["image_url"].get(
-                "medium"
-            ) or item_full_json["item"]["image_url"].get("full")
-        elif isinstance(item_full_json["item"]["image_url"], str):
-            image_url = item_full_json["item"]["image_url"]
+        raw_image_url = item_full_json["item"]["image_url"]
+        # LoC most commonly returns a list of URLs ordered by increasing
+        # resolution; take the last (highest-resolution) entry.
+        if isinstance(raw_image_url, list):
+            raw_image_url = raw_image_url[-1] if raw_image_url else None
+        if isinstance(raw_image_url, dict):
+            image_url = raw_image_url.get("medium") or raw_image_url.get("full")
+        elif isinstance(raw_image_url, str):
+            image_url = raw_image_url
     if image_url:
         if image_url.startswith("//"):
             image_url = "https:" + image_url

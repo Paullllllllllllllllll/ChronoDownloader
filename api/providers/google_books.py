@@ -107,7 +107,9 @@ def search_google_books(
             if _gb_prefer_format() == "epub":
                 p.setdefault("download", "epub")
         except Exception:
-            pass
+            logger.debug(
+                "Google Books: could not apply the download=epub hint", exc_info=True
+            )
         return p
 
     def _try(q: str, use_filter: str | None) -> dict[Any, Any] | str | bytes | None:
@@ -201,7 +203,11 @@ def search_google_books(
                 continue
             raw = {
                 "title": volume_info.get("title", "N/A"),
-                "creator": ", ".join(volume_info.get("authors", [])),
+                # A present-but-null "authors" (or one holding non-string
+                # entries) would make a bare join raise TypeError.
+                "creator": ", ".join(
+                    str(a) for a in (volume_info.get("authors") or [])
+                ),
                 "id": vol_id,
                 "item_url": f"https://books.google.com/books?id={vol_id}"
                 if vol_id

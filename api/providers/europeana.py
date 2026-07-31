@@ -33,15 +33,17 @@ def _api_key() -> str | None:
     return os.getenv(get_api_key_envvar("europeana", "EUROPEANA_API_KEY"))
 
 
-def _build_manifest_url_from_id(
-    euro_id: str, api_key: str | None, prefer_v3: bool = True
-) -> str | None:
+def _build_manifest_url_from_id(euro_id: str, prefer_v3: bool = True) -> str | None:
     """Construct the Europeana IIIF Manifest API URL from a Europeana record id.
 
     Europeana search results typically have ids like
     "/9200379/BibliographicResource_3000117247947".
     The manifest URL format is:
-      https://iiif.europeana.eu/presentation/{collectionId}/{recordId}/manifest?wskey=KEY[&format=3]
+      https://iiif.europeana.eu/presentation/{collectionId}/{recordId}/manifest[?format=3]
+
+    The API key is deliberately omitted here: this URL is persisted in search
+    results (work.json, index.csv, ``--search`` output). It is appended at
+    fetch time by :func:`_append_wskey`.
     """
     if not euro_id:
         return None
@@ -53,15 +55,22 @@ def _build_manifest_url_from_id(
             f"{EUROPEANA_MANIFEST_HOST}/presentation/"
             f"{collection_id}/{record_id}/manifest"
         )
-        params = []
-        if api_key:
-            params.append(f"wskey={api_key}")
         if prefer_v3:
-            params.append("format=3")
-        if params:
-            url = url + "?" + "&".join(params)
+            url = url + "?format=3"
         return url
     return None
+
+
+def _append_wskey(url: str, api_key: str | None) -> str:
+    """Add the Europeana API key to a Europeana-hosted manifest URL.
+
+    Only Europeana's own IIIF host requires (and understands) the ``wskey``
+    parameter; manifests discovered on provider hosts are left untouched.
+    """
+    if not api_key or "wskey=" in url or not url.startswith(EUROPEANA_MANIFEST_HOST):
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}wskey={api_key}"
 
 
 def search_europeana(
@@ -102,7 +111,7 @@ def search_europeana(
                 item_title = titles[0] if titles else "N/A"
             else:
                 item_title = titles
-            item_creator = "N/A"
+            item_creator = None
             dc_creator = item.get("dcCreator")
             if isinstance(dc_creator, list) and dc_creator:
                 item_creator = dc_creator[0]
@@ -130,14 +139,18 @@ def search_europeana(
                             iiif_manifest = view["@id"]
                             break
             except Exception:
-                pass
+                logger.debug(
+                    "Europeana: hasView manifest discovery failed for %s",
+                    item.get("id"),
+                    exc_info=True,
+                )
             if not iiif_manifest:
                 obj = item.get("object")
                 if isinstance(obj, str) and "manifest" in obj:
                     iiif_manifest = obj
             # If still none, construct Europeana Manifest API URL from id
             if not iiif_manifest and item.get("id"):
-                built = _build_manifest_url_from_id(item.get("id"), key, prefer_v3=True)
+                built = _build_manifest_url_from_id(item.get("id"), prefer_v3=True)
                 if built:
                     iiif_manifest = built
             data_provider = item.get("dataProvider")
@@ -180,8 +193,7 @@ def download_europeana_work(
 
     # If missing, construct Europeana Manifest API URL
     if not iiif_manifest_url:
-        key = _api_key()
-        built = _build_manifest_url_from_id(item_id, key, prefer_v3=True)
+        built = _build_manifest_url_from_id(item_id, prefer_v3=True)
         iiif_manifest_url = built
 
     if not iiif_manifest_url:
@@ -190,8 +202,10 @@ def download_europeana_work(
         )
         return False
 
+    # The API key is added here rather than being stored in the search result.
+    fetch_url = _append_wskey(iiif_manifest_url, _api_key())
     logger.info("Fetching Europeana IIIF manifest: %s", iiif_manifest_url)
-    manifest_data = make_request(iiif_manifest_url)
+    manifest_data = make_request(fetch_url)
     if not isinstance(manifest_data, dict):
         logger.warning("Failed to fetch IIIF manifest from %s", iiif_manifest_url)
         return False
@@ -199,6 +213,7 @@ def download_europeana_work(
     save_json(manifest_data, output_folder, f"europeana_{item_id}_iiif_manifest")
 
     # Try manifest-level renderings (PDF/EPUB) first
+    renders = 0
     try:
         renders = download_iiif_renderings(manifest_data, output_folder)
         if renders > 0 and prefer_pdf_over_images():
@@ -324,4 +339,4 @@ def download_europeana_work(
                         continue
     except Exception:
         logger.exception("Europeana fallback failed for %s", item_id)
-    return False
+    return renders > 0
