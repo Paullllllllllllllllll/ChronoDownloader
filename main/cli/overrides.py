@@ -278,7 +278,8 @@ def _looks_like_cli_invocation(argv: list[str]) -> bool:
     }
 
     for token in argv:
-        if token in cli_flags:
+        # Split on "=" so the --flag=value form is recognized too.
+        if token.split("=", 1)[0] in cli_flags:
             return True
         if not token.startswith("-"):
             return True

@@ -572,12 +572,7 @@ class TestShowQuotaStatus:
             with patch("main.cli.commands.quota.get_deferred_queue") as mock_dq:
                 mock_dq.return_value.count_by_status.return_value = {}
 
-                with patch(
-                    "main.cli.commands.quota.get_background_scheduler"
-                ) as mock_bs:
-                    mock_bs.return_value.is_running.return_value = False
-
-                    show_quota_status()
+                show_quota_status()
 
         captured = capsys.readouterr()
         assert "QUOTA" in captured.out
@@ -604,12 +599,7 @@ class TestShowQuotaStatus:
                 mock_dq.return_value.count_by_status.return_value = {}
                 mock_dq.return_value.get_pending.return_value = []
 
-                with patch(
-                    "main.cli.commands.quota.get_background_scheduler"
-                ) as mock_bs:
-                    mock_bs.return_value.is_running.return_value = False
-
-                    show_quota_status()
+                show_quota_status()
 
         captured = capsys.readouterr()
         assert "annas_archive" in captured.out
@@ -636,12 +626,7 @@ class TestShowQuotaStatus:
                 mock_dq.return_value.count_by_status.return_value = {}
                 mock_dq.return_value.get_pending.return_value = []
 
-                with patch(
-                    "main.cli.commands.quota.get_background_scheduler"
-                ) as mock_bs:
-                    mock_bs.return_value.is_running.return_value = False
-
-                    show_quota_status()
+                show_quota_status()
 
         captured = capsys.readouterr()
         assert "EXHAUSTED" in captured.out

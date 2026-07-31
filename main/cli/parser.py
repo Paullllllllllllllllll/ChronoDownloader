@@ -10,6 +10,19 @@ from __future__ import annotations
 import argparse
 
 
+def _non_negative_int(value: str) -> int:
+    """Argparse type for ``--limit``: a row count, never negative."""
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from None
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be 0 or greater (got {parsed}); omit --limit to process all rows"
+        )
+    return parsed
+
+
 def create_cli_parser() -> argparse.ArgumentParser:
     """Create the argument parser for CLI mode."""
     parser = argparse.ArgumentParser(
@@ -253,7 +266,7 @@ Examples:
 
     parser.add_argument(
         "--limit",
-        type=int,
+        type=_non_negative_int,
         default=None,
         metavar="N",
         help="Process at most N pending rows after filters are applied.",

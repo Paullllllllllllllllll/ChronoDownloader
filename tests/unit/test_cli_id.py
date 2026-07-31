@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -94,6 +95,16 @@ class TestLooksLikeCLI:
     def test_id_and_provider_detected(self) -> None:
         assert (
             _looks_like_cli_invocation(["--id", "bsb123", "--provider", "mdz"]) is True
+        )
+
+    def test_id_equals_form_detected(self) -> None:
+        """The --flag=value form must be recognized too."""
+        assert _looks_like_cli_invocation(["--id=bsb123"]) is True
+
+    def test_iiif_equals_form_detected(self) -> None:
+        assert (
+            _looks_like_cli_invocation(["--iiif=https://example.org/manifest.json"])
+            is True
         )
 
 
@@ -246,6 +257,26 @@ class TestRunIdentifierCLI:
         logger = logging.getLogger("test")
 
         _run_identifier_cli(args, {}, logger)
+
+    @patch("api.identifier_resolver.download_by_native_provider", return_value=True)
+    def test_native_identifier_with_separators_is_sanitized(
+        self, mock_native: MagicMock
+    ) -> None:
+        """Aggregator identifiers carry ':' and '/'; the work directory name
+        must stay a single, filesystem-legal directory under output_dir."""
+        args = self._make_args(id="oai:dpla.org/item/12345", provider="dpla")
+        logger = logging.getLogger("test")
+
+        _run_identifier_cli(args, {}, logger)
+
+        entries = os.listdir(self._output_dir)
+        assert len(entries) == 1
+        name = entries[0]
+        assert ":" not in name
+        assert "/" not in name
+        assert "\\" not in name
+        assert os.path.isdir(os.path.join(self._output_dir, name))
+        assert mock_native.call_args.args[2] == os.path.join(self._output_dir, name)
 
     @patch("main.cli.commands.identifier.process_direct_iiif")
     @patch(

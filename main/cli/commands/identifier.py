@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Any
 
+from api.core.naming import sanitize_filename
 from api.model import QuotaDeferredException
 from api.providers import PROVIDERS
 from main.orchestration.execution import process_direct_iiif
@@ -67,7 +68,13 @@ def run_identifier_cli(
         pkey = candidate.provider_key
 
         if candidate.use_native:
-            work_dir = os.path.join(output_dir, f"{entry_id}_{pkey}")
+            # Identifiers routinely carry ":" and "/" (DPLA, DDB, arks), which
+            # are illegal or path-splitting on disk. Flatten separators first so
+            # every component survives sanitization as one directory name.
+            dir_name = sanitize_filename(
+                f"{entry_id}_{pkey}".replace("/", "_").replace("\\", "_")
+            )
+            work_dir = os.path.join(output_dir, dir_name)
             os.makedirs(work_dir, exist_ok=True)
 
             if dry_run:

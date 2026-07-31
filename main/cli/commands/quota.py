@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from main.state.background import get_background_scheduler
 from main.state.deferred import get_deferred_queue
 from main.state.quota import get_quota_manager
 
@@ -74,12 +73,12 @@ def show_quota_status() -> None:
         if pending > 10:
             print(f"    ... and {pending - 10} more")
 
-    scheduler = get_background_scheduler()
-    stats = scheduler.get_stats()
+    # Derived from the persisted queue: in-process scheduler counters are not
+    # saved, so a standalone --quota-status run cannot see them.
+    retry_attempts = sum(item.retry_count for item in queue)
     print("\n[DEFERRED RETRY]")
     print("  * Mode: eager (ready items retried at the start of each run)")
-    print(f"  * Retries attempted: {stats.get('retries_attempted', 0)}")
-    print(f"  * Retries succeeded: {stats.get('retries_succeeded', 0)}")
+    print(f"  * Retry attempts recorded: {retry_attempts}")
 
     print("\n" + "=" * 60 + "\n")
 

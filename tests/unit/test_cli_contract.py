@@ -77,16 +77,19 @@ class TestBatchExitCodes:
             }
         ).to_csv(csv_path, index=False)
 
-        with patch(
-            "main.cli.commands.batch.run_batch_downloads",
-            return_value={
-                "processed": 1,
-                "succeeded": 0,
-                "failed": 1,
-                "deferred": 0,
-                "skipped": 0,
-            },
-        ), patch("main.cli.commands.batch.get_deferred_queue") as mq:
+        with (
+            patch(
+                "main.cli.commands.batch.run_batch_downloads",
+                return_value={
+                    "processed": 1,
+                    "succeeded": 0,
+                    "failed": 1,
+                    "deferred": 0,
+                    "skipped": 0,
+                },
+            ),
+            patch("main.cli.commands.batch.get_deferred_queue") as mq,
+        ):
             mq.return_value.get_pending.return_value = []
             code = run_batch_cli(
                 _batch_args(csv_file=csv_path),
@@ -112,16 +115,19 @@ class TestBatchExitCodes:
             }
         ).to_csv(csv_path, index=False)
 
-        with patch(
-            "main.cli.commands.batch.run_batch_downloads",
-            return_value={
-                "processed": 1,
-                "succeeded": 1,
-                "failed": 0,
-                "deferred": 0,
-                "skipped": 0,
-            },
-        ), patch("main.cli.commands.batch.get_deferred_queue") as mq:
+        with (
+            patch(
+                "main.cli.commands.batch.run_batch_downloads",
+                return_value={
+                    "processed": 1,
+                    "succeeded": 1,
+                    "failed": 0,
+                    "deferred": 0,
+                    "skipped": 0,
+                },
+            ),
+            patch("main.cli.commands.batch.get_deferred_queue") as mq,
+        ):
             mq.return_value.get_pending.return_value = []
             code = run_batch_cli(
                 _batch_args(csv_file=csv_path, json_summary=True),
@@ -249,6 +255,107 @@ class TestVerifyCommand:
         ok, reason = verify_work(work_dir)
         assert ok is False
         assert "zero" in reason
+
+    def _write_index(self, out_dir: str, rows: list[dict[str, str]]) -> str:
+        from main.data.index import INDEX_COLUMNS
+
+        os.makedirs(out_dir, exist_ok=True)
+        index_path = os.path.join(out_dir, "index.csv")
+        pd.DataFrame(rows, columns=INDEX_COLUMNS).to_csv(index_path, index=False)
+        return index_path
+
+    def test_verify_updates_existing_index_row(self, tmp_path: Any) -> None:
+        """The ledger is keyed on (work_id, entry_id): the verify row must
+        carry the entry_id so it replaces the real row instead of appending."""
+        from main.cli.commands.verify import run_verify
+
+        out_dir = str(tmp_path / "out")
+        work_dir = self._make_work(
+            out_dir,
+            "bad_work",
+            {"item.pdf": b"<html>error page</html>"},
+            work_json={"status": "completed"},
+        )
+        index_path = self._write_index(
+            out_dir,
+            [
+                {
+                    "work_id": "W1",
+                    "entry_id": "E1",
+                    "work_dir": work_dir,
+                    "status": "completed",
+                }
+            ],
+        )
+
+        stats = run_verify(out_dir)
+        assert stats["partial"] == 1
+
+        df = pd.read_csv(index_path)
+        assert len(df) == 1
+        assert str(df.loc[0, "status"]) == "partial"
+        assert str(df.loc[0, "entry_id"]) == "E1"
+
+    def test_verify_skips_rows_that_were_never_downloaded(self, tmp_path: Any) -> None:
+        """no_match/failed/deferred rows have empty directories by
+        construction; verifying them would report a spurious partial."""
+        from main.cli.commands.verify import run_verify
+        from main.cli.entry import _run_verify_command
+
+        out_dir = str(tmp_path / "out")
+        good_dir = self._make_work(
+            out_dir,
+            "good_work",
+            {"item.pdf": b"%PDF-1.4 content"},
+            work_json={"status": "completed"},
+        )
+        rows = [
+            {
+                "work_id": "W1",
+                "entry_id": "E1",
+                "work_dir": good_dir,
+                "status": "completed",
+            }
+        ]
+        for name, status in (
+            ("no_match_work", "no_match"),
+            ("failed_work", "failed"),
+            ("deferred_work", "deferred"),
+        ):
+            empty_dir = os.path.join(out_dir, name)
+            os.makedirs(empty_dir, exist_ok=True)
+            rows.append(
+                {
+                    "work_id": f"W_{status}",
+                    "entry_id": f"E_{status}",
+                    "work_dir": empty_dir,
+                    "status": status,
+                }
+            )
+        self._write_index(out_dir, rows)
+
+        stats = run_verify(out_dir)
+        assert stats == {"total": 1, "ok": 1, "partial": 0}
+
+        args = _batch_args(output_dir=out_dir, verify=True)
+        assert _run_verify_command(args) == 0
+
+
+class TestLimitArgument:
+    """A negative --limit is a usage error, not a silent no-op."""
+
+    def test_negative_limit_is_rejected(self) -> None:
+        from main.cli.parser import create_cli_parser
+
+        with pytest.raises(SystemExit) as excinfo:
+            create_cli_parser().parse_args(["works.csv", "--limit", "-1"])
+        assert excinfo.value.code == 2
+
+    def test_zero_limit_is_accepted(self) -> None:
+        from main.cli.parser import create_cli_parser
+
+        args = create_cli_parser().parse_args(["works.csv", "--limit", "0"])
+        assert args.limit == 0
 
 
 class TestParallelNoMatchCsv:

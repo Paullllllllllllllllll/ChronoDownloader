@@ -68,10 +68,11 @@ def run_batch_cli(
     pending_df = _filter_pending_rows(works_df, args)
 
     logger.info(
-        "CSV status: %d total, %d completed, %d failed, %d pending",
+        "CSV status: %d total, %d completed, %d failed, %d deferred, %d pending",
         initial_stats["total"],
         initial_stats["completed"],
         initial_stats["failed"],
+        initial_stats.get("deferred", 0),
         initial_stats["pending"],
     )
 

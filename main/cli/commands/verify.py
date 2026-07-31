@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 _VALIDATED_EXTS = (".pdf", ".epub")
 
+# Statuses whose work directory is expected to hold objects. Anything else
+# (``no_match``, ``failed``, ``deferred``) was never downloaded, so its empty
+# directory must not be reported as an incomplete work.
+_VERIFIABLE_STATUSES = frozenset({"completed", "partial", ""})
+_UNDOWNLOADED_STATUSES = frozenset({"no_match", "failed", "deferred"})
+
 
 def _object_files(work_dir: str) -> list[str]:
     objects_dir = os.path.join(work_dir, "objects")
@@ -90,31 +96,58 @@ def _safe_size(path: str) -> int:
         return 0
 
 
-def _iter_work_dirs(output_dir: str) -> list[tuple[str, str | None]]:
-    """Return ``(work_dir, work_id)`` pairs to verify.
+def _cell_text(value: Any) -> str | None:
+    """Return a CSV cell as text, or ``None`` when missing (pandas NaN)."""
+    if value is None or value != value:  # NaN never equals itself
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _iter_work_dirs(output_dir: str) -> list[tuple[str, str | None, str | None]]:
+    """Return ``(work_dir, work_id, entry_id)`` triples to verify.
 
     Prefers index.csv (authoritative), falling back to scanning subdirectories.
+    Rows that were never downloaded are skipped, and a work_dir recorded
+    relative to a different working directory is retried under ``output_dir``.
     """
-    pairs: list[tuple[str, str | None]] = []
+    triples: list[tuple[str, str | None, str | None]] = []
     df = read_index_csv(output_dir)
     if df is not None and "work_dir" in df.columns:
         for _, row in df.iterrows():
             wd = row.get("work_dir")
-            if isinstance(wd, str) and wd:
-                wid = row.get("work_id")
-                pairs.append((wd, str(wid) if wid is not None else None))
-        if pairs:
-            return pairs
+            if not isinstance(wd, str) or not wd:
+                continue
+            status = (_cell_text(row.get("status")) or "").lower()
+            if status not in _VERIFIABLE_STATUSES:
+                continue
+            if not os.path.isdir(wd):
+                # Stored paths are relative when --output_dir was relative;
+                # re-anchor them on the output directory being verified.
+                relocated = os.path.join(output_dir, os.path.basename(wd.rstrip("/\\")))
+                if os.path.isdir(relocated):
+                    wd = relocated
+            triples.append(
+                (wd, _cell_text(row.get("work_id")), _cell_text(row.get("entry_id")))
+            )
+        if triples:
+            return triples
 
     if os.path.isdir(output_dir):
         for name in sorted(os.listdir(output_dir)):
             wd = os.path.join(output_dir, name)
-            if os.path.isdir(wd) and (
+            if not os.path.isdir(wd):
+                continue
+            if not (
                 os.path.isdir(os.path.join(wd, "objects"))
                 or os.path.exists(os.path.join(wd, "work.json"))
             ):
-                pairs.append((wd, None))
-    return pairs
+                continue
+            status = str(_read_work_json(wd).get("status") or "").strip().lower()
+            if status in _UNDOWNLOADED_STATUSES:
+                continue
+            triples.append((wd, None, None))
+    return triples
 
 
 def run_verify(output_dir: str) -> dict[str, int]:
@@ -122,10 +155,10 @@ def run_verify(output_dir: str) -> dict[str, int]:
 
     Returns a stats dict with ``total``, ``ok``, and ``partial`` counts.
     """
-    pairs = _iter_work_dirs(output_dir)
+    triples = _iter_work_dirs(output_dir)
     stats = {"total": 0, "ok": 0, "partial": 0}
 
-    for work_dir, work_id in pairs:
+    for work_dir, work_id, entry_id in triples:
         stats["total"] += 1
         ok, reason = verify_work(work_dir)
         if ok:
@@ -145,6 +178,7 @@ def run_verify(output_dir: str) -> dict[str, int]:
                 output_dir,
                 {
                     "work_id": work_id,
+                    "entry_id": entry_id,
                     "work_dir": work_dir,
                     "status": "partial",
                     "pages_expected": meta.get("pages_expected"),

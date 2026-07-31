@@ -25,6 +25,46 @@ from .overrides import (
 )
 
 
+def _warn_ignored_selectors(args: argparse.Namespace, logger: logging.Logger) -> None:
+    """Warn about selectors the dispatch precedence will silently discard.
+
+    Purely advisory: precedence and exit codes are unchanged.
+    """
+    csv_file = getattr(args, "csv_file", None)
+    ad_hoc_search = getattr(args, "search", None)
+    search_active = bool(ad_hoc_search or getattr(args, "search_only", False))
+    iiif_urls = getattr(args, "iiif_urls", None)
+    identifier = getattr(args, "id", None)
+
+    ignored: list[str] = []
+    if search_active:
+        if iiif_urls:
+            ignored.append("--iiif")
+        if identifier:
+            ignored.append("--id")
+        if ad_hoc_search and csv_file:
+            ignored.append(f"the CSV file '{csv_file}'")
+        winner = "--search" if ad_hoc_search else "--search-only"
+    elif iiif_urls:
+        if identifier:
+            ignored.append("--id")
+        if csv_file:
+            ignored.append(f"the CSV file '{csv_file}'")
+        winner = "--iiif"
+    elif identifier:
+        if csv_file:
+            ignored.append(f"the CSV file '{csv_file}'")
+        winner = "--id"
+    else:
+        winner = ""
+
+    if ignored:
+        logger.warning("%s takes precedence; ignoring %s.", winner, ", ".join(ignored))
+
+    if getattr(args, "provider", None) and not identifier:
+        logger.warning("--provider only applies to --id; ignoring it for this run.")
+
+
 def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
     """Run the downloader in CLI mode.
 
@@ -42,10 +82,20 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
         except (AttributeError, OSError):
             pass
 
+    # A JSON search run emits NDJSON on stdout, so the log handler must start
+    # on stderr: messages logged before run_search_cli redirects logging would
+    # otherwise corrupt the stream.
+    search_requested = bool(
+        getattr(args, "search", None) or getattr(args, "search_only", False)
+    )
+    json_search = bool(getattr(args, "json_summary", False)) and search_requested
+
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-        handlers=[logging.StreamHandler(stream=sys.stdout)],
+        handlers=[
+            logging.StreamHandler(stream=sys.stderr if json_search else sys.stdout)
+        ],
     )
 
     try:
@@ -84,7 +134,9 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
         )
         return EXIT_USAGE
 
-    if getattr(args, "search", None) or getattr(args, "search_only", False):
+    _warn_ignored_selectors(args, logger)
+
+    if search_requested:
         return run_search_cli(args, config, logger)
 
     if args.iiif_urls:
