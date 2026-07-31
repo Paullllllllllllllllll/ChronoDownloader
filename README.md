@@ -1,4 +1,4 @@
-# ChronoDownloader v1.15.0
+# ChronoDownloader v1.16.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1144,6 +1144,27 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.16.0** (31 July 2026) -- Third-round maintenance audit release. The
+  download path now retries transient connection errors and timeouts with
+  backoff like the search path, refunds every budget-booked chunk when a
+  write fails, and the --id flag accepts full ark identifiers without
+  doubling the Gallica prefix. The state layer serializes singleton
+  initialization, treats a transiently unreadable state file as read-only
+  for the run instead of overwriting it, rolls expired quota windows before
+  recording, and fails (rather than eternally re-queues) deferred items
+  whose provider is gone. The scheduler stops semaphore-queued workers on
+  shutdown, worker timeouts are no longer applied twice, one malformed CSV
+  row no longer aborts a batch, a raising download function now triggers
+  the ranked fallback chain, and index.csv keys on (work_id, entry_id) so
+  same-title editions stop overwriting each other's ledger rows. Provider
+  adapters gain per-record error recovery, count retrieved PDF renderings
+  as success, fix e-rara's malformed CQL query, cap SBB per-page PDFs, and
+  keep the Europeana API key out of persisted metadata. Works-CSV status
+  writes round-trip untouched cells byte-identically (no more float
+  reformatting or stripped zero-padding), argparse abbreviations no longer
+  bypass the maintenance commands, and fuzzy matching transliterates
+  non-decomposable letters so Nordic and German titles match their catalog
+  records.
 - **v1.15.0** (18 July 2026) -- Deep second-round audit release. The HTTP
   layer clamps malformed negative Retry-After headers instead of crashing the
   worker, treats a negative Content-Length as unknown, and gives the circuit
