@@ -157,18 +157,26 @@ class QuotaManager:
         Args:
             state_file: Ignored (kept for backward compatibility)
         """
-        if getattr(self, "_initialized", False):
-            return
+        # Serialize first initialization under the class lock so a second
+        # thread cannot re-run the body (wiping loaded quotas and replacing
+        # the data lock) while the first is still initializing.
+        with self.__class__._lock:
+            if getattr(self, "_initialized", False):
+                return
 
-        self._quotas: dict[str, ProviderQuota] = {}
-        self._data_lock = threading.RLock()
-        self._state_manager: StateManager | None = (
-            None  # Lazy init to avoid circular imports
-        )
+            try:
+                self._quotas: dict[str, ProviderQuota] = {}
+                self._data_lock = threading.RLock()
+                self._state_manager: StateManager | None = (
+                    None  # Lazy init to avoid circular imports
+                )
 
-        # Load existing state
-        self._load_state()
-        self._initialized = True
+                # Load existing state
+                self._load_state()
+                self._initialized = True
+            except BaseException:
+                type(self)._instance = None
+                raise
         logger.debug("QuotaManager initialized")
 
     def _get_state_manager(self) -> StateManager:
@@ -263,6 +271,9 @@ class QuotaManager:
         """
         if not quota.period_start:
             quota.period_start = datetime.now(UTC).isoformat()
+            # Persist the freshly minted period start; otherwise it is lost
+            # on process exit and the window silently restarts every run.
+            self._save_state()
             return True
 
         try:
@@ -340,6 +351,10 @@ class QuotaManager:
         """
         with self._data_lock:
             quota = self._get_or_create_quota(provider_key)
+            # Roll the window first so a record without a preceding
+            # can_download in the same period does not increment (and
+            # possibly exhaust) a stale, already-expired counter.
+            self._check_and_reset_period(quota)
             quota.downloads_used += 1
 
             remaining = quota.daily_limit - quota.downloads_used
@@ -351,7 +366,7 @@ class QuotaManager:
                     provider_key,
                     quota.downloads_used,
                     quota.daily_limit,
-                    quota.reset_hours,
+                    quota.seconds_until_reset() / 3600,
                 )
             else:
                 logger.debug(

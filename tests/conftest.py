@@ -375,25 +375,33 @@ def reset_config_cache() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def reset_singletons(tmp_path: Path) -> Generator[None, None, None]:
-    """Reset StateManager and DeferredQueue singletons for each test.
+    """Reset all state-layer singletons for each test.
 
     Redirects the default state file to a temporary path so unit tests
     never write to the real .downloader_state.json in the project root.
+    QuotaManager and BackgroundRetryScheduler are reset too: they cache a
+    StateManager reference, so a stale instance would route writes to a
+    previous test's temporary state file.
     """
     from unittest.mock import patch
 
+    from main.state.background import BackgroundRetryScheduler
     from main.state.deferred import DeferredQueue
+    from main.state.quota import QuotaManager
     from main.state.store import StateManager
 
-    StateManager._instance = None
-    DeferredQueue._instance = None
+    def _reset() -> None:
+        StateManager._instance = None
+        DeferredQueue._instance = None
+        QuotaManager._instance = None
+        BackgroundRetryScheduler._instance = None
 
+    _reset()
     tmp_state = str(tmp_path / "test_state.json")
     with patch("main.state.store.DEFAULT_STATE_FILE", tmp_state):
         yield
 
-    StateManager._instance = None
-    DeferredQueue._instance = None
+    _reset()
 
 
 # ============================================================================

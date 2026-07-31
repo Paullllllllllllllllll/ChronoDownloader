@@ -264,18 +264,9 @@ class TestStateManagerDeferredItems:
         state_file = os.path.join(temp_dir, "test_state.json")
         return StateManager(state_file=state_file)
 
-    def test_add_deferred_item(self, manager: Any) -> None:
-        """add_deferred_item adds item to list."""
-        item = {"id": "item1", "title": "Test Work"}
-        manager.add_deferred_item(item)
-
-        items = manager.get_deferred_items()
-        assert len(items) == 1
-        assert items[0] == item
-
     def test_set_deferred_items_replaces_all(self, manager: Any) -> None:
         """set_deferred_items replaces entire list."""
-        manager.add_deferred_item({"id": "old"})
+        manager.set_deferred_items([{"id": "old"}])
 
         new_items = [{"id": "new1"}, {"id": "new2"}]
         manager.set_deferred_items(new_items)
@@ -284,26 +275,9 @@ class TestStateManagerDeferredItems:
         assert len(items) == 2
         assert items[0]["id"] == "new1"
 
-    def test_remove_deferred_item_by_id(self, manager: Any) -> None:
-        """remove_deferred_item removes item by ID."""
-        manager.add_deferred_item({"id": "keep"})
-        manager.add_deferred_item({"id": "remove"})
-
-        result = manager.remove_deferred_item("remove")
-
-        assert result is True
-        items = manager.get_deferred_items()
-        assert len(items) == 1
-        assert items[0]["id"] == "keep"
-
-    def test_remove_deferred_item_not_found(self, manager: Any) -> None:
-        """remove_deferred_item returns False if not found."""
-        result = manager.remove_deferred_item("nonexistent")
-        assert result is False
-
     def test_get_deferred_items_returns_copy(self, manager: Any) -> None:
         """get_deferred_items returns a copy, not internal list."""
-        manager.add_deferred_item({"id": "test"})
+        manager.set_deferred_items([{"id": "test"}])
         items = manager.get_deferred_items()
         items.append({"id": "extra"})
 
@@ -371,6 +345,56 @@ class TestStateManagerPersistence:
         # Should not raise, should create fresh state
         manager = StateManager(state_file=state_file)
         assert manager.get_quotas() == {}
+
+    def test_transient_read_error_disables_saves(
+        self, temp_dir: str, mock_config: dict[str, Any]
+    ) -> None:
+        """An unreadable (but existing) state file must not be overwritten.
+
+        A transient OSError (AV lock, share violation) is not corruption:
+        the manager starts with empty in-memory state but disables saves so
+        the intact on-disk file survives the run.
+        """
+        from unittest.mock import patch
+
+        from main.state.store import StateManager
+
+        state_file = os.path.join(temp_dir, "test_state.json")
+        payload = {"quotas": {"p": {"daily_limit": 5}}, "deferred_items": []}
+        with open(state_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        with open(state_file, encoding="utf-8") as f:
+            original = f.read()
+
+        with patch.object(
+            StateManager, "_read_state_file", side_effect=OSError("locked")
+        ):
+            manager = StateManager(state_file=state_file)
+
+        assert manager._save_disabled is True
+        # A save that would previously have clobbered the file is a no-op.
+        manager.set_quota("x", {"daily_limit": 1})
+        with open(state_file, encoding="utf-8") as f:
+            assert f.read() == original
+
+    def test_corrupt_state_file_preserved_and_no_migration(
+        self, temp_dir: str, mock_config: dict[str, Any]
+    ) -> None:
+        """A corrupt unified file is preserved as .corrupt; no legacy fallback."""
+        from unittest.mock import patch
+
+        from main.state.store import StateManager
+
+        state_file = os.path.join(temp_dir, "state.json")
+        with open(state_file, "w", encoding="utf-8") as f:
+            f.write("not valid json {{{")
+
+        with patch.object(StateManager, "_migrate_from_old_files") as migrate:
+            manager = StateManager(state_file=state_file)
+
+        migrate.assert_not_called()
+        assert manager.get_quotas() == {}
+        assert os.path.exists(os.path.join(temp_dir, "state.corrupt"))
 
 
 class TestGetStateManager:
@@ -443,7 +467,10 @@ class TestStateManagerThreadSafety:
 
         def add_items(thread_id: int) -> None:
             for i in range(5):
-                manager.add_deferred_item({"id": f"t{thread_id}_i{i}"})
+                with manager._data_lock:
+                    items = manager.get_deferred_items()
+                    items.append({"id": f"t{thread_id}_i{i}"})
+                    manager.set_deferred_items(items)
 
         threads = [threading.Thread(target=add_items, args=(i,)) for i in range(4)]
         for t in threads:

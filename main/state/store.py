@@ -91,6 +91,13 @@ class StateManager:
     _instance: StateManager | None = None
     _lock = threading.Lock()
 
+    # Instance attribute declarations (assigned under the class lock in
+    # __init__; declared here so mypy can type them across the early-return
+    # branch).
+    _initialized: bool
+    _state_file: Path
+    _save_disabled: bool
+
     def __new__(cls, state_file: str | None = None) -> StateManager:
         """Singleton pattern."""
         with cls._lock:
@@ -106,43 +113,124 @@ class StateManager:
         Args:
             state_file: Path to state file (uses config default if None)
         """
-        if getattr(self, "_initialized", False):
-            return
+        # The class lock serializes first initialization: without it a second
+        # thread constructing the singleton while the first is still inside
+        # __init__ would observe _initialized=False and re-run the body,
+        # discarding loaded state and replacing the locks mid-use.
+        with self.__class__._lock:
+            if getattr(self, "_initialized", False):
+                if state_file and Path(state_file) != self._state_file:
+                    logger.warning(
+                        "StateManager already initialized with %s; ignoring "
+                        "differing state_file %s",
+                        self._state_file,
+                        state_file,
+                    )
+                return
 
-        self._data_lock = threading.RLock()
-        self._save_lock = threading.Lock()
+            try:
+                self._data_lock = threading.RLock()
+                self._save_lock = threading.Lock()
+                # When the state file could not be read for reasons other than
+                # corruption (e.g. a transient Windows share violation), saves
+                # are disabled so the intact on-disk state is never overwritten
+                # with the empty in-memory default.
+                self._save_disabled = False
 
-        # Determine state file path (config override or user-level default,
-        # with one-time legacy CWD adoption).
-        if state_file:
-            self._state_file = Path(state_file)
-        else:
-            self._state_file = resolve_state_file_path()
+                # Determine state file path (config override or user-level
+                # default, with one-time legacy CWD adoption).
+                if state_file:
+                    self._state_file = Path(state_file)
+                else:
+                    self._state_file = resolve_state_file_path()
 
-        with contextlib.suppress(OSError):
-            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+                with contextlib.suppress(OSError):
+                    self._state_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # State sections
-        self._state: dict[str, Any] = {
-            "quotas": {},
-            "deferred_items": [],
-            "last_updated": None,
-            "version": "2.0",
-        }
+                # State sections
+                self._state: dict[str, Any] = {
+                    "quotas": {},
+                    "deferred_items": [],
+                    "last_updated": None,
+                    "version": "2.0",
+                }
 
-        # Load existing state (with migration from old files)
-        self._load_state()
-        self._initialized = True
+                # Load existing state (with migration from old files)
+                self._load_state()
+                self._initialized = True
+            except BaseException:
+                # Do not leave a half-built singleton behind: a later
+                # construction attempt must start fresh.
+                type(self)._instance = None
+                raise
         logger.debug("StateManager initialized with file: %s", self._state_file)
+
+    def _read_state_file(self) -> dict[str, Any]:
+        """Read and parse the state file, retrying transient OS errors.
+
+        On Windows a transiently open state file (AV scanner, file viewer)
+        raises PermissionError; a short bounded retry mirrors
+        ``api.core.atomic._atomic_replace`` so a momentary lock is not
+        misdiagnosed as corruption.
+        """
+        import time
+
+        attempts = 5
+        for attempt in range(attempts):
+            try:
+                with open(self._state_file, encoding="utf-8") as f:
+                    return cast(dict[str, Any], json.load(f))
+            except OSError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(0.1 * (attempt + 1))
+        raise OSError("unreachable")  # pragma: no cover
 
     def _load_state(self) -> None:
         """Load state from disk, migrating from old files if needed."""
         # Try to load unified state file first
         if self._state_file.exists():
             try:
-                with open(self._state_file, encoding="utf-8") as f:
-                    data = json.load(f)
+                data = self._read_state_file()
+            except OSError as e:
+                # The file exists but cannot be read (permissions, transient
+                # lock). This is NOT corruption: keep the on-disk file intact
+                # by disabling saves for this process rather than overwriting
+                # it later with the empty in-memory default.
+                self._save_disabled = True
+                logger.error(
+                    "Cannot read state file %s (%s); state persistence is "
+                    "disabled for this run to protect the existing file.",
+                    self._state_file,
+                    e,
+                )
+                return
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+                # Preserve the corrupt file for inspection instead of
+                # silently resetting quota counters and the deferred queue.
+                corrupt_path = self._state_file.with_suffix(".corrupt")
+                try:
+                    import shutil
 
+                    shutil.copy2(self._state_file, corrupt_path)
+                    logger.error(
+                        "State file %s is corrupt (%s); preserved a copy at "
+                        "%s and starting with fresh state.",
+                        self._state_file,
+                        e,
+                        corrupt_path,
+                    )
+                except Exception:
+                    logger.error(
+                        "State file %s is corrupt (%s); starting with fresh state.",
+                        self._state_file,
+                        e,
+                    )
+                # Deliberately no fall-through to legacy migration: stale
+                # legacy files must not replace the (corrupt but preserved)
+                # unified state.
+                return
+            else:
                 self._state["quotas"] = data.get("quotas", {})
                 self._state["deferred_items"] = data.get("deferred_items", [])
                 self._state["version"] = data.get("version", "1.0")
@@ -153,27 +241,6 @@ class StateManager:
                     len(self._state["deferred_items"]),
                 )
                 return
-            except Exception as e:
-                # Preserve the unreadable file for inspection instead of
-                # silently resetting quota counters and the deferred queue.
-                corrupt_path = self._state_file.with_suffix(".corrupt")
-                try:
-                    import shutil
-
-                    shutil.copy2(self._state_file, corrupt_path)
-                    logger.error(
-                        "State file %s is unreadable (%s); preserved a copy at "
-                        "%s and starting with fresh state.",
-                        self._state_file,
-                        e,
-                        corrupt_path,
-                    )
-                except Exception:
-                    logger.error(
-                        "State file %s is unreadable (%s); starting with fresh state.",
-                        self._state_file,
-                        e,
-                    )
 
         # Migration: Try to load from old separate files
         self._migrate_from_old_files()
@@ -212,8 +279,16 @@ class StateManager:
             logger.info("Migration complete. Old files can be deleted manually.")
 
     def _save_state(self) -> None:
-        """Save state to disk atomically (temp file + os.replace)."""
-        with self._save_lock:
+        """Save state to disk atomically (temp file + os.replace).
+
+        The data lock is held while serializing so a concurrent mutator (or a
+        ``force_save`` from another thread) cannot change ``self._state``
+        mid-``json.dumps`` (which would raise and silently drop the save).
+        """
+        if self._save_disabled:
+            logger.debug("State persistence disabled; skipping save.")
+            return
+        with self._data_lock, self._save_lock:
             try:
                 self._state["last_updated"] = datetime.now(UTC).isoformat()
                 atomic_write_json(str(self._state_file), self._state)
@@ -284,37 +359,6 @@ class StateManager:
         with self._data_lock:
             self._state["deferred_items"] = items
             self._save_state()
-
-    def add_deferred_item(self, item: dict[str, Any]) -> None:
-        """Add a deferred item.
-
-        Args:
-            item: Deferred item dict
-        """
-        with self._data_lock:
-            self._state["deferred_items"].append(item)
-            self._save_state()
-
-    def remove_deferred_item(self, item_id: str) -> bool:
-        """Remove a deferred item by ID.
-
-        Args:
-            item_id: Item ID to remove
-
-        Returns:
-            True if removed, False if not found
-        """
-        with self._data_lock:
-            original_len = len(self._state["deferred_items"])
-            self._state["deferred_items"] = [
-                item
-                for item in self._state["deferred_items"]
-                if item.get("id") != item_id
-            ]
-            if len(self._state["deferred_items"]) < original_len:
-                self._save_state()
-                return True
-            return False
 
     # === General Methods ===
 

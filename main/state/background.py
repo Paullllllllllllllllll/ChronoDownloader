@@ -67,31 +67,33 @@ class BackgroundRetryScheduler:
 
     def __init__(self) -> None:
         """Initialize the eager deferred-retry helper."""
-        if getattr(self, "_initialized", False):
-            return
+        # Serialize first initialization under the class lock so a second
+        # thread cannot re-run the body while the first is mid-initialization.
+        with self.__class__._lock:
+            if getattr(self, "_initialized", False):
+                return
 
-        # Components (bound lazily on first retry_ready_now call)
-        self._queue: DeferredQueue | None = None
-        self._quota_manager: QuotaManager | None = None
+            # Components (bound lazily on first retry_ready_now call)
+            self._queue: DeferredQueue | None = None
+            self._quota_manager: QuotaManager | None = None
 
-        # Provider download functions (set during integration)
-        self._provider_download_fns: dict[str, Callable[..., Any]] = {}
+            # Provider download functions (set during integration)
+            self._provider_download_fns: dict[str, Callable[..., Any]] = {}
 
-        # Statistics
-        self._stats_lock = threading.Lock()
-        self._stats = {
-            "checks": 0,
-            "retries_attempted": 0,
-            "retries_succeeded": 0,
-            "retries_failed": 0,
-            "retries_redeferred": 0,
-        }
+            # Statistics
+            self._stats_lock = threading.Lock()
+            self._stats = {
+                "retries_attempted": 0,
+                "retries_succeeded": 0,
+                "retries_failed": 0,
+                "retries_redeferred": 0,
+            }
 
-        # Callbacks
-        self._on_retry_success: Callable[[DeferredItem], None] | None = None
-        self._on_retry_failure: Callable[[DeferredItem, str], None] | None = None
+            # Callbacks
+            self._on_retry_success: Callable[[DeferredItem], None] | None = None
+            self._on_retry_failure: Callable[[DeferredItem, str], None] | None = None
 
-        self._initialized = True
+            self._initialized = True
         logger.debug("BackgroundRetryScheduler initialized (eager-retry mode)")
 
     def set_provider_download_fn(
@@ -241,18 +243,27 @@ class BackgroundRetryScheduler:
 
         provider_key = item.provider_key
 
-        # Check if we have a download function for this provider
+        # Check if we have a download function for this provider. Mark the
+        # item failed rather than skipping: a skipped item would stay
+        # "pending" forever (cleanup only prunes completed/failed items) and
+        # be re-selected on every run.
         download_fn = self._provider_download_fns.get(provider_key)
         if not download_fn:
-            logger.warning(
-                "No download function registered for provider %s, skipping %s",
-                provider_key,
-                item.title,
-            )
+            reason = f"No download function registered for provider {provider_key}"
+            logger.warning("%s; failing deferred item %s", reason, item.title)
+            if self._queue:
+                self._queue.mark_failed(item.id, reason)
+            with self._stats_lock:
+                self._stats["retries_failed"] += 1
+            if self._on_retry_failure:
+                self._on_retry_failure(item, reason)
             return False
 
-        # Check quota before attempting
-        if self._quota_manager:
+        # Check quota before attempting. Only consult the quota manager for
+        # providers that actually have quotas: can_download would otherwise
+        # create and persist a bogus default quota record (10/day) for a
+        # non-quota provider.
+        if self._quota_manager and self._quota_manager.has_quota(provider_key):
             can_download, wait_seconds = self._quota_manager.can_download(provider_key)
             if not can_download:
                 # Still quota limited - update reset time and skip.

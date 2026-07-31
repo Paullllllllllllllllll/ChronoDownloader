@@ -36,9 +36,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Legacy constant (kept for backward compatibility)
-DEFAULT_QUEUE_FILE = ".deferred_queue.json"
-
 
 @dataclass
 class DeferredItem:
@@ -204,24 +201,35 @@ class DeferredQueue:
         Args:
             queue_file: Ignored (kept for backward compatibility)
         """
-        if getattr(self, "_initialized", False):
-            return
+        # Serialize first initialization under the class lock so a second
+        # thread (e.g. a download worker deferring an item while the main
+        # thread is still constructing the queue) cannot re-run the body,
+        # wiping loaded items and replacing the data lock mid-use.
+        with self.__class__._lock:
+            if getattr(self, "_initialized", False):
+                return
 
-        self._items: dict[str, DeferredItem] = {}
-        self._data_lock = threading.RLock()
-        self._save_lock = threading.Lock()
-        self._state_manager: StateManager | None = (
-            None  # Lazy init to avoid circular imports
-        )
+            try:
+                self._items: dict[str, DeferredItem] = {}
+                self._data_lock = threading.RLock()
+                self._save_lock = threading.Lock()
+                self._state_manager: StateManager | None = (
+                    None  # Lazy init to avoid circular imports
+                )
 
-        # Get max retries from config
-        cfg = get_config()
-        deferred_cfg = cfg.get("deferred", {})
-        self._max_retries = int(deferred_cfg.get("max_retries", 5))
+                # Get max retries from config
+                cfg = get_config()
+                deferred_cfg = cfg.get("deferred", {})
+                self._max_retries = int(deferred_cfg.get("max_retries", 5))
 
-        # Load existing queue
-        self._load_queue()
-        self._initialized = True
+                # Load existing queue
+                self._load_queue()
+                self._initialized = True
+            except BaseException:
+                # Do not leave a half-built singleton behind (get_config may
+                # raise); a later construction attempt must start fresh.
+                type(self)._instance = None
+                raise
         logger.debug("DeferredQueue initialized")
 
     def _get_state_manager(self) -> StateManager:
@@ -257,11 +265,17 @@ class DeferredQueue:
             logger.warning("Failed to load deferred queue: %s", e)
 
     def _save_queue(self) -> None:
-        """Save queue to StateManager."""
+        """Save queue to StateManager.
+
+        The data lock is acquired (re-entrantly for mutators that already
+        hold it) so external callers cannot serialize ``self._items`` while
+        another thread mutates it mid-iteration.
+        """
+        with self._data_lock:
+            items_data = [item.to_dict() for item in self._items.values()]
         with self._save_lock:
             try:
                 state_manager = self._get_state_manager()
-                items_data = [item.to_dict() for item in self._items.values()]
                 state_manager.set_deferred_items(items_data)
             except Exception as e:
                 logger.warning("Failed to save deferred queue: %s", e)

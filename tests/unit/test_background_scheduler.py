@@ -200,6 +200,40 @@ class TestRetryItem:
         result = s._retry_item(item)
         assert result is False
 
+    def test_no_download_fn_marks_item_failed(self) -> None:
+        """An item for an unregistered provider is failed, not skipped.
+
+        A merely-skipped item stays pending forever: cleanup prunes only
+        completed/failed items, so it would be re-selected on every run.
+        """
+        s = BackgroundRetryScheduler()
+        s._queue = MagicMock()
+        s._provider_download_fns = {}
+
+        item = MagicMock()
+        item.title = "Test"
+        item.provider_key = "gone_provider"
+        item.id = "item1"
+
+        assert s._retry_item(item) is False
+        s._queue.mark_failed.assert_called_once()
+        assert s.get_stats()["retries_failed"] == 1
+
+    def test_non_quota_provider_skips_quota_check(self) -> None:
+        """can_download must not be consulted for providers without quotas.
+
+        can_download would create and persist a bogus default quota record
+        (10/day) for the non-quota provider.
+        """
+        s = BackgroundRetryScheduler()
+        s._queue = MagicMock()
+        s._quota_manager = MagicMock()
+        s._quota_manager.has_quota.return_value = False
+        s._provider_download_fns = {"ia": MagicMock(return_value=True)}
+
+        assert s._retry_item(_mock_item()) is True
+        s._quota_manager.can_download.assert_not_called()
+
     def test_skips_when_quota_not_ready(self) -> None:
         s = BackgroundRetryScheduler()
         s._queue = MagicMock()

@@ -264,6 +264,32 @@ class TestQuotaManagerOperations:
         status = manager.get_quota_status("test_provider")
         assert status["downloads_used"] == 1
 
+    def test_record_download_resets_expired_period_first(self, manager: Any) -> None:
+        """Recording into an expired window rolls the period before counting.
+
+        Without the reset, a record without a preceding can_download in the
+        same period increments the stale counter and can mark the provider
+        exhausted against a window that ended hours ago.
+        """
+        from main.state.quota import ProviderQuota
+
+        old_start = datetime.now(UTC) - timedelta(hours=48)
+        quota = ProviderQuota(
+            provider_key="test_provider",
+            daily_limit=10,
+            reset_hours=24,
+            downloads_used=10,
+            period_start=old_start.isoformat(),
+            exhausted_at=old_start.isoformat(),
+        )
+        manager._quotas["test_provider"] = quota
+
+        remaining = manager.record_download("test_provider")
+
+        assert quota.downloads_used == 1
+        assert remaining == 9
+        assert quota.exhausted_at is None
+
     def test_record_download_marks_exhausted(self, manager: Any) -> None:
         """record_download marks quota exhausted when limit reached."""
         from main.state.quota import ProviderQuota
