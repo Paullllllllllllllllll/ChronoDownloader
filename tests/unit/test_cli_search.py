@@ -283,6 +283,23 @@ class TestRunSearchCliCsv:
         assert mock_search.call_args.args[0] == "First Book"
 
     @patch("main.cli.commands.search.pipeline.search_work")
+    def test_filters_matching_nothing_is_not_a_usage_error(
+        self, mock_search: MagicMock, tmp_path: Path
+    ) -> None:
+        """The batch path returns 0 for the same filters; exit 2 is reserved
+        for a missing or invalid CSV, not an empty slice."""
+        args = self._args(
+            [
+                self._write_csv(tmp_path),
+                "--search-only",
+                "--entry-ids",
+                "E999",
+            ]
+        )
+        assert run_search_cli(args, {}, logger) == EXIT_OK
+        mock_search.assert_not_called()
+
+    @patch("main.cli.commands.search.pipeline.search_work")
     def test_partial_match_exits_one(
         self, mock_search: MagicMock, tmp_path: Path
     ) -> None:

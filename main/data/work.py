@@ -134,10 +134,15 @@ def check_work_status(
 
     elif resume_mode == "skip_if_has_objects" and os.path.isdir(objects_dir):
         try:
+            # Ignore .part files: a hard kill (or a locked-file removal
+            # failure) can still leave one behind, and skipping the work
+            # forever on the strength of an incomplete stream is the very
+            # trap the atomic .part path exists to avoid.
             files = [
                 f
                 for f in os.listdir(objects_dir)
-                if os.path.isfile(os.path.join(objects_dir, f))
+                if not f.endswith(".part")
+                and os.path.isfile(os.path.join(objects_dir, f))
             ]
             if files:
                 return True, f"objects/ contains {len(files)} file(s)"

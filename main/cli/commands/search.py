@@ -172,6 +172,13 @@ def run_search_cli(
         queries = maybe_queries
 
     if not queries:
+        # A CSV that --entry-ids or --limit filtered down to nothing is not a
+        # usage error: the batch path returns 0 for exactly the same filters,
+        # and --limit 0 is an explicitly permitted value. Exit code 2 is
+        # reserved for a missing or invalid CSV and the like.
+        if getattr(args, "entry_ids", None) or getattr(args, "limit", None) is not None:
+            logger.info("No works to search after applying entry/limit filters.")
+            return EXIT_OK
         logger.error("No searchable works found.")
         return EXIT_USAGE
 

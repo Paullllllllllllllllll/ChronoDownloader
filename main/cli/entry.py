@@ -34,6 +34,16 @@ def _run_verify_command(args: object) -> int:
     """Run ``--verify`` and return an exit code (1 if any work was partial)."""
     from .commands.verify import run_verify
 
+    # --verify short-circuits before run_cli, which is the only caller of
+    # basicConfig. Without a handler, logging.lastResort dropped the closing
+    # summary entirely and printed the VERIFY warnings unformatted, and
+    # --log-level had no effect. stderr keeps a --json stdout stream clean.
+    logging.basicConfig(
+        level=getattr(logging, getattr(args, "log_level", "INFO"), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+        handlers=[logging.StreamHandler(stream=sys.stderr)],
+    )
+
     output_dir = getattr(args, "output_dir", "downloaded_works")
     stats = run_verify(output_dir)
     if getattr(args, "json_summary", False):

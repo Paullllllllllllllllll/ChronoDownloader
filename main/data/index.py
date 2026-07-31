@@ -246,7 +246,13 @@ def read_index_csv(base_output_dir: str) -> pd.DataFrame | None:
         return None
 
     try:
-        return pd.read_csv(index_path, encoding="utf-8")
+        # Pin the two upsert-key columns to text. dtype inference reads a
+        # zero-padded "00123" as int 123, so --verify's write-back no longer
+        # matched its own row and appended a titleless duplicate on every run
+        # while the real row kept advertising "completed".
+        return pd.read_csv(
+            index_path, encoding="utf-8", dtype={"work_id": str, "entry_id": str}
+        )
     except Exception:
         logger.exception("Failed to read index.csv")
         return None

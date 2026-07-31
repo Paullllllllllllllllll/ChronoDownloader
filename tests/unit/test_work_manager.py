@@ -179,6 +179,20 @@ class TestCheckWorkStatus:
 
         assert should_skip is False
 
+    def test_skip_if_has_objects_ignores_part_files(self, temp_dir: str) -> None:
+        """A leftover .part holds no usable content. Counting it skipped the
+        work forever -- the very trap the atomic .part path exists to avoid."""
+        work_dir = os.path.join(temp_dir, "test_work")
+        objects_dir = os.path.join(work_dir, "objects")
+        os.makedirs(objects_dir)
+
+        with open(os.path.join(objects_dir, "book_ia.pdf.part"), "w") as f:
+            f.write("partial")
+
+        should_skip, _reason = check_work_status(work_dir, "skip_if_has_objects")
+
+        assert should_skip is False
+
     def test_reprocess_all_never_skips(self, temp_dir: str) -> None:
         """Test reprocess_all mode never skips."""
         work_dir = os.path.join(temp_dir, "test_work")

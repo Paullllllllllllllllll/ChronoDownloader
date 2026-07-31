@@ -205,7 +205,9 @@ Examples:
         "--json",
         dest="json_summary",
         action="store_true",
-        help="Emit a single machine-readable JSON summary line on stdout at exit.",
+        help="Emit machine-readable JSON on stdout: one summary line at exit "
+        "for a CSV batch run and for --verify, one NDJSON line per work for "
+        "--search/--search-only. Ignored by the other commands.",
     )
 
     parser.add_argument(

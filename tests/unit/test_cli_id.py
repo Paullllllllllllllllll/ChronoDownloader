@@ -12,7 +12,7 @@ import pytest
 
 from main.cli import create_cli_parser
 from main.cli.commands.identifier import run_identifier_cli as _run_identifier_cli
-from main.cli.exit_codes import EXIT_FAILURES
+from main.cli.exit_codes import EXIT_FAILURES, EXIT_OK
 from main.cli.overrides import _looks_like_cli_invocation
 
 # ============================================================================
@@ -337,3 +337,21 @@ class TestRunIdentifierCLI:
         assert rc == EXIT_FAILURES
         mock_process.assert_called_once()
         assert any("partial" in r.message.lower() for r in caplog.records)
+
+    @patch(
+        "main.cli.commands.identifier.PROVIDERS",
+        {
+            "google_books": (MagicMock(), MagicMock(), "Google Books"),
+        },
+    )
+    def test_native_dry_run_creates_no_work_directory(self) -> None:
+        """--dry-run is documented as writing no work directories; the native
+        branch called makedirs before the dry-run check."""
+        args = self._make_args(id="gb_test_id", provider="google_books")
+        args.dry_run = True
+        logger = logging.getLogger("test")
+
+        rc = _run_identifier_cli(args, {}, logger)
+
+        assert rc == EXIT_OK
+        assert not os.path.isdir(self._output_dir) or os.listdir(self._output_dir) == []

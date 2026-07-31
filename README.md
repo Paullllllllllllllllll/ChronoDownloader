@@ -35,7 +35,7 @@ extraction pipeline.
 ## Features
 
 - **Multi-provider search** across 17 digital libraries with
-  configurable parallel searches (up to 5 concurrent)
+  configurable parallel searches (`selection.max_parallel_searches`)
 - **Two execution modes**: interactive guided workflow with colored
   console UI, or scriptable CLI for automation and batch jobs
 - **IIIF support**: native IIIF Presentation v2/v3 manifest
@@ -371,13 +371,16 @@ optional in interactive).
 - `--dry-run` -- search and select only, skip downloads
 - `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` -- logging
   verbosity (default: `INFO`)
-- `--config PATH` -- configuration JSON file
-  (default: `config.json`)
+- `--config PATH` -- configuration JSON file (default: the
+  `CHRONO_CONFIG_PATH` environment variable, else `config.json`)
 - `--interactive` / `--cli` / `--non-interactive` -- force execution
   mode (override the config-file mode)
-- `--json` -- emit one machine-readable JSON summary line on stdout
-  at exit (files processed / succeeded / failed / deferred / skipped,
-  output paths)
+- `--json` -- emit machine-readable JSON on stdout: one summary line
+  at exit for a CSV batch run (processed / succeeded / failed /
+  deferred / skipped, csv and output paths) and for `--verify`
+  (total / ok / partial); one NDJSON line per work for `--search` and
+  `--search-only`. The direct-download (`--iiif`, `--id`),
+  provider-listing, and quota commands ignore it.
 - `--verify` -- verify the works already downloaded under
   `--output_dir` (non-empty objects, PDF/EPUB magic bytes, and
   recorded page counts) and flip any incomplete work to `partial`
@@ -400,7 +403,7 @@ optional in interactive).
 - `--provider KEY` -- provider key for `--id` lookup
   (auto-detected when possible)
 - `--name STEM` -- custom naming stem for `--iiif`/`--id`
-  downloads
+  downloads; repeatable, paired positionally with repeated `--iiif`
 
 **Provider control**:
 
@@ -633,7 +636,7 @@ breaker and set the threshold to 2--3 with a cooldown of
 - `max_files`: maximum files per work (for Google Books, the
   direct PDF/EPUB download cap, distinct from `max_pages`)
 - `free_only`: only download free/public domain works
-- `prefer`: preferred format (`pdf` or `images`)
+- `prefer`: preferred download format (`pdf` or `epub`)
 - `allow_drm`: whether to allow DRM-protected content
 
 To adjust for slow providers, increase `delay_ms` and
@@ -673,7 +676,7 @@ To adjust for slow providers, increase `delay_ms` and
 ```
 
 - `resume_mode`: how to handle previously processed works
-  - `skip_completed`: skip if `work.json` exists
+  - `skip_completed`: skip if `work.json` records `status=completed`
   - `skip_if_has_objects`: skip if `objects/` has files
   - `resume_from_csv`: skip if `retrievable=True` in CSV
   - `reprocess_all`: always reprocess
@@ -691,7 +694,8 @@ To adjust for slow providers, increase `delay_ms` and
   (1 = sequential)
 - `provider_concurrency`: per-provider concurrent download
   limits; prevents overwhelming rate-limited APIs
-- `worker_timeout_s`: maximum seconds per download task
+- `worker_timeout_s`: total ceiling in seconds for the download phase
+  (the wait for all workers plus the shutdown), not a per-task limit
 
 ### 5. Download Budget Limits
 
@@ -837,9 +841,13 @@ multiple exist (`_2.pdf`).
 ### Index File
 
 `index.csv` is a thread-safe ledger with one row per work, keyed by
-`work_id`: re-processing a work updates its row in place (upsert)
-instead of appending duplicates, and the full column set is always
-written.
+`(work_id, entry_id)`: re-processing a work updates its row in place
+(upsert) instead of appending duplicates, and the full column set is
+always written. Two editions of the same title share a `work_id`
+(a hash of title and creator), so the entry id is part of the key.
+The ledger covers the search path; direct-IIIF downloads (`--iiif`,
+`--id`, and CSV rows carrying `direct_link`) record their result in
+`work.json` only.
 
 | Column | Description |
 |--------|-------------|
@@ -861,7 +869,10 @@ written.
 A work is `completed` only when every expected page arrived;
 page-level gaps yield `partial`, which is not treated as
 retrievable and is picked up again on the next run (and by
-`--verify`).
+`--verify`). Page counts are recorded on the direct-IIIF path,
+where the manifest is the download plan; provider downloads report
+success or failure rather than a page tally, so `pages_expected` and
+`pages_downloaded` are populated in `index.csv` only by `--verify`.
 
 ### work.json
 

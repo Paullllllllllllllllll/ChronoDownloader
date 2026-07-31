@@ -296,6 +296,39 @@ class TestVerifyCommand:
         assert str(df.loc[0, "status"]) == "partial"
         assert str(df.loc[0, "entry_id"]) == "E1"
 
+    def test_verify_matches_zero_padded_entry_ids(self, tmp_path: Any) -> None:
+        """dtype inference read "00123" back as int 123, so the upsert key
+        never matched and every run appended one titleless duplicate while
+        the real row kept advertising "completed"."""
+        from main.cli.commands.verify import run_verify
+
+        out_dir = str(tmp_path / "out")
+        work_dir = self._make_work(
+            out_dir,
+            "bad_work",
+            {"item.pdf": b"<html>error page</html>"},
+            work_json={"status": "completed"},
+        )
+        index_path = self._write_index(
+            out_dir,
+            [
+                {
+                    "work_id": "W1",
+                    "entry_id": "00123",
+                    "work_dir": work_dir,
+                    "title": "A Work",
+                    "status": "completed",
+                }
+            ],
+        )
+
+        run_verify(out_dir)
+
+        df = pd.read_csv(index_path, dtype=str)
+        assert len(df) == 1
+        assert str(df.loc[0, "entry_id"]) == "00123"
+        assert str(df.loc[0, "status"]) == "partial"
+
     def test_verify_skips_rows_that_were_never_downloaded(self, tmp_path: Any) -> None:
         """no_match/failed/deferred rows have empty directories by
         construction; verifying them would report a spurious partial."""

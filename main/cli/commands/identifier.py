@@ -75,15 +75,18 @@ def run_identifier_cli(
                 f"{entry_id}_{pkey}".replace("/", "_").replace("\\", "_")
             )
             work_dir = os.path.join(output_dir, dir_name)
-            os.makedirs(work_dir, exist_ok=True)
 
             if dry_run:
+                # Before makedirs: --dry-run is documented as writing no work
+                # directories, and the IIIF branch below honors that.
                 logger.info(
                     "Dry-run: would download '%s' via native %s download",
                     identifier,
                     pkey,
                 )
                 return EXIT_OK
+
+            os.makedirs(work_dir, exist_ok=True)
 
             try:
                 ok = download_by_native_provider(
