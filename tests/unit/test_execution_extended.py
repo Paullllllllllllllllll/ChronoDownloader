@@ -517,6 +517,74 @@ class TestRunParallelDirectIIIF:
         mock_process.assert_called_once()
 
 
+class TestRunParallelNoMatchStats:
+    """A genuine no-match must count as processed+failed, as it does
+    sequentially: the CLI derives its exit code from ``failed``, so an
+    all-no-match batch used to exit 0 in parallel mode and 1 sequentially."""
+
+    @patch("main.orchestration.execution.pipeline.search_and_select", return_value=None)
+    @patch(
+        "main.orchestration.execution.is_direct_download_enabled", return_value=False
+    )
+    @patch("main.orchestration.execution.get_parallel_download_config")
+    def test_no_match_rows_counted_as_failed(
+        self,
+        mock_cfg: MagicMock,
+        mock_direct_enabled: MagicMock,
+        mock_search: MagicMock,
+    ) -> None:
+        import logging
+
+        from main.orchestration.execution import _run_parallel
+
+        mock_cfg.return_value = {
+            "max_parallel_downloads": 2,
+            "provider_concurrency": {},
+            "worker_timeout_s": 0,
+        }
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book A", "Book B"],
+                "main_author": ["Author A", "Author B"],
+                "entry_id": ["E001", "E002"],
+            }
+        )
+        stats = _run_parallel(
+            works_df,
+            "/output",
+            {},
+            None,
+            logging.getLogger("test"),
+        )
+        assert stats["failed"] == 2
+        assert stats["processed"] == 2
+        assert stats["succeeded"] == 0
+
+
+class TestProcessDirectIIIFCreator:
+    """The creator must reach compute_work_dir, or a direct-IIIF work lands in
+    a different directory than the search path computes for the same work when
+    ``naming.include_creator_in_work_dir`` is enabled."""
+
+    @patch("main.orchestration.execution.download_from_iiif_manifest")
+    @patch("main.data.work.compute_work_dir")
+    def test_creator_forwarded_to_compute_work_dir(
+        self, mock_dir: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        mock_dir.return_value = ("/out/work", "work")
+        mock_dl.return_value = {"success": True, "provider": "Gallica"}
+
+        process_direct_iiif(
+            manifest_url="https://example.org/manifest.json",
+            output_dir="/out",
+            entry_id="E001",
+            title="Le Viandier",
+            creator="Taillevent",
+        )
+
+        assert mock_dir.call_args.kwargs["creator"] == "Taillevent"
+
+
 # ============================================================================
 # create_interactive_callbacks
 # ============================================================================

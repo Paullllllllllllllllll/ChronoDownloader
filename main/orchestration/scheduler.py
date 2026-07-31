@@ -214,6 +214,18 @@ def get_parallel_download_config() -> dict[str, Any]:
     # positive value to enforce a hard ceiling per batch wait.
     dl.setdefault("worker_timeout_s", 0)
 
+    # Quota-limited providers are pinned to one concurrent download whatever
+    # the config says: the pipeline's quota check and the download it guards
+    # are only serialized against each other by this semaphore, so a larger
+    # value would let two workers both clear a quota with one unit left.
+    from main.orchestration.pipeline import QUOTA_LIMITED_PROVIDERS
+
+    concurrency = dict(dl.get("provider_concurrency") or {})
+    for quota_provider in QUOTA_LIMITED_PROVIDERS:
+        if concurrency.get(quota_provider) != 1:
+            concurrency[quota_provider] = 1
+    dl["provider_concurrency"] = concurrency
+
     return dl
 
 

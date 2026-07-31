@@ -65,12 +65,13 @@ def _read_existing_rows(index_path: str) -> list[dict[str, str]]:
             return []
     except OSError:
         return []
-    try:
-        with open(index_path, encoding="utf-8", newline="") as f:
-            return list(csv.DictReader(f))
-    except Exception:
-        logger.exception("Failed to read existing index.csv; starting fresh")
-        return []
+    # A read failure is deliberately NOT swallowed into an empty list: the
+    # caller rewrites the whole file, so "starting fresh" after a transient
+    # PermissionError (AV scanner, file open in Excel) or a decode error
+    # replaced the entire ledger with the single row being written. Letting it
+    # propagate makes update_index_csv skip the write and keep the file intact.
+    with open(index_path, encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
 
 
 def _index_stat(index_path: str) -> tuple[float, int]:
@@ -134,9 +135,13 @@ def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
                         continue
                     if str(existing.get("entry_id", "") or "") != entry_id:
                         continue
+                    # Keyed on presence, not on None: build_index_row always
+                    # supplies every column and uses None for "no selection",
+                    # so a value-based test left a stale provider, source id
+                    # and item URL on a row that had become no_match.
                     merged = {
                         col: normalized[col]
-                        if row.get(col) is not None
+                        if col in row
                         else _cell(existing.get(col))
                         for col in INDEX_COLUMNS
                     }
@@ -166,7 +171,11 @@ def _render_csv(rows: list[dict[str, str]]) -> str:
     import io
 
     out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=INDEX_COLUMNS, extrasaction="ignore")
+    # lineterminator pinned to "\n": csv.DictWriter defaults to "\r\n", which
+    # atomic_write_text (newline="\n") then writes through literally.
+    writer = csv.DictWriter(
+        out, fieldnames=INDEX_COLUMNS, extrasaction="ignore", lineterminator="\n"
+    )
     writer.writeheader()
     for r in rows:
         writer.writerow({col: r.get(col, "") for col in INDEX_COLUMNS})

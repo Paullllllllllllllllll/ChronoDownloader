@@ -336,6 +336,25 @@ class TestMarkSuccess:
         assert row[STATUS_COL] == "True"
         assert row[LINK_COL] == "https://x/y"
 
+    def test_lf_line_endings_preserved_after_status_write(self, temp_dir: str) -> None:
+        """_save_csv pins lineterminator="\\n": a status write on an LF works
+        CSV must keep LF endings, not rewrite the whole file as CRLF (the
+        Windows default for pandas' unpinned lineterminator).
+        """
+        csv_path = os.path.join(temp_dir, "lf_ledger.csv")
+        with open(csv_path, "wb") as f:
+            f.write(
+                b"entry_id,short_title,retrievable,link\n"
+                b"E0001,Le Viandier,,\n"
+                b"E0002,Opera,,\n"
+            )
+
+        assert mark_success(csv_path, "E0001", "https://example.com/item") is True
+
+        with open(csv_path, "rb") as f:
+            data = f.read()
+        assert b"\r\n" not in data
+
 
 class TestMarkFailed:
     """Tests for mark_failed function."""

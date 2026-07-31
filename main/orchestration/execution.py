@@ -242,8 +242,12 @@ def process_direct_iiif(
     from main.data.work import compute_work_dir
 
     dir_title = title or "iiif_download"
+    # creator must be forwarded: with naming.include_creator_in_work_dir
+    # enabled, omitting it puts a direct-IIIF work in a different directory
+    # than the same work downloaded through the search path, and the
+    # no-match/resume bookkeeping then looks in the wrong place.
     work_dir, _work_dir_name = compute_work_dir(
-        output_dir, str(entry_id) if entry_id else None, dir_title
+        output_dir, str(entry_id) if entry_id else None, dir_title, creator=creator
     )
 
     dl_result = download_from_iiif_manifest(
@@ -449,7 +453,6 @@ def _run_sequential(
     succeeded = 0
     failed = 0
     skipped = 0
-    direct_iiif_count = 0
 
     for index, row in works_df.iterrows():
         try:
@@ -465,7 +468,6 @@ def _run_sequential(
                     title if not title_missing else entry_id,
                     direct_link,
                 )
-                direct_iiif_count += 1
                 result = process_direct_iiif(
                     manifest_url=direct_link,
                     output_dir=output_dir,
@@ -597,6 +599,9 @@ def _run_parallel(
     # their outcomes never reach scheduler.get_stats(); count them locally.
     direct_iiif_succeeded = 0
     direct_iiif_failed = 0
+    # Genuine no-matches never reach the scheduler, so its failure counter
+    # cannot see them; sequential mode counts them as failed.
+    no_match_failed = 0
 
     # Default callbacks if none provided
     def default_on_submit(task: DownloadTask) -> None:
@@ -796,21 +801,38 @@ def _run_parallel(
                     continue
 
                 if task:
-                    # Submit download to worker pool
-                    scheduler.submit(task, pipeline.execute_download)
-                elif csv_path and entry_id:
+                    # Submit download to worker pool. A submission failure is
+                    # per-row like the search failure above; without this guard
+                    # it aborted the batch with every later row unsearched.
+                    try:
+                        scheduler.submit(task, pipeline.execute_download)
+                    except Exception:
+                        logger.exception(
+                            "Failed to submit download for row %s; skipping", index
+                        )
+                        skipped_count += 1
+                        continue
+                else:
                     # No task means either a resume-skip or a genuine no-match.
                     # Mirror sequential mode: mark genuine no-matches failed in
                     # the CSV, but never overwrite a resume-skipped (already
                     # completed) work.
-                    _mark_no_match_failed(
-                        csv_path,
-                        output_dir,
-                        str(entry_id),
-                        str(title),
-                        logger,
-                        creator=None if pd.isna(creator) else str(creator),
-                    )
+                    if csv_path and entry_id:
+                        _mark_no_match_failed(
+                            csv_path,
+                            output_dir,
+                            str(entry_id),
+                            str(title),
+                            logger,
+                            creator=None if pd.isna(creator) else str(creator),
+                        )
+                    # Count the outcome regardless of whether a CSV is in play:
+                    # sequential mode counts the same no-match as processed and
+                    # failed, and the CLI derives its exit code from "failed",
+                    # so an all-no-match batch used to exit 0 in parallel mode
+                    # and 1 in sequential mode.
+                    no_match_failed += 1
+                    actual_submitted[0] += 1
 
         # Phase 2: Wait for all downloads to complete
         pending = scheduler.pending_count
@@ -874,7 +896,7 @@ def _run_parallel(
     return {
         "processed": actual_submitted[0],
         "succeeded": final_stats["succeeded"] + direct_iiif_succeeded,
-        "failed": final_stats["failed"] + direct_iiif_failed,
+        "failed": final_stats["failed"] + direct_iiif_failed + no_match_failed,
         "skipped": skipped_count,
     }
 

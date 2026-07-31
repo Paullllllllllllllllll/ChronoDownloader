@@ -214,7 +214,11 @@ def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
         df: DataFrame to save
         csv_path: Path to save to
     """
-    csv_text = df.to_csv(index=False)
+    # lineterminator is pinned to "\n": pandas defaults to os.linesep, so on
+    # Windows the first status write rewrote every line of an LF works CSV as
+    # CRLF -- a whole-file diff in the sampling frame, and a breach of the
+    # byte-identical round-trip contract outside the updated cells.
+    csv_text = df.to_csv(index=False, lineterminator="\n")
     atomic_write_text(csv_path, csv_text)
 
 

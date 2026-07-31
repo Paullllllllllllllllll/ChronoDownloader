@@ -126,6 +126,43 @@ class TestUpdateIndexCsv:
         assert len(df) == 2
         assert pd.isna(df.iloc[1]["creator"])
 
+    def test_read_failure_skips_write_and_preserves_existing_rows(
+        self, temp_output_dir: str
+    ) -> None:
+        """A read failure must not be swallowed into an empty list.
+
+        update_index_csv rewrites the whole file, so "starting fresh" after a
+        transient read failure (AV scanner, file open in Excel) would replace
+        the entire ledger with the single row being written. The failure must
+        propagate so update_index_csv skips the write and the ledger survives.
+        """
+        from unittest.mock import patch
+
+        import main.data.index as index_module
+
+        update_index_csv(temp_output_dir, {"work_id": "abc123", "status": "completed"})
+        update_index_csv(temp_output_dir, {"work_id": "def456", "status": "failed"})
+
+        index_path = os.path.join(temp_output_dir, "index.csv")
+        with open(index_path, encoding="utf-8") as f:
+            original_content = f.read()
+
+        # The module caches rows by (mtime, size); clear it so the patched
+        # reader is actually exercised on the next call.
+        index_module._index_cache.clear()
+
+        # Patch the shared stdlib csv module object (index.py's own `import
+        # csv` binds the same module), rather than main.data.index.csv --
+        # mypy strict flags the latter as an attribute main.data.index does
+        # not explicitly re-export.
+        with patch.object(csv, "DictReader", side_effect=RuntimeError("boom")):
+            update_index_csv(
+                temp_output_dir, {"work_id": "ghi789", "status": "pending"}
+            )
+
+        with open(index_path, encoding="utf-8") as f:
+            assert f.read() == original_content
+
 
 class TestBuildIndexRow:
     """Tests for build_index_row function."""
@@ -288,6 +325,48 @@ class TestUpsertKeyedOnEntryId:
         assert df is not None
         assert len(df) == 1
         assert str(df.iloc[0]["status"]) == "completed"
+
+    def test_upsert_clears_stale_fields_when_row_becomes_no_match(
+        self, temp_output_dir: str
+    ) -> None:
+        """A row that becomes no_match must clear stale provider/url fields.
+
+        The merge is keyed on ``col in row``, not on truthiness: build_index_row
+        always supplies every column and uses None for "no selection", so a
+        value-based test previously left the prior provider, source id, and
+        item URL on a row that had since become no_match.
+        """
+        update_index_csv(
+            temp_output_dir,
+            {
+                "work_id": "abc123",
+                "entry_id": "E0001",
+                "selected_provider": "Internet Archive",
+                "selected_provider_key": "internet_archive",
+                "item_url": "https://archive.org/details/abc",
+                "status": "completed",
+            },
+        )
+        update_index_csv(
+            temp_output_dir,
+            {
+                "work_id": "abc123",
+                "entry_id": "E0001",
+                "selected_provider": None,
+                "selected_provider_key": None,
+                "item_url": None,
+                "status": "no_match",
+            },
+        )
+
+        df = read_index_csv(temp_output_dir)
+        assert df is not None
+        assert len(df) == 1
+        row = df.iloc[0]
+        assert pd.isna(row["selected_provider"])
+        assert pd.isna(row["selected_provider_key"])
+        assert pd.isna(row["item_url"])
+        assert row["status"] == "no_match"
 
 
 class TestGetProcessedWorkIds:

@@ -403,10 +403,14 @@ def _try_ranked_fallbacks(
             _s, dfunc, _pname = provider_map[prov_key]
             logger.info("Attempting fallback download from %s", _pname)
             try:
-                _quota_preflight(prov_key)
                 with _provider_slot(prov_key, pkey) as slot_ok:
                     if not slot_ok:
                         continue
+                    # Preflight inside the provider slot: quota-limited
+                    # providers run at concurrency 1, so checking under the
+                    # slot closes the check-then-act window that let two
+                    # workers both clear the quota and both download.
+                    _quota_preflight(prov_key)
                     set_current_provider(prov_key)
                     if dfunc(sr, work_dir):
                         logger.info("Fallback download from %s succeeded.", _pname)
@@ -502,7 +506,7 @@ def _run_download_with_fallback(
             download_deferred = True
             logger.info("Download deferred for '%s': %s", title, qde.message)
             queue = get_deferred_queue()
-            queue.add(
+            deferred_item = queue.add(
                 title=title,
                 creator=creator,
                 entry_id=entry_id,
@@ -515,6 +519,17 @@ def _run_download_with_fallback(
                 reset_time=qde.reset_time,
                 raw_data=selected.raw,
             )
+            if deferred_item is None:
+                # The queue could not be written, so no retry will happen.
+                # Recording the work as failed is the honest outcome: it is
+                # re-attempted on the next run instead of waiting forever on
+                # a retry that was never scheduled.
+                download_deferred = False
+                logger.error(
+                    "Quota deferral for '%s' could not be persisted; "
+                    "recording the work as failed so it is re-attempted.",
+                    title,
+                )
     except Exception:
         # A raising download function is the same failure mode as one that
         # returns False (HTTP error, malformed manifest, parse failure), so
@@ -545,10 +560,13 @@ def _run_download_with_fallback(
                         work_dir,
                     )
                     try:
-                        _quota_preflight(prov_key)
                         with _provider_slot(prov_key, pkey) as slot_ok:
                             if not slot_ok:
                                 continue
+                            # See _try_ranked_fallbacks: the quota check runs
+                            # under the provider slot so it cannot race a
+                            # concurrent worker's download.
+                            _quota_preflight(prov_key)
                             set_current_provider(prov_key)
                             if dfunc(sr, work_dir):
                                 _quota_record(prov_key)
