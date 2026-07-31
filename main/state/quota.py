@@ -35,6 +35,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _coerce_int(value: Any, default: int, provider_key: str, field: str) -> int:
+    """Coerce a configured quota value to int, falling back on malformed input.
+
+    A hand-edited ``provider_settings`` entry can hold a dict or a
+    non-numeric string; a bare ``int()`` then raised inside quota
+    initialization and took down the whole run.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid %s for provider %s (%r); using %d.",
+            field,
+            provider_key,
+            value,
+            default,
+        )
+        return default
+
+
 @dataclass
 class ProviderQuota:
     """Quota state for a single provider.
@@ -164,6 +184,13 @@ class QuotaManager:
             if getattr(self, "_initialized", False):
                 return
 
+            if type(self)._instance is not self:
+                # A concurrent construction that failed cleared the
+                # singleton pointer; re-publish this object so later
+                # callers share one instance instead of building a second
+                # manager that writes the same file.
+                type(self)._instance = self
+
             try:
                 self._quotas: dict[str, ProviderQuota] = {}
                 self._data_lock = threading.RLock()
@@ -246,8 +273,8 @@ class QuotaManager:
 
             self._quotas[provider_key] = ProviderQuota(
                 provider_key=provider_key,
-                daily_limit=int(daily_limit),
-                reset_hours=int(reset_hours),
+                daily_limit=_coerce_int(daily_limit, 10, provider_key, "daily_limit"),
+                reset_hours=_coerce_int(reset_hours, 24, provider_key, "reset_hours"),
                 period_start=datetime.now(UTC).isoformat(),
             )
             self._save_state()
@@ -284,7 +311,11 @@ class QuotaManager:
             now = datetime.now(UTC)
             hours_elapsed = (now - period_start).total_seconds() / 3600
 
-            if hours_elapsed >= quota.reset_hours:
+            # A negative elapsed time means period_start lies in the future
+            # (clock adjustment, DST-naive timestamp, restored backup). Without
+            # this branch the window never expires and an exhausted provider
+            # stays blocked until wall time catches up.
+            if hours_elapsed < 0 or hours_elapsed >= quota.reset_hours:
                 # Reset the period
                 old_used = quota.downloads_used
                 quota.downloads_used = 0

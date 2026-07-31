@@ -309,7 +309,13 @@ class TestQuotaManagerOperations:
 
     def test_get_quota_status_returns_complete_info(self, manager: Any) -> None:
         """get_quota_status returns comprehensive status dict."""
-        with patch("main.state.quota.get_provider_setting", return_value={}):
+        # Return each caller's own default, mirroring a config that carries no
+        # provider_settings entry at all. A blanket return_value={} would make
+        # the legacy daily-limit lookup yield a dict.
+        with patch(
+            "main.state.quota.get_provider_setting",
+            side_effect=lambda _pk, _key, default=None: default,
+        ):
             manager.can_download("test")  # Initialize
 
             status = manager.get_quota_status("test")
@@ -597,3 +603,44 @@ class TestQuotaManagerPeriodReset:
 
         assert can is True
         assert wait is None
+
+    def test_check_and_reset_period_resets_future_period_start(self) -> None:
+        """A period_start in the FUTURE (clock adjustment, restored backup)
+        must reset the window instead of blocking the provider until wall
+        time catches up.
+        """
+        from main.state.quota import ProviderQuota, QuotaManager
+
+        manager = QuotaManager()
+
+        future_start = datetime.now(UTC) + timedelta(hours=1)
+        quota = ProviderQuota(
+            provider_key="test",
+            daily_limit=10,
+            downloads_used=10,
+            reset_hours=24,
+            period_start=future_start.isoformat(),
+        )
+        manager._quotas["test"] = quota
+
+        was_reset = manager._check_and_reset_period(quota)
+
+        assert was_reset is True
+        assert quota.downloads_used == 0
+
+        can, wait = manager.can_download("test")
+        assert can is True
+        assert wait is None
+
+
+class TestCoerceInt:
+    """Regression: a malformed configured quota value must not raise."""
+
+    def test_coerce_int_falls_back_for_malformed_daily_limit(self) -> None:
+        """A hand-edited provider_settings entry can hold a dict; a bare
+        int() then raised inside quota initialization and took down the
+        whole run. It must now fall back to the caller's default.
+        """
+        from main.state.quota import _coerce_int
+
+        assert _coerce_int({"nested": "dict"}, 10, "test_provider", "daily_limit") == 10

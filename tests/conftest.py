@@ -374,17 +374,35 @@ def reset_config_cache() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def reset_singletons(tmp_path: Path) -> Generator[None, None, None]:
+def _isolate_state_paths(tmp_path: Path) -> Generator[None, None, None]:
+    """Route the default state file into a per-test temporary directory.
+
+    Deliberately named with a leading underscore and kept separate from
+    ``reset_singletons``: several test classes define their own autouse
+    fixture called ``reset_singletons``, which shadows the conftest one, so
+    a redirect living there silently stopped applying and the suite wrote
+    the real ``~/.chronodownloader/.downloader_state.json``. Both the
+    filename and the directory are patched, so neither resolution branch
+    can escape the temporary path.
+    """
+    from unittest.mock import patch
+
+    tmp_state = str(tmp_path / "test_state.json")
+    with (
+        patch("main.state.store.DEFAULT_STATE_FILE", tmp_state),
+        patch("main.state.store.DEFAULT_STATE_DIR", tmp_path / "state_home"),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def reset_singletons() -> Generator[None, None, None]:
     """Reset all state-layer singletons for each test.
 
-    Redirects the default state file to a temporary path so unit tests
-    never write to the real .downloader_state.json in the project root.
     QuotaManager and BackgroundRetryScheduler are reset too: they cache a
     StateManager reference, so a stale instance would route writes to a
     previous test's temporary state file.
     """
-    from unittest.mock import patch
-
     from main.state.background import BackgroundRetryScheduler
     from main.state.deferred import DeferredQueue
     from main.state.quota import QuotaManager
@@ -397,10 +415,7 @@ def reset_singletons(tmp_path: Path) -> Generator[None, None, None]:
         BackgroundRetryScheduler._instance = None
 
     _reset()
-    tmp_state = str(tmp_path / "test_state.json")
-    with patch("main.state.store.DEFAULT_STATE_FILE", tmp_state):
-        yield
-
+    yield
     _reset()
 
 
