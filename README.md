@@ -1,4 +1,4 @@
-# ChronoDownloader v1.17.0
+# ChronoDownloader v1.18.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1155,6 +1155,43 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.18.0** (31 July 2026) -- Fifth-round maintenance audit release. Two
+  connectors were downloading several times the bytes a work needs and
+  discarding most of them: SBB collected page images from every METS
+  fileGrp, so each page arrived at three to five resolutions and a
+  configured page cap was spent on thumbnails, while Internet Archive
+  matched primary files by a substring test on the format field, which
+  pulled in the DjVu text and XML derivatives only to file them under
+  metadata/ and report failure -- and, with `prefer_pdf_over_images`
+  disabled, fetched the EPUB and DjVu on top of a PDF it had already
+  downloaded. Creator strings are no longer split on the comma: catalog
+  records name a single author in inverted form, and splitting
+  "Escoffier, Auguste" made two people out of one, dropping the creator
+  score from 100 to 69 and persisting a phantom author; the five
+  connectors that genuinely carry several creators now pass a list. On the
+  download path a connection drop partway through the body is retried like
+  any other transient error instead of ending the download outright, and it
+  gives back the sequence number it reserved so no gap appears in the page
+  numbering; a mistyped page cap such as `"500"` is coerced rather than
+  silently meaning "no cap". Reported counts are honest again: parallel
+  mode no longer books resume-skips or quota deferrals as failures, both of
+  which made an otherwise healthy run exit 1, and the deferred figure is
+  this run's rather than the whole queue's backlog. The eager deferred
+  retry now confirms that a queued item belongs to the works CSV in front
+  of it before writing to it -- entry-id schemes repeat across sampling
+  CSVs, and an id-only match stamped one corpus's success into another's
+  row and then dropped that row from the batch unprocessed. Reading
+  index.csv pins the key columns to text, so `--verify` stops appending a
+  titleless duplicate per run for zero-padded entry ids, and `--verify`
+  finally configures logging, so its summary is no longer swallowed.
+  Smaller fixes: the British Library viewer fallback runs when the manifest
+  endpoint answers with an HTML error page, `--dry-run` on a native `--id`
+  creates no work directory, a filtered-to-empty `--search-only` exits 0
+  like the batch path, a leftover `.part` file no longer makes
+  `skip_if_has_objects` skip a work forever, and the Windows MAX_PATH
+  advisory fires for paths that go on to break. Documentation was aligned
+  with behavior for `--json`, the index.csv key, the resume modes,
+  `worker_timeout_s`, and the Google Books format option.
 - **v1.17.0** (31 July 2026) -- Fourth-round maintenance audit release. The
   test suite no longer writes the real user state file: a class-level
   fixture shadowed the conftest redirect, so every run polluted
