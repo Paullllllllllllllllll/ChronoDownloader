@@ -78,15 +78,6 @@ class DownloadBudget:
         except Exception:
             return None
 
-    @staticmethod
-    def _limit_value(v: Any) -> int | None:
-        """Convert config value to an integer limit or None if unlimited."""
-        try:
-            iv = int(v)
-            return iv if iv > 0 else None
-        except Exception:
-            return None
-
     def _policy(self) -> str:
         """Get the on_exceed policy: 'skip' or 'stop'."""
         dl = get_download_limits()

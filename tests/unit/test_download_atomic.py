@@ -59,12 +59,61 @@ def test_midstream_abort_leaves_no_file(
     folder = str(tmp_path / "work")
 
     dl_mod._BUDGET._exhausted = False
-    with patch.object(dl_mod, "get_session", return_value=session):
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch("api.core.download.time.sleep"),
+    ):
         result = dl_mod.download_file("https://example.org/book.pdf", folder, "book")
 
     assert result is None
     # No file (and crucially no leftover .part) at the final location.
     assert _objects_files(folder) == []
+
+
+def test_midstream_connection_error_is_retried(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """A drop after raise_for_status must consume an attempt, not the run.
+
+    The mid-stream handler used to return None straight out of
+    ``_process_response``, which left ``download_file``'s retry loop
+    immediately -- so the configured ``max_attempts`` never applied to the
+    normal failure mode of a large PDF.
+    """
+    payload = b"%PDF-1.4\n" + b"x" * 512
+
+    def broken_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload[:64]
+        raise requests.exceptions.ConnectionError("connection dropped mid-stream")
+
+    def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload
+
+    def _as_cm(response: MagicMock) -> MagicMock:
+        cm = MagicMock()
+        cm.__enter__ = MagicMock(return_value=response)
+        cm.__exit__ = MagicMock(return_value=False)
+        return cm
+
+    session = MagicMock()
+    session.get.side_effect = [
+        _as_cm(_make_response({"Content-Type": "application/pdf"}, broken_iter)),
+        _as_cm(_make_response({"Content-Type": "application/pdf"}, good_iter)),
+    ]
+    folder = str(tmp_path / "work")
+
+    dl_mod._BUDGET._exhausted = False
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch("api.core.download.time.sleep"),
+    ):
+        result = dl_mod.download_file("https://example.org/book.pdf", folder, "book")
+
+    assert result is not None
+    assert session.get.call_count == 2
+    # No "_2" suffix: the failed attempt gave its sequence number back, so a
+    # retried page cannot leave a gap in the image numbering.
+    assert _objects_files(folder) == ["book_unknown.pdf"]
 
 
 def test_write_failure_refunds_all_booked_bytes(

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+from unittest.mock import patch
+
 from api.core.naming import (
     PROVIDER_ABBREV,
     PROVIDER_SLUGS,
@@ -242,3 +246,33 @@ class TestWindowsReservedNames:
         sanitized = sanitize_filename("con.pdf")
         assert sanitized.endswith(".pdf")
         assert sanitized.split(".")[0].lower() != "con"
+
+
+class TestPathLengthWarning:
+    """The MAX_PATH advisory must fire for paths that go on to fail."""
+
+    def test_long_work_dir_warns(self, caplog: Any) -> None:
+        """Files land at <work_dir>/objects/<name>, roughly 90 characters
+        beyond the directory checked, so a 200-character work directory is
+        already past the 260-character limit."""
+        from api.core.naming import warn_if_path_too_long
+
+        path = r"C:\out" + "\\" + ("a" * 200)
+        with (
+            patch("api.core.naming.sys.platform", "win32"),
+            caplog.at_level(logging.WARNING, logger="api.core.naming"),
+        ):
+            warn_if_path_too_long(path, "W0001")
+
+        assert "MAX_PATH" in caplog.text
+
+    def test_short_work_dir_is_silent(self, caplog: Any) -> None:
+        from api.core.naming import warn_if_path_too_long
+
+        with (
+            patch("api.core.naming.sys.platform", "win32"),
+            caplog.at_level(logging.WARNING, logger="api.core.naming"),
+        ):
+            warn_if_path_too_long(r"C:\out\e_0001_the_art_of_cooking", "W0001")
+
+        assert caplog.text == ""

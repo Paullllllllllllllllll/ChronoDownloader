@@ -14,9 +14,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Windows applications default to a 260-character MAX_PATH limit. Warn a little
-# below it so there is headroom for the objects/ subdirectory and filename.
-_WINDOWS_MAX_PATH_WARN = 250
+# Windows applications default to a 260-character MAX_PATH limit. What is
+# checked is the WORK directory, but the files that actually fail land at
+# <work_dir>\objects\<stem(50)>_<slug(9)>_image_000.jpeg -- roughly 90
+# characters more. Ten characters of headroom meant the warning could not fire
+# for any path that went on to break.
+_WINDOWS_MAX_PATH_WARN = 170
 
 # Provider slug mappings for abbreviated provider keys
 PROVIDER_SLUGS = {

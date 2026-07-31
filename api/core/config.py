@@ -273,9 +273,21 @@ def get_max_pages(provider_key: str) -> int | None:
         Max pages limit (0 or None means unlimited)
     """
     val = get_provider_setting(provider_key, "max_pages", None)
-    if isinstance(val, int):
-        return val
-    return None
+    if val is None:
+        return None
+    # Coerce rather than type-test: JSON admits "500" and 500.0, and every
+    # caller reads None as "unlimited", so rejecting a hand-written string
+    # removed the cap the user was trying to impose -- on the one setting that
+    # bounds how many pages a work downloads.
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Ignoring non-numeric max_pages for %s: %r; treating as unlimited.",
+            provider_key,
+            val,
+        )
+        return None
 
 
 def get_resume_mode() -> str:

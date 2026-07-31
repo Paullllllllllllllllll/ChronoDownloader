@@ -144,6 +144,25 @@ def increment_counter(key: tuple[str, str, str]) -> int:
     return counters[key]
 
 
+def release_counter(key: tuple[str, str, str]) -> int:
+    """Give back the sequence number taken by the last ``increment_counter``.
+
+    A download that fails mid-stream is retried against the same name, so the
+    number it reserved must not be spent: otherwise the retried page lands at
+    ``image_002`` and leaves a permanent gap at ``image_001``.
+
+    Args:
+        key: Tuple of (stem, provider_slug, type_key)
+
+    Returns:
+        The counter value after the rollback
+    """
+    counters = get_counters()
+    if counters.get(key, 0) > 0:
+        counters[key] -= 1
+    return counters.get(key, 0)
+
+
 def peek_counter(key: tuple[str, str, str]) -> int:
     """Return the next counter value for a key WITHOUT incrementing.
 

@@ -236,6 +236,22 @@ class TestGetMaxPages:
         result = get_max_pages("unknown_provider")
         assert result is None
 
+    def test_coerces_numeric_string(self) -> None:
+        """A hand-written "500" must still cap the download.
+
+        An isinstance(int) test returned None, which every caller reads as
+        unlimited -- the opposite of the user's intent, on the one setting
+        that bounds how many pages a work downloads.
+        """
+        cfg = {"provider_settings": {"gallica": {"max_pages": "500"}}}
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_max_pages("gallica") == 500
+
+    def test_non_numeric_value_falls_back_to_unlimited(self) -> None:
+        cfg = {"provider_settings": {"gallica": {"max_pages": "many"}}}
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_max_pages("gallica") is None
+
 
 class TestGetResumeMode:
     """Tests for get_resume_mode function."""

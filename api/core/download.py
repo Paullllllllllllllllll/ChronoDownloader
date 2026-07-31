@@ -38,6 +38,7 @@ from .context import (
     get_current_work,
     increment_counter,
     peek_counter,
+    release_counter,
 )
 from .naming import get_provider_slug, sanitize_filename, to_snake_case
 from .network import (
@@ -260,18 +261,28 @@ def _determine_target_directory(
     return os.path.join(folder_path, "objects"), "", True
 
 
+def _counter_key(
+    ext: str,
+    stem: str,
+    prov_slug: str,
+    max_stem_len: int = 50,
+) -> tuple[str, str, str]:
+    """Build the per-work naming counter key for one (extension, stem) pair."""
+    if len(stem) > max_stem_len:
+        stem = stem[:max_stem_len].rstrip("_")
+
+    type_key = "image" if ext in _IMAGE_EXTENSIONS else (ext.lstrip(".") or "bin")
+    return (stem, prov_slug, type_key)
+
+
 def _build_standardized_filename(
     ext: str,
     stem: str,
     prov_slug: str,
     max_stem_len: int = 50,
 ) -> str:
-    if len(stem) > max_stem_len:
-        stem = stem[:max_stem_len].rstrip("_")
-
-    type_key = "image" if ext in _IMAGE_EXTENSIONS else (ext.lstrip(".") or "bin")
-
-    key = (stem, prov_slug, type_key)
+    key = _counter_key(ext, stem, prov_slug, max_stem_len)
+    stem, prov_slug, type_key = key
     seq = increment_counter(key)
 
     if type_key == "image":
@@ -340,15 +351,8 @@ def _try_skip_existing(
     stem = get_current_name_stem() or to_snake_case(filename) or "object"
     prov_slug = get_provider_slug(get_current_provider(), provider)
 
-    if len(stem) > 50:
-        stem = stem[:50].rstrip("_")
-
-    type_key = (
-        "image"
-        if predicted_ext in _IMAGE_EXTENSIONS
-        else (predicted_ext.lstrip(".") or "bin")
-    )
-    key = (stem, prov_slug, type_key)
+    key = _counter_key(predicted_ext, stem, prov_slug)
+    stem, prov_slug, type_key = key
     seq = peek_counter(key)
 
     if type_key == "image":
@@ -394,10 +398,6 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     # probe slot.
     if _BUDGET.exhausted():
         logger.warning("Download budget exhausted; skipping %s", url)
-        return None
-
-    if not _BUDGET.allow_new_file(provider, work_id):
-        logger.warning("Download budget stop-policy tripped; skipping %s", url)
         return None
 
     # Consult the per-provider circuit breaker before downloading, mirroring
@@ -482,6 +482,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
 
         _ensure_dir(target_dir)
 
+        name_key = _counter_key(inferred_ext, stem, prov_slug)
         safe_name = _build_standardized_filename(inferred_ext, stem, prov_slug)
         filepath = os.path.join(target_dir, safe_name)
 
@@ -563,7 +564,27 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     f.write(chunk)
                     if len(head) < _VALIDATION_HEAD_BYTES:
                         head.extend(chunk[: _VALIDATION_HEAD_BYTES - len(head)])
-        except (requests.exceptions.RequestException, OSError) as e:
+        except requests.exceptions.RequestException as e:
+            # A connection reset or read timeout partway through the body is
+            # the normal failure mode for a large PDF, and it lands here --
+            # after raise_for_status, inside _process_response -- rather than
+            # on the initial GET. Returning None exited download_file's retry
+            # loop immediately, so max_attempts never applied to it. Refund
+            # the bytes, drop the .part file, and re-raise into the loop.
+            logger.warning(
+                "Error while streaming %s to %s: %s; discarding partial file "
+                "and retrying.",
+                url,
+                part_path,
+                e,
+            )
+            _discard_partial()
+            # Hand back the sequence number this attempt reserved, so the
+            # retry writes p00005_..._image_001 rather than _image_002.
+            release_counter(name_key)
+            raise
+        except OSError as e:
+            # A disk-side failure will not be cured by another attempt.
             logger.error(
                 "Error while streaming %s to %s: %s; discarding partial file.",
                 url,
