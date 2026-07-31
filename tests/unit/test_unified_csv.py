@@ -58,6 +58,15 @@ class TestLoadWorksCsv:
         df = load_works_csv(csv_path)
         assert LINK_COL in df.columns
 
+    def test_entry_id_preserves_leading_zeros(self, temp_dir: str) -> None:
+        """Zero-padded entry_ids load as text, not stripped integers."""
+        csv_path = os.path.join(temp_dir, "padded.csv")
+        with open(csv_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("entry_id,short_title\n00123,Le Viandier\n")
+
+        df = load_works_csv(csv_path)
+        assert df[ENTRY_ID_COL].tolist() == ["00123"]
+
     def test_raises_for_missing_file(self, temp_dir: str) -> None:
         """Test that FileNotFoundError is raised for missing file."""
         missing_path = os.path.join(temp_dir, "nonexistent.csv")
@@ -297,6 +306,35 @@ class TestMarkSuccess:
         """Test that False is returned for missing entry."""
         result = mark_success(sample_csv_file, "NONEXISTENT", "https://example.com")
         assert result is False
+
+    def test_untouched_cells_round_trip_verbatim(self, temp_dir: str) -> None:
+        """Status writes must not reformat other columns.
+
+        Pre-fix, the pandas round-trip inferred dtypes: an integer column
+        with one blank cell became float64 and was written back with a
+        ".0" suffix, and zero-padded ids lost their padding — silently
+        corrupting the source ledger on the first successful download.
+        """
+        csv_path = os.path.join(temp_dir, "ledger.csv")
+        with open(csv_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(
+                "entry_id,short_title,earliest_year,total_editions,retrievable,link\n"
+                "00123,Le Viandier,1490,12,,\n"
+                "00124,Opera,,3,,\n"
+            )
+
+        assert mark_success(csv_path, "00123", "https://x/y") is True
+
+        with open(csv_path, encoding="utf-8") as f:
+            content = f.read()
+        assert "1490" in content and "1490.0" not in content
+        assert ",12," in content and "12.0" not in content
+        assert "00123" in content and "00124" in content
+        # The updated row carries the new status and link.
+        df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+        row = df[df[ENTRY_ID_COL] == "00123"].iloc[0]
+        assert row[STATUS_COL] == "True"
+        assert row[LINK_COL] == "https://x/y"
 
 
 class TestMarkFailed:

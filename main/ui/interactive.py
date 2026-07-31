@@ -190,7 +190,7 @@ class InteractiveWorkflow:
                 key_settings["Format preference"] = "PDF over images"
             if dl_config.get("max_total_size_gb"):
                 key_settings["Max total size"] = f"{dl_config['max_total_size_gb']} GB"
-            if dl_config.get("max_parallel_downloads", 1) > 1:
+            if int(dl_config.get("max_parallel_downloads", 1) or 1) > 1:
                 key_settings["Parallel downloads"] = dl_config["max_parallel_downloads"]
 
             if key_settings:
@@ -851,7 +851,10 @@ def run_interactive_session(
     providers = pipeline.filter_enabled_providers_for_keys(providers)
     pipeline.ENABLED_APIS = providers
 
-    if not providers:
+    # Direct IIIF downloads need no search provider, so an empty provider
+    # list must not block them (mirrors the --iiif exemption in the CLI
+    # dispatcher).
+    if not providers and config.mode != "direct_iiif":
         log.warning(
             "No providers are enabled. Update %s to enable providers.",
             config.config_path,

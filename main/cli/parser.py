@@ -14,6 +14,12 @@ def create_cli_parser() -> argparse.ArgumentParser:
     """Create the argument parser for CLI mode."""
     parser = argparse.ArgumentParser(
         description="ChronoDownloader - Historical Document Download Tool (CLI Mode)",
+        # Abbreviated flags are refused: the maintenance commands
+        # (--status, --quota-status, --cleanup-deferred) are dispatched by
+        # exact-string scanning of sys.argv in main.cli.entry, so an
+        # abbreviation like "--stat" would parse fine here but bypass that
+        # dispatch and start a real download run.
+        allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

@@ -73,9 +73,11 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
     providers = pipeline.filter_enabled_providers_for_keys(providers)
     pipeline.ENABLED_APIS = providers
 
-    # Direct-IIIF downloads need no search provider, so exempt --iiif from the
-    # empty-provider guard; the other subcommands still require providers.
-    if not providers and not args.iiif_urls:
+    # Direct-IIIF and --id downloads need no search provider (--id resolves
+    # through the full registry and static manifest templates), so exempt
+    # both from the empty-provider guard; the other subcommands still
+    # require providers.
+    if not providers and not args.iiif_urls and not getattr(args, "id", None):
         logger.warning(
             "No providers are enabled. Update %s to enable providers.",
             config_path,

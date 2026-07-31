@@ -302,7 +302,9 @@ def try_pdf_first_then_images(
                 url,
             )
 
-    if manifest_url and not (any_downloaded and prefer_pdf_over_images()):
+    # No prefer-PDF cutoff needed here: a successful PDF under
+    # prefer_pdf_over_images() already returned True inside the loop above.
+    if manifest_url:
         try:
             if download_iiif_manifest_and_images(
                 manifest_url,

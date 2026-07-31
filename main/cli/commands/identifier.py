@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Any
 
+from api.model import QuotaDeferredException
 from api.providers import PROVIDERS
 from main.orchestration.execution import process_direct_iiif
 
@@ -77,12 +78,25 @@ def run_identifier_cli(
                 )
                 return EXIT_OK
 
-            ok = download_by_native_provider(
-                identifier,
-                pkey,
-                work_dir,
-                title=title,
-            )
+            try:
+                ok = download_by_native_provider(
+                    identifier,
+                    pkey,
+                    work_dir,
+                    title=title,
+                )
+            except QuotaDeferredException as qde:
+                # A quota deferral is not an internal error: report it
+                # clearly instead of letting it bubble up as "Unexpected
+                # error" with a traceback.
+                logger.warning(
+                    "Provider %s quota exhausted for '%s': %s. Retry after "
+                    "the quota resets.",
+                    pkey,
+                    identifier,
+                    qde.message,
+                )
+                continue
             if ok:
                 logger.info(
                     "Download completed via %s for identifier '%s'",

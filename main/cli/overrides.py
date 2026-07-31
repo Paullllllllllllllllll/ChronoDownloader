@@ -197,7 +197,9 @@ def _filter_pending_rows(
         status_series = (
             works_df[STATUS_COL]
             if STATUS_COL in works_df.columns
-            else pd.Series([pd.NA] * len(works_df))
+            # Align on works_df's own index: a fresh RangeIndex would raise
+            # IndexingError for frames with a non-default index.
+            else pd.Series(pd.NA, index=works_df.index)
         )
         status_labels = status_series.apply(_classify_status)
         if pending_mode == "new":

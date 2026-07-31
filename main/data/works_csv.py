@@ -55,7 +55,7 @@ def _parse_status(val: object) -> str:
     """Classify a single status cell value.
 
     Returns:
-        ``"completed"``, ``"failed"``, or ``"pending"``.
+        ``"completed"``, ``"failed"``, ``"deferred"``, or ``"pending"``.
     """
     if val is None or val is pd.NA or (isinstance(val, float) and pd.isna(val)):
         return "pending"
@@ -88,6 +88,14 @@ def _parse_status(val: object) -> str:
             return "failed"
         if lowered == "deferred":
             return "deferred"
+        # Numeric strings beyond "1"/"0" (e.g. "1.0" written by earlier
+        # pandas float round-trips) classify by value.
+        with contextlib.suppress(ValueError):
+            f = float(lowered)
+            if f == 1.0:
+                return "completed"
+            if f == 0.0:
+                return "failed"
     return "pending"
 
 
@@ -107,7 +115,10 @@ def load_works_csv(csv_path: str) -> pd.DataFrame:
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
-    df = pd.read_csv(csv_path, encoding="utf-8")
+    # entry_id must load as text: an integer-inferred column would strip
+    # leading zeros ("00123" -> 123), breaking --entry-ids filtering and the
+    # status writes keyed on the padded form.
+    df = pd.read_csv(csv_path, encoding="utf-8", dtype={ENTRY_ID_COL: str})
 
     # Validate required columns: entry_id is always required;
     # short_title is required unless a direct_link column is present
@@ -220,7 +231,13 @@ def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
         if cached_mtime == mtime:
             return df
 
-    df = pd.read_csv(csv_path, encoding="utf-8")
+    # Read every cell verbatim as text: the status writers rewrite the WHOLE
+    # file, and letting pandas infer dtypes silently reformats source columns
+    # (an integer column with one blank cell becomes float64, so "1490" is
+    # written back as "1490.0" and zero-padded ids lose their padding). With
+    # dtype=str + keep_default_na=False all untouched cells round-trip
+    # byte-identically; _parse_status already classifies the string forms.
+    df = pd.read_csv(csv_path, encoding="utf-8", dtype=str, keep_default_na=False)
     _csv_cache[csv_path] = (df, mtime)
     return df
 

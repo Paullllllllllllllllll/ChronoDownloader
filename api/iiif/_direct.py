@@ -14,7 +14,7 @@ Supported IIIF manifest URL patterns (major digital libraries):
 - Wellcome Collection: https://iiif.wellcomecollection.org/presentation/{id}
 - British Library: https://api.bl.uk/metadata/iiif/{id}/manifest.json
 - e-rara: https://www.e-rara.ch/i3f/v20/{id}/manifest
-- SLUB Dresden: https://digital.slub-dresden.de/data/kitodo/{id}/manifest.json
+- SLUB Dresden: https://iiif.slub-dresden.de/iiif/2/{ppn}/manifest.json
 """
 
 from __future__ import annotations

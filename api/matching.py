@@ -29,11 +29,30 @@ def strip_accents(text: str | None) -> str:
     return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
 
 
+# Latin letters that NFKD does not decompose (unlike e.g. e-acute) and that
+# the ASCII-only filter in normalize_text would otherwise replace with a
+# space, splitting a word in two ("Bønder" -> "b nder") and sinking match
+# scores below the selection gate for Danish/Norwegian/German/Polish titles.
+_NON_DECOMPOSABLE_TRANSLIT = str.maketrans(
+    {
+        "ß": "ss",
+        "ø": "o",
+        "æ": "ae",
+        "œ": "oe",
+        "ł": "l",
+        "đ": "d",
+        "ð": "d",
+        "þ": "th",
+    }
+)
+
+
 def normalize_text(text: str | None) -> str:
     """Normalize text for robust fuzzy matching.
 
-    Performs lowercase conversion, accent removal, whitespace collapse,
-    and punctuation stripping.
+    Performs lowercase conversion, accent removal, transliteration of
+    non-decomposable Latin letters (ß, ø, æ, œ, ł, đ, ð, þ), whitespace
+    collapse, and punctuation stripping.
 
     Args:
         text: Input text to normalize
@@ -44,7 +63,7 @@ def normalize_text(text: str | None) -> str:
     if text is None:
         return ""
 
-    s = strip_accents(str(text)).lower()
+    s = strip_accents(str(text)).lower().translate(_NON_DECOMPOSABLE_TRANSLIT)
 
     # Replace punctuation and separators with spaces
     s = re.sub(r"[\t\r\n]+", " ", s)

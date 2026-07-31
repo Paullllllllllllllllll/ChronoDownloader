@@ -90,6 +90,19 @@ class TestNormalizeText:
         """Test string with only punctuation."""
         assert normalize_text("!@#$%^&*()") == ""
 
+    def test_transliterates_non_decomposable_letters(self) -> None:
+        """ß, ø, æ, œ, ł do not split words into fragments.
+
+        NFKD leaves these letters intact, so the ASCII-only filter used to
+        replace them with a space ("Bønder" -> "b nder"), sinking title
+        scores below the selection gate for Nordic/German/Polish titles.
+        """
+        assert normalize_text("Kogebog for Bønder") == "kogebog for bonder"
+        assert normalize_text("Straße") == "strasse"
+        assert normalize_text("Encyclopædia") == "encyclopaedia"
+        assert normalize_text("Œuvres complètes") == "oeuvres completes"
+        assert normalize_text("Kucharz doskonały") == "kucharz doskonaly"
+
 
 class TestSimpleRatio:
     """Tests for simple_ratio function."""
