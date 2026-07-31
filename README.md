@@ -1,4 +1,4 @@
-# ChronoDownloader v1.16.0
+# ChronoDownloader v1.17.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1144,6 +1144,30 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.17.0** (31 July 2026) -- Fourth-round maintenance audit release. The
+  test suite no longer writes the real user state file: a class-level
+  fixture shadowed the conftest redirect, so every run polluted
+  ~/.chronodownloader/.downloader_state.json with fixture quotas and
+  deferred items. Persistence now tells the truth -- saving reports
+  success or failure, a deferral that could not be written is recorded as
+  failed instead of promising a retry that will never happen, one
+  malformed queue entry no longer erases every entry after it, a state
+  file with a non-object JSON root is preserved as corrupt rather than
+  silently disabling all saves, and writes are flushed to disk before the
+  atomic replace. On the download path an interrupt now discards the
+  partial file that would otherwise make the work look complete forever,
+  a per-work byte cap no longer aborts the entire run, an existing file
+  routed to metadata/ no longer counts as a successful download, and a
+  non-retryable status records a circuit-breaker outcome so a healthy
+  provider is not throttled to one request per cooldown. The ledgers are
+  safer too: a transient index.csv read error no longer truncates it to a
+  single row, the works CSV keeps LF endings, an upsert clears stale
+  provider and URL cells, parallel mode counts no-match rows as failures
+  (so an all-no-match batch no longer exits 0), and --verify updates the
+  real row instead of appending a duplicate and skips works that were
+  never downloaded. Seven provider connectors gained the missing
+  download-budget guard, LoC reports a retrieved PDF as success, and
+  titles in non-Latin scripts are no longer scored zero.
 - **v1.16.0** (31 July 2026) -- Third-round maintenance audit release. The
   download path now retries transient connection errors and timeouts with
   backoff like the search path, refunds every budget-booked chunk when a
