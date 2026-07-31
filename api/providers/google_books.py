@@ -206,10 +206,12 @@ def search_google_books(
             raw = {
                 "title": volume_info.get("title", "N/A"),
                 # A present-but-null "authors" (or one holding non-string
-                # entries) would make a bare join raise TypeError.
-                "creator": ", ".join(
-                    str(a) for a in (volume_info.get("authors") or [])
-                ),
+                # entries) would make a bare join raise TypeError. Pass the
+                # list under the plural key: joining with ", " would be
+                # re-split as an inverted personal name, and an empty join
+                # became creators == [""], a phantom author persisted to
+                # work.json and index.csv.
+                "creators": [str(a) for a in (volume_info.get("authors") or [])],
                 "id": vol_id,
                 "item_url": f"https://books.google.com/books?id={vol_id}"
                 if vol_id

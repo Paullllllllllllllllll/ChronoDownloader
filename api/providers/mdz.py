@@ -68,14 +68,16 @@ def search_mdz(
                 # Strip simple tags from highlighted title
                 title_text = re.sub(r"<[^>]+>", "", str(title_html))
                 authors = doc.get("authors") or []
-                creator_text = (
-                    (", ".join(authors) or None)
+                # Plural key: joining with ", " would be re-split as an
+                # inverted personal name (see api.model._as_list).
+                creators_list = (
+                    [str(a) for a in authors]
                     if isinstance(authors, list)
-                    else (authors or None)
+                    else ([str(authors)] if authors else [])
                 )
                 raw = {
                     "title": title_text,
-                    "creator": creator_text,
+                    "creators": creators_list,
                     "id": obj_id,
                     "item_url": f"https://www.digitale-sammlungen.de/view/{obj_id}",
                 }

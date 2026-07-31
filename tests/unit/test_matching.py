@@ -369,3 +369,30 @@ class TestCombinedMatchScore:
         )
         # With default creator_weight=0.2 and no creator: 100 * 0.8 = 80
         assert score == 80.0
+
+
+class TestInvertedCreatorNames:
+    """Catalog records name a single author in inverted form."""
+
+    def test_inverted_name_scores_as_one_creator(self) -> None:
+        """Splitting "Escoffier, Auguste" on the comma made two people out of
+        one and dropped the creator score from 100 to 69."""
+        from api.matching import creator_score
+        from api.model import convert_to_searchresult
+
+        sr = convert_to_searchresult(
+            "BnF Gallica", {"title": "T", "creator": "Escoffier, Auguste"}
+        )
+
+        assert sr.creators == ["Escoffier, Auguste"]
+        assert creator_score("Auguste Escoffier", sr.creators) == 100
+
+    def test_semicolon_list_still_splits(self) -> None:
+        """The DC/MARC multi-value separator remains a separator."""
+        from api.model import convert_to_searchresult
+
+        sr = convert_to_searchresult(
+            "BnF Gallica", {"title": "T", "creator": "Escoffier, Auguste; Gilbert, P."}
+        )
+
+        assert sr.creators == ["Escoffier, Auguste", "Gilbert, P."]

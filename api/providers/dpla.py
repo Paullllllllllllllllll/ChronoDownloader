@@ -104,9 +104,11 @@ def search_dpla(
                     creators = [creators]
                 raw = {
                     "title": title_text or "N/A",
-                    # Coerce elements to str: DPLA occasionally returns structured
-                    # (dict) creator entries that a bare join would choke on.
-                    "creator": ", ".join(str(c) for c in creators) or None,
+                    # Coerce elements to str: DPLA occasionally returns
+                    # structured (dict) creator entries. Pass the list under
+                    # the plural key -- joining with ", " would be re-split as
+                    # an inverted personal name (see api.model._as_list).
+                    "creators": [str(c) for c in creators],
                     "id": doc.get("id"),
                     "item_url": doc.get("isShownAt"),
                     "iiif_manifest": iiif_manifest,

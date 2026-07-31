@@ -217,8 +217,11 @@ def download_british_library_work(
     manifest = make_request(manifest_url)
 
     # Fallback: if direct manifest fetch failed, try discovering it from the
-    # public viewer page
-    if not manifest:
+    # public viewer page. The test is on the type, not on truthiness:
+    # make_request returns a str for an HTML body, and api.bl.uk answers with
+    # an error or maintenance page rather than a status code, so a truthiness
+    # test skipped the fallback in exactly the situation it exists for.
+    if not isinstance(manifest, dict):
         try:
             viewer_url = f"https://access.bl.uk/item/viewer/ark:/81055/{identifier}"
             logger.info(
@@ -230,8 +233,9 @@ def download_british_library_work(
                 if m:
                     alt_manifest = m.group(0)
                     logger.info("BL fallback: found manifest URL %s", alt_manifest)
-                    manifest = make_request(alt_manifest)
-                    if manifest:
+                    alt = make_request(alt_manifest)
+                    if isinstance(alt, dict):
+                        manifest = alt
                         manifest_url = alt_manifest
         except Exception:
             logger.exception(

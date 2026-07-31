@@ -29,6 +29,10 @@ SRU_URL = "https://sru.gbv.de/stabikat"
 METS_URL = "https://digital.staatsbibliothek-berlin.de/dms/metsresolver/?PPN={ppn}"
 ITEM_URL = "https://digital.staatsbibliothek-berlin.de/werkansicht?PPN={ppn}"
 
+# METS fileGrp/@USE values of the DFG-Viewer application profile, ordered by
+# descending resolution. Only one group is downloaded; see _collect_mets_urls.
+_IMAGE_FILEGRP_PRIORITY = ("MAX", "DEFAULT", "PRESENTATION", "MIN", "THUMBS")
+
 
 def _candidate_queries(title: str, creator: str | None) -> list[str]:
     q_title = escape_sru_literal(title)
@@ -144,29 +148,47 @@ def search_sbb_digital(
 
 
 def _collect_mets_urls(mets_xml: str) -> tuple[list[str], list[str]]:
+    """Collect PDF and image URLs from a METS document, one image per page.
+
+    A METS file section holds one ``fileGrp`` per derivative -- the
+    DFG-Viewer profile SBB serves emits ``THUMBS``, ``MIN``, ``DEFAULT``
+    and ``MAX``, each with one entry per page. Collecting across all of
+    them returns the same page three to five times over, which both
+    multiplies the bytes downloaded and spends ``max_pages`` on
+    duplicates (on thumbnails first, since they come first in document
+    order). Pick a single group by ``USE``, best resolution first.
+    """
     ns = {"mets": "http://www.loc.gov/METS/"}
     root = ET.fromstring(mets_xml)
     pdf_urls: list[str] = []
-    image_urls: list[str] = []
+    images_by_group: dict[str, list[str]] = {}
 
-    for file_el in root.findall(".//mets:file", ns):
-        mimetype = (file_el.get("MIMETYPE") or "").lower()
-        flocat = file_el.find("mets:FLocat", ns)
-        if flocat is None:
-            continue
-        href = flocat.get("{http://www.w3.org/1999/xlink}href")
-        if not href:
-            continue
-        href_lower = href.lower()
-        if "pdf" in mimetype or href_lower.endswith(".pdf"):
-            pdf_urls.append(href)
-            continue
-        if "image" in mimetype or href_lower.endswith(
-            (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2")
-        ):
-            image_urls.append(href)
+    for grp in root.findall(".//mets:fileGrp", ns):
+        use = (grp.get("USE") or "").upper()
+        # Direct children only: a nested fileGrp is visited in its own turn.
+        for file_el in grp.findall("mets:file", ns):
+            mimetype = (file_el.get("MIMETYPE") or "").lower()
+            flocat = file_el.find("mets:FLocat", ns)
+            if flocat is None:
+                continue
+            href = flocat.get("{http://www.w3.org/1999/xlink}href")
+            if not href:
+                continue
+            href_lower = href.lower()
+            if "pdf" in mimetype or href_lower.endswith(".pdf"):
+                pdf_urls.append(href)
+                continue
+            if "image" in mimetype or href_lower.endswith(
+                (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".jp2")
+            ):
+                images_by_group.setdefault(use, []).append(href)
 
-    return pdf_urls, image_urls
+    for use in _IMAGE_FILEGRP_PRIORITY:
+        if images_by_group.get(use):
+            return pdf_urls, images_by_group[use]
+
+    # Unlabeled or unrecognized groups: fall back to every image found.
+    return pdf_urls, [url for urls in images_by_group.values() for url in urls]
 
 
 def download_sbb_digital_work(

@@ -131,9 +131,9 @@ class TestInternetArchiveProvider:
             results = search_internet_archive("Title")
 
             assert len(results) == 2
-            assert results[0].raw["creator"] is None
+            assert results[0].raw["creators"] == []
             assert results[0].creators == []
-            assert results[1].raw["creator"] == "123, X"
+            assert results[1].creators == ["123", "X"]
 
     def test_search_no_year_yields_none_not_na(self) -> None:
         """An absent "year" must yield raw["year"] is None, not the retired
@@ -459,6 +459,55 @@ class TestSbbDigitalProvider:
             assert result is False
             mock_dl.assert_not_called()
 
+    METS_MULTI_FILEGRP = (
+        '<?xml version="1.0"?>'
+        '<mets:mets xmlns:mets="http://www.loc.gov/METS/" '
+        'xmlns:xlink="http://www.w3.org/1999/xlink">'
+        '<mets:fileSec><mets:fileGrp USE="THUMBS">'
+        '<mets:file MIMETYPE="image/jpeg">'
+        '<mets:FLocat xlink:href="https://x/t1.jpg"/></mets:file>'
+        '<mets:file MIMETYPE="image/jpeg">'
+        '<mets:FLocat xlink:href="https://x/t2.jpg"/></mets:file>'
+        "</mets:fileGrp>"
+        '<mets:fileGrp USE="MAX">'
+        '<mets:file MIMETYPE="image/jpeg">'
+        '<mets:FLocat xlink:href="https://x/m1.jpg"/></mets:file>'
+        '<mets:file MIMETYPE="image/jpeg">'
+        '<mets:FLocat xlink:href="https://x/m2.jpg"/></mets:file>'
+        "</mets:fileGrp></mets:fileSec></mets:mets>"
+    )
+
+    def test_mets_collects_one_filegrp_not_every_resolution(self) -> None:
+        """A METS file section holds one fileGrp per derivative. Collecting
+        across all of them fetched every page three to five times over and
+        spent max_pages on thumbnails, which come first in document order."""
+        from api.providers.sbb_digital import _collect_mets_urls
+
+        _pdfs, images = _collect_mets_urls(self.METS_MULTI_FILEGRP)
+
+        assert images == ["https://x/m1.jpg", "https://x/m2.jpg"]
+
+    def test_mets_without_use_labels_keeps_every_image(self) -> None:
+        """An unlabeled fileGrp cannot be ranked, so nothing is dropped."""
+        from api.providers.sbb_digital import _collect_mets_urls
+
+        mets = (
+            '<?xml version="1.0"?>'
+            '<mets:mets xmlns:mets="http://www.loc.gov/METS/" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink">'
+            "<mets:fileSec><mets:fileGrp>"
+            '<mets:file MIMETYPE="image/jpeg">'
+            '<mets:FLocat xlink:href="https://x/a.jpg"/></mets:file>'
+            '<mets:file MIMETYPE="application/pdf">'
+            '<mets:FLocat xlink:href="https://x/a.pdf"/></mets:file>'
+            "</mets:fileGrp></mets:fileSec></mets:mets>"
+        )
+
+        pdfs, images = _collect_mets_urls(mets)
+
+        assert pdfs == ["https://x/a.pdf"]
+        assert images == ["https://x/a.jpg"]
+
 
 class TestHathiTrustProvider:
     """Integration tests for the HathiTrust Bibliographic API provider."""
@@ -588,8 +637,8 @@ class TestDplaProvider:
             assert results[0].raw["id"] == "good"
 
     def test_search_empty_creators_yields_none_not_empty_string(self) -> None:
-        """An item with no creators must yield raw["creator"] is None, not
-        the empty-string artifact of joining an empty list."""
+        """An item with no creators must yield no creators at all, not the
+        empty-string artifact of joining an empty list."""
         response = {
             "docs": [{"id": "x1", "sourceResource": {"title": "T1", "creator": []}}]
         }
@@ -601,7 +650,8 @@ class TestDplaProvider:
 
             results = search_dpla("cookbook")
 
-            assert results[0].raw["creator"] is None
+            assert results[0].raw["creators"] == []
+            assert results[0].creators == []
 
 
 class TestBudgetGuards:
@@ -672,8 +722,11 @@ class TestGoogleBooksProvider:
             results = search_google_books("Cookery")
 
             assert len(results) == 2
-            assert results[0].raw["creator"] == ""
-            assert results[1].raw["creator"] == "123, X"
+            # An absent author list yields no creators. Joining into "" left
+            # creators == [""], a phantom author persisted to the ledgers.
+            assert results[0].raw["creators"] == []
+            assert results[0].creators == []
+            assert results[1].creators == ["123", "X"]
 
 
 class TestBritishLibraryProvider:
@@ -776,6 +829,39 @@ class TestBritishLibraryProvider:
 
             assert len(results) == 1
             assert results[0].raw["creator"] is None
+
+    def test_viewer_fallback_runs_when_manifest_endpoint_returns_html(
+        self, temp_output_dir: str
+    ) -> None:
+        """make_request returns a str for an HTML body, and api.bl.uk answers
+        with an error page rather than a status code. A truthiness test on the
+        result skipped the viewer fallback in exactly that case."""
+        manifest: dict[str, Any] = {"sequences": []}
+        responses: list[Any] = [
+            "<html>Service unavailable</html>",
+            '<html>var m = "https://api.bl.uk/x/manifest.json";</html>',
+            manifest,
+        ]
+        with (
+            patch(
+                "api.providers.british_library.make_request", side_effect=responses
+            ) as mock_req,
+            patch("api.providers.british_library.save_json", return_value=None),
+            patch(
+                "api.providers.british_library.download_iiif_renderings", return_value=0
+            ),
+            patch(
+                "api.providers.british_library.extract_image_service_bases",
+                return_value=[],
+            ),
+        ):
+            from api.providers.british_library import download_british_library_work
+
+            download_british_library_work({"identifier": "vdc_X"}, temp_output_dir)
+
+            # Three calls: the failing manifest endpoint, the viewer page, and
+            # the manifest discovered inside it.
+            assert mock_req.call_count == 3
 
 
 class TestERaraProvider:
@@ -909,10 +995,10 @@ class TestDownloadFunctions:
 
             results = search_internet_archive("T")
 
-            assert results[0].raw["creator"] == "Jane Doe"
+            assert results[0].creators == ["Jane Doe"]
 
     def test_ia_search_handles_list_creator(self) -> None:
-        """A list creator is still joined with commas."""
+        """A list creator is carried through as a list of creators."""
         resp = {
             "response": {
                 "docs": [
@@ -930,7 +1016,7 @@ class TestDownloadFunctions:
 
             results = search_internet_archive("T")
 
-            assert results[0].raw["creator"] == "A, B"
+            assert results[0].creators == ["A", "B"]
 
     def test_ia_download_thumbnail_only_returns_false(
         self, temp_output_dir: str
@@ -958,6 +1044,49 @@ class TestDownloadFunctions:
             result = download_ia_work({"identifier": "id1"}, temp_output_dir)
 
             assert result is False
+
+    def test_ia_download_skips_djvu_text_derivatives(
+        self, temp_output_dir: str
+    ) -> None:
+        """A substring test against "format" matched DjVuTXT and Djvu XML.
+        Those extensions are disallowed objects, so each was streamed in
+        full, filed under metadata/ and reported as a failure -- the whole
+        derivative family downloaded and discarded."""
+        metadata = {
+            "files": [
+                {"name": "id1_djvu.txt", "format": "DjVuTXT"},
+                {"name": "id1_djvu.xml", "format": "Djvu XML"},
+                {"name": "id1.pdf", "format": "Text PDF"},
+            ]
+        }
+        requested: list[str] = []
+
+        def _fake_download(url: str, folder: str, stem: str) -> str:
+            requested.append(url)
+            return "/x/f.pdf"
+
+        with (
+            patch("api.providers.internet_archive.make_request", return_value=metadata),
+            patch("api.providers.internet_archive.save_json", return_value=None),
+            patch(
+                "api.providers.internet_archive.prefer_pdf_over_images",
+                return_value=False,
+            ),
+            patch(
+                "api.providers.internet_archive.download_file",
+                side_effect=_fake_download,
+            ),
+        ):
+            from api.providers.internet_archive import download_ia_work
+
+            result = download_ia_work({"identifier": "id1"}, temp_output_dir)
+
+            assert result is True
+            # Exactly one primary object: preferred_exts is a priority order,
+            # not a shopping list, so the EPUB/DjVu passes must not run once a
+            # PDF has landed -- even with prefer_pdf_over_images disabled.
+            assert len(requested) == 1
+            assert requested[0].endswith("/id1.pdf")
 
     def test_gallica_download_no_content_returns_false(
         self, temp_output_dir: str

@@ -91,7 +91,8 @@ class SearchResult:
 def _as_list(value: Any) -> list[str]:
     """Convert various input types to a list of strings.
 
-    Handles None, strings (with comma splitting), lists, and other types.
+    Handles None, strings (split on the multi-value separator), lists, and
+    other types.
 
     Args:
         value: Input value to convert
@@ -106,10 +107,16 @@ def _as_list(value: Any) -> list[str]:
         return [str(v) for v in value if v is not None]
 
     if isinstance(value, str):
-        # Split on comma if it's a single string with commas
-        if "," in value:
-            return [v.strip() for v in value.split(",") if v.strip()]
-        return [value]
+        # Split on ";" -- the Dublin Core / MARC multi-value separator -- and
+        # NOT on ",". Catalog records name a single author in inverted form
+        # ("Escoffier, Auguste"); splitting that comma turned one person into
+        # two, which both halved the creator score (100 -> 69 against the
+        # query "Auguste Escoffier") and persisted a phantom second author to
+        # work.json and index.csv. Connectors that really do carry several
+        # creators pass a list under the plural "creators" key.
+        if ";" in value:
+            return [v.strip() for v in value.split(";") if v.strip()]
+        return [value] if value.strip() else []
 
     return [str(value)]
 

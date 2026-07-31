@@ -113,8 +113,13 @@ class TestAsList:
     def test_string(self) -> None:
         assert _as_list("author") == ["author"]
 
-    def test_comma_separated_string(self) -> None:
-        assert _as_list("a, b, c") == ["a", "b", "c"]
+    def test_semicolon_separated_string(self) -> None:
+        assert _as_list("a; b; c") == ["a", "b", "c"]
+
+    def test_comma_separated_string_is_one_creator(self) -> None:
+        # A comma in a creator string is the inverted-name separator, not a
+        # multi-value separator; splitting it invented a second author.
+        assert _as_list("Escoffier, Auguste") == ["Escoffier, Auguste"]
 
     def test_list(self) -> None:
         assert _as_list(["a", "b"]) == ["a", "b"]
@@ -126,10 +131,10 @@ class TestAsList:
         assert _as_list(42) == ["42"]
 
     def test_empty_string(self) -> None:
-        assert _as_list("") == [""]
+        assert _as_list("") == []
 
-    def test_comma_only(self) -> None:
-        assert _as_list(",") == []
+    def test_semicolon_only(self) -> None:
+        assert _as_list(";") == []
 
 
 # ============================================================================

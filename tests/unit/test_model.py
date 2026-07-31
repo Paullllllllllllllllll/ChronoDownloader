@@ -78,10 +78,14 @@ class TestAsList:
         """Test with single string."""
         assert _as_list("hello") == ["hello"]
 
-    def test_comma_separated_string(self) -> None:
-        """Test with comma-separated string."""
-        result = _as_list("one, two, three")
+    def test_semicolon_separated_string(self) -> None:
+        """Test with semicolon-separated string (the DC/MARC separator)."""
+        result = _as_list("one; two; three")
         assert result == ["one", "two", "three"]
+
+    def test_comma_is_not_a_separator(self) -> None:
+        """An inverted personal name must stay a single creator."""
+        assert _as_list("Escoffier, Auguste") == ["Escoffier, Auguste"]
 
     def test_list_input(self) -> None:
         """Test with list input."""

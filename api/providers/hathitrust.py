@@ -160,7 +160,9 @@ def search_hathitrust(
                             item_url = it.get("itemURL")
                 raw = {
                     "title": title_text,
-                    "creator": ", ".join(authors) if authors else None,
+                    # Plural key: joining with ", " would be re-split as an
+                    # inverted personal name (see api.model._as_list).
+                    "creators": [str(a) for a in authors] if authors else [],
                     "date": date,
                     "record_id": rec_id,
                     "htid": htid,

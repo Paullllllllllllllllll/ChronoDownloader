@@ -7,6 +7,7 @@ and faster downloads, as configured in the download preferences.
 from __future__ import annotations
 
 import logging
+import os
 import urllib.parse
 from typing import Any
 
@@ -64,19 +65,19 @@ def search_internet_archive(
         for item in data["response"]["docs"]:
             # Build a normalized SearchResult, keep raw for downloads
             ia_identifier = item.get("identifier")
-            # The IA API returns creator as either a single string or a list;
-            # joining a bare string would split it into individual characters.
-            # An absent or null "creator" must stay None so that the record
-            # yields no creators at all rather than a literal sentinel.
+            # The IA API returns creator as either a single string or a list.
+            # Pass a list through under the plural key rather than joining it
+            # with ", ": _as_list no longer splits on the comma, because that
+            # comma is far more often the inverted-name separator.
             creator_val = item.get("creator")
-            creator_str = (
-                creator_val
+            creators_list = (
+                [creator_val]
                 if isinstance(creator_val, str)
-                else (", ".join(str(c) for c in creator_val) if creator_val else None)
+                else ([str(c) for c in creator_val] if creator_val else [])
             )
             raw = {
                 "title": item.get("title", "N/A"),
-                "creator": creator_str,
+                "creators": creators_list,
                 "identifier": ia_identifier,
                 "item_url": f"https://archive.org/details/{ia_identifier}"
                 if ia_identifier
@@ -151,21 +152,37 @@ def download_ia_work(
                     if source == "derivative" and "_text" in name.lower():
                         continue
 
-                    if name.lower().endswith(ext) or ext.lstrip(".") in fmt:
-                        file_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(name)}"
-                        logger.info("IA: Attempting to download %s from %s", ext, name)
-                        if download_file(
-                            file_url, output_folder, f"ia_{identifier}_content"
-                        ):
-                            ok = True
-                            logger.info(
-                                "IA: Successfully downloaded %s for %s",
-                                name,
-                                identifier,
-                            )
-                            break
-                if ok and prefer_pdf:
-                    # If we got a primary object and prefer that, we can return early
+                    # Match on the file's own extension. A substring test
+                    # against "format" also matched the DjVu text and XML
+                    # derivatives (formats "DjVuTXT" and "Djvu XML"), whose
+                    # extensions are not in allowed_object_extensions: each
+                    # was streamed in full, filed under metadata/ and
+                    # reported as a failure, so the loop downloaded and
+                    # discarded the whole derivative family.
+                    name_ext = os.path.splitext(name)[1].lower()
+                    if name_ext != ext and not (
+                        not name_ext and ext.lstrip(".") in fmt
+                    ):
+                        continue
+
+                    file_url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(name)}"
+                    logger.info("IA: Attempting to download %s from %s", ext, name)
+                    if download_file(
+                        file_url, output_folder, f"ia_{identifier}_content"
+                    ):
+                        ok = True
+                        logger.info(
+                            "IA: Successfully downloaded %s for %s",
+                            name,
+                            identifier,
+                        )
+                        break
+                if ok:
+                    # preferred_exts is a priority order, not a shopping list:
+                    # one primary object per work. Gating this return on
+                    # prefer_pdf fetched the EPUB and the DjVu family on top
+                    # of an already-downloaded PDF whenever
+                    # prefer_pdf_over_images was disabled.
                     return True
             return ok
 
