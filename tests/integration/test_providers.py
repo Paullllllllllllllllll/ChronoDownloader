@@ -1129,7 +1129,11 @@ class TestDownloadFunctions:
         self, temp_output_dir: str
     ) -> None:
         """A successfully downloaded PDF/EPUB rendering must not be discarded
-        when the subsequent image downloads all fail."""
+        when the subsequent image downloads all fail.
+
+        The per-page loop lives in ``api.iiif._strategies.download_page_images``,
+        so the failing per-service download is pinned there.
+        """
         manifest = {"@id": "m"}
         with (
             patch("api.providers.bnf_gallica.make_request", return_value=manifest),
@@ -1142,8 +1146,9 @@ class TestDownloadFunctions:
             patch(
                 "api.providers.bnf_gallica.prefer_pdf_over_images", return_value=False
             ),
+            patch("api.iiif._strategies.budget_exhausted", return_value=False),
             patch(
-                "api.providers.bnf_gallica.download_one_from_service",
+                "api.iiif._strategies.download_one_from_service",
                 return_value=False,
             ),
         ):
@@ -1274,3 +1279,199 @@ class TestSearchResultScoring:
 
         assert sample_search_result.raw["__matching__"]["score"] == 100
         assert sample_search_result.raw["__matching__"]["creator_score"] == 100
+
+
+class TestPageImageLoopConsolidation:
+    """The per-page image loop is shared, not copied.
+
+    Each connector below hands ``api.iiif.download_page_images`` its own
+    provider key, which drives both the ``{key}_{id}_p{index:05d}.jpg``
+    filename shape and the ``get_max_pages(key)`` config lookup. The loop
+    invariants themselves (page cap, budget stop, per-page recovery, filename
+    shape) are pinned in tests/unit/test_download_helpers.py.
+    """
+
+    MANIFEST = {"@id": "m"}
+    SERVICES = ["https://svc/1", "https://svc/2"]
+
+    def test_gallica_uses_shared_loop_with_gallica_key(
+        self, temp_output_dir: str
+    ) -> None:
+        with (
+            patch("api.providers.bnf_gallica.make_request", return_value=self.MANIFEST),
+            patch("api.providers.bnf_gallica.save_json", return_value=None),
+            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.bnf_gallica.extract_image_service_bases",
+                return_value=self.SERVICES,
+            ),
+            patch(
+                "api.providers.bnf_gallica.download_page_images", return_value=True
+            ) as mock_pages,
+        ):
+            from api.providers.bnf_gallica import download_gallica_work
+
+            assert download_gallica_work({"ark_id": "bpt6k123"}, temp_output_dir)
+            mock_pages.assert_called_once_with(
+                self.SERVICES, temp_output_dir, "gallica", "bpt6k123"
+            )
+
+    def test_polona_uses_shared_loop_with_polona_key(
+        self, temp_output_dir: str
+    ) -> None:
+        with (
+            patch("api.providers.polona.make_request", return_value=self.MANIFEST),
+            patch("api.providers.polona.save_json", return_value=None),
+            patch("api.providers.polona.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.polona.extract_image_service_bases",
+                return_value=self.SERVICES,
+            ),
+            patch(
+                "api.providers.polona.download_page_images", return_value=True
+            ) as mock_pages,
+        ):
+            from api.providers.polona import download_polona_work
+
+            assert download_polona_work({"id": "9876"}, temp_output_dir)
+            mock_pages.assert_called_once_with(
+                self.SERVICES, temp_output_dir, "polona", "9876"
+            )
+
+    def test_ddb_uses_shared_loop_with_ddb_key(self, temp_output_dir: str) -> None:
+        item_meta = {"iiifManifest": "https://example.org/manifest.json"}
+        with (
+            patch("api.providers.ddb._api_key", return_value=None),
+            patch(
+                "api.providers.ddb.make_request",
+                side_effect=[item_meta, self.MANIFEST],
+            ),
+            patch("api.providers.ddb.save_json", return_value=None),
+            patch("api.providers.ddb.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.ddb.extract_image_service_bases",
+                return_value=self.SERVICES,
+            ),
+            patch(
+                "api.providers.ddb.download_page_images", return_value=True
+            ) as mock_pages,
+        ):
+            from api.providers.ddb import download_ddb_work
+
+            assert download_ddb_work({"id": "DDB1"}, temp_output_dir)
+            mock_pages.assert_called_once_with(
+                self.SERVICES, temp_output_dir, "ddb", "DDB1"
+            )
+
+    def test_dpla_uses_shared_loop_with_dpla_key(self, temp_output_dir: str) -> None:
+        item_details = {"object": "https://iiif.example.org/manifest.json"}
+        with (
+            patch("api.providers.dpla._api_key", return_value=None),
+            patch(
+                "api.providers.dpla.make_request",
+                side_effect=[item_details, self.MANIFEST],
+            ),
+            patch("api.providers.dpla.save_json", return_value=None),
+            patch("api.providers.dpla.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.dpla.extract_image_service_bases",
+                return_value=self.SERVICES,
+            ),
+            patch(
+                "api.providers.dpla.download_page_images", return_value=True
+            ) as mock_pages,
+        ):
+            from api.providers.dpla import download_dpla_work
+
+            assert download_dpla_work({"id": "DPLA1"}, temp_output_dir)
+            mock_pages.assert_called_once_with(
+                self.SERVICES, temp_output_dir, "dpla", "DPLA1"
+            )
+
+    def test_europeana_uses_shared_loop_with_europeana_key(
+        self, temp_output_dir: str
+    ) -> None:
+        with (
+            patch("api.providers.europeana._api_key", return_value="KEY"),
+            patch("api.providers.europeana.make_request", return_value=self.MANIFEST),
+            patch("api.providers.europeana.save_json", return_value=None),
+            patch("api.providers.europeana.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.europeana.extract_image_service_bases",
+                return_value=self.SERVICES,
+            ),
+            patch(
+                "api.providers.europeana.download_page_images", return_value=True
+            ) as mock_pages,
+        ):
+            from api.providers.europeana import download_europeana_work
+
+            item = {
+                "id": "EU1",
+                "iiif_manifest": "https://iiif.europeana.eu/1/manifest",
+            }
+            assert download_europeana_work(item, temp_output_dir)
+            mock_pages.assert_called_once_with(
+                self.SERVICES, temp_output_dir, "europeana", "EU1"
+            )
+
+    def test_europeana_falls_back_to_shared_direct_url_loop(
+        self, temp_output_dir: str
+    ) -> None:
+        """No IIIF Image service: the direct whole-image URLs go through the
+        shared direct-URL loop under the same provider key."""
+        urls = ["https://img/1", "https://img/2"]
+        with (
+            patch("api.providers.europeana._api_key", return_value="KEY"),
+            patch("api.providers.europeana.make_request", return_value=self.MANIFEST),
+            patch("api.providers.europeana.save_json", return_value=None),
+            patch("api.providers.europeana.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.europeana.extract_image_service_bases", return_value=[]
+            ),
+            patch(
+                "api.providers.europeana.extract_direct_image_urls", return_value=urls
+            ),
+            patch(
+                "api.providers.europeana.download_direct_image_urls", return_value=True
+            ) as mock_direct,
+        ):
+            from api.providers.europeana import download_europeana_work
+
+            item = {
+                "id": "EU1",
+                "iiif_manifest": "https://iiif.europeana.eu/1/manifest",
+            }
+            assert download_europeana_work(item, temp_output_dir)
+            mock_direct.assert_called_once_with(
+                urls, temp_output_dir, "europeana", "EU1"
+            )
+
+    def test_loc_uses_shared_loop_with_loc_key(self, temp_output_dir: str) -> None:
+        item_json = {
+            "item": {
+                "resources": [{"iiif_manifest": "https://example.org/manifest.json"}]
+            }
+        }
+        with (
+            patch(
+                "api.providers.loc.make_request",
+                side_effect=[item_json, self.MANIFEST],
+            ),
+            patch("api.providers.loc.save_json", return_value=None),
+            patch("api.providers.loc.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.loc.extract_image_service_bases",
+                return_value=self.SERVICES,
+            ),
+            patch(
+                "api.providers.loc.download_page_images", return_value=True
+            ) as mock_pages,
+        ):
+            from api.providers.loc import download_loc_work
+
+            item = {"item_url": "https://www.loc.gov/item/1/", "id": "LOC1"}
+            assert download_loc_work(item, temp_output_dir)
+            mock_pages.assert_called_once_with(
+                self.SERVICES, temp_output_dir, "loc", "LOC1"
+            )

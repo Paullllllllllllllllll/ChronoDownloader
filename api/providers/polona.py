@@ -8,13 +8,12 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from ..core.budget import budget_exhausted
-from ..core.config import get_max_pages, prefer_pdf_over_images
+from ..core.config import prefer_pdf_over_images
 from ..core.download import save_json
 from ..core.network import make_request
 from ..iiif import (
     download_iiif_renderings,
-    download_one_from_service,
+    download_page_images,
     extract_image_service_bases,
 )
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
@@ -113,42 +112,8 @@ def download_polona_work(
             "Polona: error while downloading manifest renderings for %s", item_id
         )
 
-    # Extract IIIF Image API service bases
+    # Extract IIIF Image API service bases and download per-canvas images
     service_bases: list[str] = extract_image_service_bases(manifest)
+    ok_any = download_page_images(service_bases, output_folder, "polona", item_id)
 
-    if not service_bases:
-        logger.info("No IIIF image services found in Polona manifest for %s", item_id)
-        return renders > 0
-
-    # Use shared helper to attempt per-canvas downloads
-
-    max_pages = get_max_pages("polona")
-    total = len(service_bases)
-    to_download = (
-        service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
-    )
-    logger.info(
-        "Polona: downloading %d/%d page images for %s", len(to_download), total, item_id
-    )
-    ok_any = False
-    for idx, svc in enumerate(to_download, start=1):
-        if budget_exhausted():
-            logger.warning(
-                "Download budget exhausted; stopping Polona downloads at "
-                "%d/%d pages for %s",
-                idx - 1,
-                len(to_download),
-                item_id,
-            )
-            break
-        try:
-            fname = f"polona_{item_id}_p{idx:05d}.jpg"
-            if download_one_from_service(svc, output_folder, fname):
-                ok_any = True
-            else:
-                logger.warning("Failed to download Polona image from %s", svc)
-        except Exception:
-            logger.exception(
-                "Error downloading Polona image for %s from %s", item_id, svc
-            )
     return ok_any or renders > 0

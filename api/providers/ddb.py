@@ -13,13 +13,12 @@ import os
 import re
 from typing import Any
 
-from ..core.budget import budget_exhausted
-from ..core.config import get_api_key_envvar, get_max_pages, prefer_pdf_over_images
+from ..core.config import get_api_key_envvar, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ..iiif import (
     download_iiif_renderings,
-    download_one_from_service,
+    download_page_images,
     extract_image_service_bases,
 )
 from ..model import (
@@ -245,43 +244,8 @@ def download_ddb_work(
             "DDB: error while downloading manifest renderings for %s", item_id
         )
 
-    # Extract IIIF image service bases from v2 or v3
+    # Extract IIIF image service bases from v2 or v3 and download per-canvas images
     image_service_bases = extract_image_service_bases(manifest)
-
-    if not image_service_bases:
-        logger.info("No IIIF image services found in DDB manifest for %s", item_id)
-        return renders > 0
-
-    # Use shared helper to attempt per-canvas image downloads
-
-    max_pages = get_max_pages("ddb")
-    total = len(image_service_bases)
-    to_download = (
-        image_service_bases[:max_pages]
-        if max_pages and max_pages > 0
-        else image_service_bases
-    )
-    logger.info(
-        "DDB: downloading %d/%d page images for %s", len(to_download), total, item_id
-    )
-    ok_any = False
-    for idx, svc in enumerate(to_download, start=1):
-        if budget_exhausted():
-            logger.warning(
-                "Download budget exhausted; stopping DDB downloads at "
-                "%d/%d pages for %s",
-                idx - 1,
-                len(to_download),
-                item_id,
-            )
-            break
-        try:
-            fname = f"ddb_{item_id}_p{idx:05d}.jpg"
-            if download_one_from_service(svc, output_folder, fname):
-                ok_any = True
-            else:
-                logger.warning("Failed to download DDB image from %s", svc)
-        except Exception:
-            logger.exception("Error downloading DDB image for %s from %s", item_id, svc)
+    ok_any = download_page_images(image_service_bases, output_folder, "ddb", item_id)
 
     return ok_any or renders > 0

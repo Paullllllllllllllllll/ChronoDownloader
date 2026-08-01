@@ -4,13 +4,13 @@ import logging
 import os
 from typing import Any
 
-from ..core.budget import budget_exhausted
-from ..core.config import get_api_key_envvar, get_max_pages, prefer_pdf_over_images
+from ..core.config import get_api_key_envvar, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ..iiif import (
+    download_direct_image_urls,
     download_iiif_renderings,
-    download_one_from_service,
+    download_page_images,
     extract_direct_image_urls,
     extract_image_service_bases,
 )
@@ -230,87 +230,18 @@ def download_europeana_work(
         )
 
     # Extract IIIF Image API service bases and download images (v2/v3)
-    ok_any = False
     service_bases = extract_image_service_bases(manifest_data)
 
     if service_bases:
-        # Use shared helper to download a single image per canvas
-        max_pages = get_max_pages("europeana")
-        total = len(service_bases)
-        to_download = (
-            service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
+        ok_any = download_page_images(
+            service_bases, output_folder, "europeana", item_id
         )
-        logger.info(
-            "Europeana: downloading %d/%d page images for %s",
-            len(to_download),
-            total,
-            item_id,
-        )
-        for idx, svc in enumerate(to_download, start=1):
-            if budget_exhausted():
-                logger.warning(
-                    "Download budget exhausted; stopping Europeana downloads "
-                    "at %d/%d pages for %s",
-                    idx - 1,
-                    len(to_download),
-                    item_id,
-                )
-                break
-            try:
-                fname = f"europeana_{item_id}_p{idx:05d}.jpg"
-                if download_one_from_service(svc, output_folder, fname):
-                    ok_any = True
-                else:
-                    logger.warning("Failed to download Europeana image from %s", svc)
-            except Exception:
-                logger.exception(
-                    "Error downloading Europeana image for %s from %s", item_id, svc
-                )
     else:
         # Fallback: try direct image URLs (common in simplified IIIF v3 manifests)
         direct_urls = extract_direct_image_urls(manifest_data)
-        if direct_urls:
-            max_pages = get_max_pages("europeana")
-            total = len(direct_urls)
-            to_download = (
-                direct_urls[:max_pages] if max_pages and max_pages > 0 else direct_urls
-            )
-            logger.info(
-                "Europeana: downloading %d/%d direct images for %s (no IIIF service)",
-                len(to_download),
-                total,
-                item_id,
-            )
-            for idx, url in enumerate(to_download, start=1):
-                if budget_exhausted():
-                    logger.warning(
-                        "Download budget exhausted; stopping Europeana "
-                        "direct-image downloads at %d/%d pages for %s",
-                        idx - 1,
-                        len(to_download),
-                        item_id,
-                    )
-                    break
-                try:
-                    fname = f"europeana_{item_id}_p{idx:05d}"
-                    if download_file(url, output_folder, fname):
-                        ok_any = True
-                    else:
-                        logger.warning(
-                            "Failed to download Europeana direct image from %s", url
-                        )
-                except Exception:
-                    logger.exception(
-                        "Error downloading Europeana direct image for %s from %s",
-                        item_id,
-                        url,
-                    )
-        else:
-            logger.info(
-                "No IIIF image services or direct images found in Europeana "
-                "manifest for %s",
-                item_id,
-            )
+        ok_any = download_direct_image_urls(
+            direct_urls, output_folder, "europeana", item_id
+        )
 
     if ok_any:
         return True

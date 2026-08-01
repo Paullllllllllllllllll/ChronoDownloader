@@ -4,13 +4,12 @@ import logging
 import urllib.parse
 from typing import Any, cast
 
-from ..core.budget import budget_exhausted
-from ..core.config import get_max_pages, prefer_pdf_over_images
+from ..core.config import prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ..iiif import (
     download_iiif_renderings,
-    download_one_from_service,
+    download_page_images,
     extract_image_service_bases,
 )
 from ..model import (
@@ -195,40 +194,9 @@ def download_loc_work(
             service_bases = extract_image_service_bases(iiif_manifest_data)
 
             if service_bases:
-                max_pages = get_max_pages("loc")
-                total = len(service_bases)
-                to_download = (
-                    service_bases[:max_pages]
-                    if max_pages and max_pages > 0
-                    else service_bases
+                ok_any = download_page_images(
+                    service_bases, output_folder, "loc", item_id
                 )
-                logger.info(
-                    "LOC: downloading %d/%d page images for %s",
-                    len(to_download),
-                    total,
-                    item_id,
-                )
-                ok_any = False
-                for idx, svc in enumerate(to_download, start=1):
-                    if budget_exhausted():
-                        logger.warning(
-                            "Download budget exhausted; stopping LOC downloads "
-                            "at %d/%d pages for %s",
-                            idx - 1,
-                            len(to_download),
-                            item_id,
-                        )
-                        break
-                    try:
-                        fname = f"loc_{item_id}_p{idx:05d}.jpg"
-                        if download_one_from_service(svc, output_folder, fname):
-                            ok_any = True
-                        else:
-                            logger.warning("Failed to download LOC image from %s", svc)
-                    except Exception:
-                        logger.exception(
-                            "Error downloading LOC image for %s from %s", item_id, svc
-                        )
                 return ok_any or renders > 0
             else:
                 logger.info(

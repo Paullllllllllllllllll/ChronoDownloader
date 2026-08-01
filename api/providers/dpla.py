@@ -6,13 +6,12 @@ import logging
 import os
 from typing import Any
 
-from ..core.budget import budget_exhausted
-from ..core.config import get_api_key_envvar, get_max_pages, prefer_pdf_over_images
+from ..core.config import get_api_key_envvar, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ..iiif import (
     download_iiif_renderings,
-    download_one_from_service,
+    download_page_images,
     extract_image_service_bases,
 )
 from ..model import (
@@ -209,48 +208,10 @@ def download_dpla_work(
                     "DPLA: error while downloading manifest renderings for %s", item_id
                 )
 
-            # Extract IIIF Image API service bases (v2/v3)
+            # Extract IIIF Image API service bases (v2/v3) and download images
             service_bases = extract_image_service_bases(manifest)
-
-            if service_bases:
-                # Use shared helper to try full-size image candidates per canvas
-                max_pages = get_max_pages("dpla")
-                total = len(service_bases)
-                to_download = (
-                    service_bases[:max_pages]
-                    if max_pages and max_pages > 0
-                    else service_bases
-                )
-                logger.info(
-                    "DPLA: downloading %d/%d page images for %s",
-                    len(to_download),
-                    total,
-                    item_id,
-                )
-                for idx, svc in enumerate(to_download, start=1):
-                    if budget_exhausted():
-                        logger.warning(
-                            "Download budget exhausted; stopping DPLA downloads "
-                            "at %d/%d pages for %s",
-                            idx - 1,
-                            len(to_download),
-                            item_id,
-                        )
-                        break
-                    try:
-                        fname = f"dpla_{item_id}_p{idx:05d}.jpg"
-                        if download_one_from_service(svc, output_folder, fname):
-                            ok_any = True
-                        else:
-                            logger.warning("Failed to download DPLA image from %s", svc)
-                    except Exception:
-                        logger.exception(
-                            "Error downloading DPLA image for %s from %s", item_id, svc
-                        )
-            else:
-                logger.info(
-                    "No IIIF image services found in DPLA manifest for %s", item_id
-                )
+            if download_page_images(service_bases, output_folder, "dpla", item_id):
+                ok_any = True
 
     if ok_any:
         return True

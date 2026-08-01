@@ -14,13 +14,12 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from ..core.budget import budget_exhausted
-from ..core.config import get_max_pages, prefer_pdf_over_images
+from ..core.config import prefer_pdf_over_images
 from ..core.download import save_json
 from ..core.network import make_request
 from ..iiif import (
     download_iiif_renderings,
-    download_one_from_service,
+    download_page_images,
     extract_image_service_bases,
 )
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
@@ -152,45 +151,10 @@ def download_gallica_work(
             "Gallica: error while downloading manifest renderings for %s", ark_id
         )
 
-    # Extract image service bases from IIIF v2 or v3
+    # Extract image service bases from IIIF v2 or v3 and download page images
     image_service_bases = extract_image_service_bases(manifest)
-
-    if not image_service_bases:
-        logger.info("No IIIF image services found in Gallica manifest for %s", ark_id)
-        return renders > 0
-
-    # Use shared helper to try full-size image candidates per canvas
-
-    max_pages = get_max_pages("gallica")
-    total = len(image_service_bases)
-    to_download = (
-        image_service_bases[:max_pages]
-        if max_pages and max_pages > 0
-        else image_service_bases
+    success_any = download_page_images(
+        image_service_bases, output_folder, "gallica", ark_id
     )
-    logger.info(
-        "Gallica: downloading %d/%d page images for %s", len(to_download), total, ark_id
-    )
-    success_any = False
-    for idx, svc in enumerate(to_download, start=1):
-        if budget_exhausted():
-            logger.warning(
-                "Download budget exhausted; stopping Gallica downloads at "
-                "%d/%d pages for %s",
-                idx - 1,
-                len(to_download),
-                ark_id,
-            )
-            break
-        try:
-            fname = f"gallica_{ark_id}_p{idx:05d}.jpg"
-            if download_one_from_service(svc, output_folder, fname):
-                success_any = True
-            else:
-                logger.warning("Failed to download Gallica image from service %s", svc)
-        except Exception:
-            logger.exception(
-                "Error downloading Gallica image for %s from %s", ark_id, svc
-            )
 
     return success_any or renders > 0

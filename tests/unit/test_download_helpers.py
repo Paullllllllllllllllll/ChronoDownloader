@@ -34,6 +34,15 @@ class TestDownloadPageImages:
         )
         assert result is True
         assert mock_dl.call_count == 3
+        # Filename shape is part of the connector contract: every provider
+        # consolidated onto this helper must keep producing
+        # "{provider_key}_{item_id}_p{index:05d}.jpg" in the work folder.
+        assert [c.args[1] for c in mock_dl.call_args_list] == ["/out"] * 3
+        assert [c.args[2] for c in mock_dl.call_args_list] == [
+            "test_provider_item123_p00001.jpg",
+            "test_provider_item123_p00002.jpg",
+            "test_provider_item123_p00003.jpg",
+        ]
 
     @patch("api.iiif._strategies.download_one_from_service")
     @patch("api.iiif._strategies.budget_exhausted", return_value=False)
@@ -97,6 +106,49 @@ class TestDownloadPageImages:
         mock_dl.assert_not_called()
 
     @patch("api.iiif._strategies.download_one_from_service")
+    @patch("api.iiif._strategies.budget_exhausted")
+    @patch("api.iiif._strategies.get_max_pages", return_value=None)
+    def test_stops_mid_loop_when_budget_runs_out(
+        self, mock_max: MagicMock, mock_budget: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        """The budget guard must abandon the remaining pages, not only refuse
+        to start: pages already written still count as a success."""
+        from api.iiif import download_page_images
+
+        mock_budget.side_effect = [False, True]
+        mock_dl.return_value = True
+        result = download_page_images(
+            ["https://svc/1", "https://svc/2", "https://svc/3"],
+            "/out",
+            "test_provider",
+            "item123",
+        )
+        assert result is True
+        assert mock_dl.call_count == 1
+
+    @patch("api.iiif._strategies.download_one_from_service")
+    @patch("api.iiif._strategies.budget_exhausted")
+    @patch("api.iiif._strategies.get_max_pages", return_value=None)
+    def test_stops_when_budget_runs_out_during_a_page(
+        self, mock_max: MagicMock, mock_budget: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        """A failed page that turns out to be a budget refusal ends the loop
+        rather than burning the remaining pages on doomed requests."""
+        from api.iiif import download_page_images
+
+        # Iteration 1: guard passes, download fails, post-failure guard trips.
+        mock_budget.side_effect = [False, True]
+        mock_dl.return_value = False
+        result = download_page_images(
+            ["https://svc/1", "https://svc/2", "https://svc/3"],
+            "/out",
+            "test_provider",
+            "item123",
+        )
+        assert result is False
+        assert mock_dl.call_count == 1
+
+    @patch("api.iiif._strategies.download_one_from_service")
     @patch("api.iiif._strategies.budget_exhausted", return_value=False)
     @patch("api.iiif._strategies.get_max_pages", return_value=None)
     def test_handles_download_failure(
@@ -131,6 +183,116 @@ class TestDownloadPageImages:
             "item123",
         )
         assert result is False
+
+    @patch("api.iiif._strategies.download_one_from_service")
+    @patch("api.iiif._strategies.budget_exhausted", return_value=False)
+    @patch("api.iiif._strategies.get_max_pages", return_value=None)
+    def test_exception_on_one_page_does_not_abort_the_work(
+        self, mock_max: MagicMock, mock_budget: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        """Per-page recovery: one blown-up canvas must not cost the rest."""
+        from api.iiif import download_page_images
+
+        mock_dl.side_effect = [Exception("network error"), True, True]
+        result = download_page_images(
+            ["https://svc/1", "https://svc/2", "https://svc/3"],
+            "/out",
+            "test_provider",
+            "item123",
+        )
+        assert result is True
+        assert mock_dl.call_count == 3
+
+
+# ============================================================================
+# download_direct_image_urls
+# ============================================================================
+
+
+class TestDownloadDirectImageUrls:
+    """Tests for the direct whole-image URL loop (no IIIF Image API service)."""
+
+    @patch("api.iiif._strategies.download_file")
+    @patch("api.iiif._strategies.budget_exhausted", return_value=False)
+    @patch("api.iiif._strategies.get_max_pages", return_value=None)
+    def test_downloads_all_urls_with_page_numbered_names(
+        self, mock_max: MagicMock, mock_budget: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        from api.iiif import download_direct_image_urls
+
+        mock_dl.return_value = "/out/f"
+        result = download_direct_image_urls(
+            ["https://img/1", "https://img/2"],
+            "/out",
+            "europeana",
+            "item123",
+        )
+        assert result is True
+        assert [c.args[2] for c in mock_dl.call_args_list] == [
+            "europeana_item123_p00001",
+            "europeana_item123_p00002",
+        ]
+
+    @patch("api.iiif._strategies.download_file")
+    @patch("api.iiif._strategies.budget_exhausted", return_value=False)
+    @patch("api.iiif._strategies.get_max_pages", return_value=1)
+    def test_respects_max_pages_from_config(
+        self, mock_max: MagicMock, mock_budget: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        from api.iiif import download_direct_image_urls
+
+        mock_dl.return_value = "/out/f"
+        result = download_direct_image_urls(
+            ["https://img/1", "https://img/2"],
+            "/out",
+            "europeana",
+            "item123",
+        )
+        assert result is True
+        assert mock_dl.call_count == 1
+        mock_max.assert_called_once_with("europeana")
+
+    def test_returns_false_for_empty_url_list(self) -> None:
+        from api.iiif import download_direct_image_urls
+
+        assert download_direct_image_urls([], "/out", "europeana", "item123") is False
+
+    @patch("api.iiif._strategies.download_file")
+    @patch("api.iiif._strategies.budget_exhausted")
+    @patch("api.iiif._strategies.get_max_pages", return_value=None)
+    def test_stops_mid_loop_when_budget_runs_out(
+        self, mock_max: MagicMock, mock_budget: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        from api.iiif import download_direct_image_urls
+
+        mock_budget.side_effect = [False, True]
+        mock_dl.return_value = "/out/f"
+        result = download_direct_image_urls(
+            ["https://img/1", "https://img/2", "https://img/3"],
+            "/out",
+            "europeana",
+            "item123",
+        )
+        assert result is True
+        assert mock_dl.call_count == 1
+
+    @patch("api.iiif._strategies.download_file")
+    @patch("api.iiif._strategies.budget_exhausted", return_value=False)
+    @patch("api.iiif._strategies.get_max_pages", return_value=None)
+    def test_exception_on_one_url_does_not_abort_the_work(
+        self, mock_max: MagicMock, mock_budget: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        from api.iiif import download_direct_image_urls
+
+        mock_dl.side_effect = [Exception("boom"), "/out/f"]
+        result = download_direct_image_urls(
+            ["https://img/1", "https://img/2"],
+            "/out",
+            "europeana",
+            "item123",
+        )
+        assert result is True
+        assert mock_dl.call_count == 2
 
 
 # ============================================================================
