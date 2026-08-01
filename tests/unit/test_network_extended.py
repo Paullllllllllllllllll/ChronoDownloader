@@ -267,3 +267,31 @@ class TestMakeJsonRequest:
         mock_req.return_value = None
         result = make_json_request("https://example.org/api")
         assert result is None
+
+
+class TestHalfOpenRetryReport:
+    """A denied HALF_OPEN caller must not be told to retry in zero seconds."""
+
+    def test_half_open_reports_the_remaining_probe_window(self) -> None:
+        from api.core.network import CircuitBreaker
+
+        cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=60.0)
+        cb.record_failure("p")
+        cb.opened_at -= 61.0  # cooldown elapsed: next call takes the probe
+        assert cb.allow_request() is True  # probe admitted
+        assert cb.allow_request() is False  # concurrent worker denied
+        assert cb.time_until_retry() > 0.0
+
+
+class TestDdbManifestHostsArePaced:
+    """DDB manifests live at the holding library, not at DDB's own hosts."""
+
+    def test_aggregated_manifest_hosts_map_back_to_ddb(self) -> None:
+        from api.core.network import get_provider_for_url
+
+        urls = (
+            "https://digi.ub.uni-heidelberg.de/diglit/iiif/xyz/manifest.json",
+            "https://manifests.sub.uni-goettingen.de/iiif/presentation/x/manifest",
+        )
+        for url in urls:
+            assert get_provider_for_url(url) == "ddb", url

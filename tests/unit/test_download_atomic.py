@@ -18,6 +18,7 @@ import pytest
 import requests
 
 from api.core import download as dl_mod
+from api.core.budget import DownloadBudget
 
 
 def _make_session(response: MagicMock) -> MagicMock:
@@ -350,3 +351,58 @@ def test_non_retryable_status_records_success_on_breaker(
 
     assert result is None
     mock_cb.record_success.assert_called_once()
+
+
+class TestSaveJsonBudget:
+    """``save_json`` must be bound by the metadata budget like any download.
+
+    It previously wrote first and then called ``record_download``, which only
+    increments counters: it consults no limit and never trips the ``stop``
+    policy. Every manifest -- megabytes on a large work -- was therefore
+    exempt from both ``download_limits.total.metadata_gb`` and the per-work
+    ``metadata_mb`` cap.
+    """
+
+    def test_writes_within_budget(self, temp_output_dir: str) -> None:
+        budget = DownloadBudget()
+        with (
+            patch.object(dl_mod, "_BUDGET", budget),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value={}),
+        ):
+            path = dl_mod.save_json({"a": 1}, temp_output_dir, "meta")
+
+        assert path is not None
+        assert os.path.exists(path)
+        assert budget.total_metadata_bytes > 0
+
+    def test_refuses_and_discards_beyond_the_ceiling(
+        self, temp_output_dir: str
+    ) -> None:
+        budget = DownloadBudget()
+        limits = {
+            "total": {"metadata_gb": 1e-9},  # about 1 byte
+            "on_exceed": "stop",
+        }
+        with (
+            patch.object(dl_mod, "_BUDGET", budget),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value=limits),
+        ):
+            path = dl_mod.save_json({"payload": "x" * 5000}, temp_output_dir, "meta")
+
+        assert path is None
+        meta_dir = os.path.join(temp_output_dir, "metadata")
+        leftovers = os.listdir(meta_dir) if os.path.isdir(meta_dir) else []
+        assert leftovers == [], f"refused metadata left on disk: {leftovers}"
+        assert budget.exhausted() is True
+
+    def test_skips_once_the_budget_is_exhausted(self, temp_output_dir: str) -> None:
+        budget = DownloadBudget()
+        budget._exhausted = True
+        with (
+            patch.object(dl_mod, "_BUDGET", budget),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value={}),
+        ):
+            assert dl_mod.save_json({"a": 1}, temp_output_dir, "meta") is None

@@ -153,10 +153,15 @@ class CircuitBreaker:
             Seconds remaining, or 0 if requests are allowed
         """
         with self._lock:
-            if self.state != CircuitState.OPEN:
-                return 0.0
-            elapsed = time.monotonic() - self.opened_at
-            return max(0.0, self.cooldown_seconds - elapsed)
+            if self.state == CircuitState.OPEN:
+                elapsed = time.monotonic() - self.opened_at
+                return max(0.0, self.cooldown_seconds - elapsed)
+            if self.state == CircuitState.HALF_OPEN:
+                # A denied caller in HALF_OPEN waits out the in-flight probe's
+                # window, not zero seconds; callers log this value as the wait.
+                elapsed = time.monotonic() - self.probe_started_at
+                return max(0.0, self.cooldown_seconds - elapsed)
+            return 0.0
 
 
 # Per-provider circuit breakers
@@ -222,6 +227,12 @@ PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
     "ddb": (
         "api.deutsche-digitale-bibliothek.de",
         "iiif.deutsche-digitale-bibliothek.de",
+        # DDB aggregates: its manifests live at the holding library, and
+        # ddb.IIIF_MANIFEST_PATTERNS builds URLs on these two hosts. Without
+        # them, every page image of such a work bypasses DDB's rate limiter
+        # and circuit breaker entirely.
+        "digi.ub.uni-heidelberg.de",
+        "manifests.sub.uni-goettingen.de",
     ),
     "polona": ("polona.pl",),
     "bne": ("datos.bne.es", "bnedigital.bne.es", "bdh.bne.es"),

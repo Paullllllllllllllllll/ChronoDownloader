@@ -30,6 +30,26 @@ __all__ = [
 ]
 
 
+def _warn_if_incomplete(
+    provider_key: str, item_id: str, downloaded: int, requested: int
+) -> None:
+    """Log a page-level gap left by a partially successful download.
+
+    Only the direct-manifest path records ``pages_expected``/
+    ``pages_downloaded``; a search-driven work that retrieved 3 of 500 pages
+    is otherwise recorded as ``completed`` with no trace of the shortfall.
+    Surfacing it in the run log is the cheapest honest signal available here.
+    """
+    if 0 < downloaded < requested:
+        logger.warning(
+            "%s: incomplete page set for %s -- %d of %d page(s) downloaded.",
+            provider_key.upper(),
+            item_id,
+            downloaded,
+            requested,
+        )
+
+
 def download_page_images(
     service_bases: list[str],
     output_folder: str,
@@ -76,7 +96,7 @@ def download_page_images(
         item_id,
     )
 
-    any_downloaded = False
+    downloaded = 0
     for idx, svc in enumerate(to_download, start=1):
         if budget_exhausted():
             logger.warning(
@@ -92,7 +112,7 @@ def download_page_images(
         try:
             fname = f"{provider_key}_{item_id}_p{idx:05d}.jpg"
             if download_one_from_service(svc, output_folder, fname):
-                any_downloaded = True
+                downloaded += 1
             else:
                 if budget_exhausted():
                     logger.warning(
@@ -114,7 +134,8 @@ def download_page_images(
                 svc,
             )
 
-    return any_downloaded
+    _warn_if_incomplete(provider_key, item_id, downloaded, len(to_download))
+    return downloaded > 0
 
 
 def download_direct_image_urls(
@@ -163,7 +184,7 @@ def download_direct_image_urls(
         item_id,
     )
 
-    any_downloaded = False
+    downloaded = 0
     for idx, url in enumerate(to_download, start=1):
         if budget_exhausted():
             logger.warning(
@@ -179,7 +200,7 @@ def download_direct_image_urls(
         try:
             fname = f"{provider_key}_{item_id}_p{idx:05d}"
             if download_file(url, output_folder, fname) is not None:
-                any_downloaded = True
+                downloaded += 1
             else:
                 logger.warning(
                     "Failed to download %s image from URL %s",
@@ -194,7 +215,8 @@ def download_direct_image_urls(
                 url,
             )
 
-    return any_downloaded
+    _warn_if_incomplete(provider_key, item_id, downloaded, len(to_download))
+    return downloaded > 0
 
 
 def download_iiif_manifest_and_images(

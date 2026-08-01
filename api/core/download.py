@@ -857,15 +857,34 @@ def save_json(data: Any, folder_path: str, filename: str) -> str | None:
         base = f"{stem}_{prov_slug}_{idx}"
         filepath = os.path.join(meta_dir, sanitize_filename(base) + ".json")
 
+    if _BUDGET.exhausted():
+        logger.warning("Download budget exhausted; skipping metadata save %s", filename)
+        return None
+
     try:
         atomic_write_json(filepath, data)
-        logger.info("Saved JSON: %s", filepath)
-        # Book metadata bytes against the metadata budget bucket.
+        # Book the bytes against the metadata bucket through the enforcing
+        # check-and-record path. record_download() only incremented counters,
+        # so neither the metadata ceilings nor the "stop" policy applied to
+        # anything written here -- and manifests for large works run to
+        # megabytes. The size is unknowable before serialization, so this
+        # writes first and discards on refusal, mirroring the .part semantics
+        # of download_file.
         try:
             size = os.path.getsize(filepath)
-            _BUDGET.record_download("metadata", get_current_work(), size)
         except OSError:
-            pass
+            size = 0
+        if size and not _BUDGET.add_bytes(
+            None, get_current_work(), size, content_type="metadata"
+        ):
+            logger.warning(
+                "Metadata budget would be exceeded by %s (%d bytes); discarding.",
+                filepath,
+                size,
+            )
+            _safe_remove(filepath)
+            return None
+        logger.info("Saved JSON: %s", filepath)
         return filepath
     except (OSError, TypeError, ValueError) as e:
         logger.error("Error saving JSON %s: %s", filepath, e)
