@@ -1,4 +1,4 @@
-# ChronoDownloader v1.20.0
+# ChronoDownloader v1.21.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1222,6 +1222,34 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.21.0** (1 August 2026) -- Fifth and final maintenance round. Two
+  network defects that made a dead provider expensive are fixed: a blanket
+  rejection of the client (401/403) now feeds the circuit breaker instead of
+  counting as a success, so a provider that refuses every request trips its
+  own breaker rather than being re-dialled for every remaining work, while a
+  missing resource still records a success and preserves the half-open probe
+  semantics; and a connection that never comes up is retried twice rather
+  than for the whole per-provider budget, cutting one search against a
+  silently dropped host from roughly 370 seconds to 44. Metadata quality is
+  the round's other theme. DDB read its creator from a fixed index into an
+  unlabeled display array and persisted document types, publishers and page
+  counts as authors; the MODS connectors matched any name at any depth and
+  credited subject headings; Wellcome never asked for contributors or
+  production at all; and six connectors dropped a publication date the
+  response already carried. All are repaired and verified live. Also fixed:
+  a discarded download no longer burns its page number, which had left
+  phantom gaps in the image sequence; a finished file is promoted with the
+  bounded retry the state writers already use, rather than being thrown away
+  on the first transient Windows lock; a non-Latin title carrying a year
+  keeps its script instead of normalizing to the year alone; the IIIF
+  rendering whitelist and limit both bind as documented and maxWidth is
+  treated as the ceiling it is; one malformed quota value no longer takes
+  down the run or erases every provider's counter; deferrals are counted
+  where they happen instead of being inferred from a queue length that a
+  re-deferred work leaves unmoved; a failed ledger write is no longer
+  committed by the next successful one; and the BNE search is constrained to
+  historical imprints, failing open on undated and unparseable records.
 
 - **v1.20.0** (1 August 2026) -- Fourth maintenance round, driven by a live
   probe of all 17 search endpoints. Three providers were silently returning
