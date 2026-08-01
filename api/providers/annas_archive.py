@@ -52,9 +52,16 @@ from ..model import (
 
 logger = logging.getLogger(__name__)
 
-SEARCH_URL = "https://annas-archive.gl/search"
-MD5_PAGE_URL = "https://annas-archive.gl/md5/{md5}"
-FAST_DOWNLOAD_API_URL = "https://annas-archive.gl/dyn/api/fast_download.json"
+# Anna's Archive rotates its mirror domains, and a retired one stops resolving
+# rather than redirecting: the previously hard-coded annas-archive.gl now fails
+# DNS outright, which killed search, the md5 page, and the fast-download API at
+# once. Deriving all three from one base keeps the next rotation to a one-line
+# change. Alternates seen in the wild: .li, .pm, .in, .org, .se -- only some
+# resolve at any given time, and .pm currently serves an untrusted certificate.
+BASE_URL = "https://annas-archive.li"
+SEARCH_URL = f"{BASE_URL}/search"
+MD5_PAGE_URL = BASE_URL + "/md5/{md5}"
+FAST_DOWNLOAD_API_URL = f"{BASE_URL}/dyn/api/fast_download.json"
 
 
 def is_api_backed() -> bool:

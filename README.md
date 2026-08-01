@@ -88,9 +88,40 @@ extraction pipeline.
 links. A member API key enables faster downloads with daily quota
 tracking (875/day).
 
+### Reachability
+
+Every search endpoint was probed live on 1 August 2026 with the
+client this tool ships. Eight providers answered normally: Internet
+Archive, BnF Gallica, Europeana, DPLA, DDB, MDZ, e-rara, and
+Wellcome Collection. Polona answers through its JSON gateway. Google
+Books answers, though `free_only` (the default) discards
+non-public-domain volumes. HathiTrust has no public keyword API and
+only answers when the query carries an explicit identifier
+(`oclc:`, `isbn:`, `lccn:`, `issn:`, `htid:`), so it is inert for
+title-driven batches.
+
+The rest were unreachable at that time and ship disabled in
+`config.example.json`:
+
+- **Library of Congress** and **BNE** answer 403 behind a bot
+  filter. BNE is a TLS-fingerprint block -- `curl` gets a valid
+  response where the `requests` client does not -- so a
+  browser-impersonating HTTP client would restore it. LoC blocks
+  `curl` identically, so it is a broader bot rule.
+- **British Library**: `sru.bl.uk` no longer resolves and the BNB
+  SPARQL host does not complete a TCP handshake. Both search paths
+  are dead.
+- **SLUB Dresden** returns HTTP 500 naming an expired certificate on
+  its own upstream index; nothing to fix client-side.
+- **SBB Digital Collections**: `sru.gbv.de` resolves but accepts no
+  connection. Note that one search there costs roughly 18 minutes
+  before returning empty (5 query variants x 8 attempts x 40 s).
+- **Anna's Archive** rotates mirror domains; the shipped base URL
+  points at whichever mirror last resolved, and may need updating.
+
 ## Installation
 
-**Requirements**: Python 3.10+ (3.11+ recommended),
+**Requirements**: Python 3.11+ (matching `requires-python`),
 [uv](https://docs.astral.sh/uv/), internet connection.
 
 ```bash
@@ -149,7 +180,7 @@ variables or shell profile.
 - [DPLA API](https://pro.dp.la/developers/api-codex) (free)
 - [Deutsche Digitale Bibliothek](https://www.deutsche-digitale-bibliothek.de/content/api) (free)
 - [Google Cloud Console](https://console.cloud.google.com/apis/library/books.googleapis.com)
-- [Anna's Archive](https://annas-archive.org) membership (optional,
+- [Anna's Archive](https://annas-archive.li) membership (optional,
   for fast downloads)
 
 ### Remapping Key Environment Variables (optional)
