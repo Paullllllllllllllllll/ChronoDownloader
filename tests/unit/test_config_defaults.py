@@ -31,10 +31,12 @@ from api.core.config import (
     DEFAULT_ON_EXCEED,
     DEFAULT_RESUME_MODE,
     DEFAULT_SEARCH_TIMEOUT_SECONDS,
+    DEFAULT_YEAR_TOLERANCE,
     get_download_config,
     get_min_title_score,
     get_resume_mode,
     get_search_timeout,
+    get_year_tolerance,
     resolve_max_parallel_downloads,
 )
 from api.providers.google_books import DEFAULT_MAX_FILES, _gb_max_files
@@ -54,6 +56,7 @@ class TestDocumentedDefaultValues:
         assert DEFAULT_MAX_PARALLEL_DOWNLOADS == 1
         assert DEFAULT_MAX_PARALLEL_SEARCHES == 1
         assert DEFAULT_SEARCH_TIMEOUT_SECONDS == 60.0
+        assert DEFAULT_YEAR_TOLERANCE == 15
         assert DEFAULT_MAX_FILES == 2
 
 
@@ -90,6 +93,10 @@ class TestConfigAbsentFallbacks:
         with patch("api.core.config.get_config", return_value={}):
             assert get_search_timeout() == DEFAULT_SEARCH_TIMEOUT_SECONDS
 
+    def test_year_tolerance(self) -> None:
+        with patch("api.core.config.get_config", return_value={}):
+            assert get_year_tolerance() == DEFAULT_YEAR_TOLERANCE
+
     def test_on_exceed(self) -> None:
         with patch("api.core.config.get_config", return_value={}):
             assert DownloadBudget()._policy() == DEFAULT_ON_EXCEED
@@ -114,6 +121,7 @@ class TestConfigAbsentFallbacks:
         assert sel["keep_non_selected_metadata"] is DEFAULT_KEEP_NON_SELECTED_METADATA
         assert sel["max_parallel_searches"] == DEFAULT_MAX_PARALLEL_SEARCHES
         assert sel["search_timeout_seconds"] == DEFAULT_SEARCH_TIMEOUT_SECONDS
+        assert sel["year_tolerance"] == DEFAULT_YEAR_TOLERANCE
 
     def test_max_parallel_searches(self) -> None:
         from main.orchestration.selection import _get_max_parallel_searches

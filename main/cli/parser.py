@@ -308,6 +308,16 @@ Examples:
     )
 
     parser.add_argument(
+        "--year-tolerance",
+        type=int,
+        default=None,
+        metavar="YEARS",
+        help="Override selection.year_tolerance for this run: candidates dated "
+        "further than this from the CSV's year column are penalized in ranking "
+        "(0 = exact-year preference). Inert without a year column.",
+    )
+
+    parser.add_argument(
         "--search-timeout",
         type=float,
         default=None,

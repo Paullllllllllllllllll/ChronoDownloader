@@ -37,6 +37,7 @@ DEFAULT_KEEP_NON_SELECTED_METADATA = False
 DEFAULT_ON_EXCEED = "stop"
 DEFAULT_MAX_PARALLEL_DOWNLOADS = 1
 DEFAULT_MAX_PARALLEL_SEARCHES = 1
+DEFAULT_YEAR_TOLERANCE = 15
 
 
 def get_config(force_reload: bool = False) -> dict[str, Any]:
@@ -396,6 +397,42 @@ def get_min_title_score(
             pass
 
     return default
+
+
+def get_year_tolerance(default: int = DEFAULT_YEAR_TOLERANCE) -> int:
+    """Get the edition-year tolerance in years from ``selection.year_tolerance``.
+
+    The tolerance is the half-width of the window around a query year inside
+    which a candidate's imprint year is treated as an exact period match. Only
+    candidates OUTSIDE the window are penalized, and only when a query year is
+    known at all -- see :func:`main.orchestration.selection.year_penalty`.
+
+    Semantics:
+    - key absent: ``default`` (``DEFAULT_YEAR_TOLERANCE``); the penalty is
+      still applied, but only for works whose query carries a year
+    - explicit ``0``: exact-year preference (any deviation is penalized)
+    - negative: clamped to 0
+    - non-numeric: ``default``, with a warning
+
+    Args:
+        default: Fallback when the key is absent or unusable.
+
+    Returns:
+        Tolerance in years, never negative.
+    """
+    sel = get_config().get("selection", {})
+    raw = sel.get("year_tolerance") if isinstance(sel, dict) else None
+    if raw is None:
+        return default
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Ignoring non-numeric selection.year_tolerance: %r; using %d.",
+            raw,
+            default,
+        )
+        return default
 
 
 def _coerce_search_timeout(value: Any) -> float | None:

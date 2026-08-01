@@ -8,6 +8,13 @@ Expected CSV columns (from bib_sampling.ipynb):
     entry_id, short_title, primary_category, stratum_abbrev, selection_type,
     re_sampled, full_title, main_author, earliest_year, regional_editions,
     total_editions, pps_weight, design_weight, short_note, retrievable, link
+
+Only entry_id and short_title (or direct_link) are required. An explicit
+``year`` column, when present, supplies the query year that drives the
+edition-year ranking penalty; see :func:`get_row_year`. The sampling frame's
+``earliest_year`` is deliberately NOT honored: it records a work's first
+attestation, not the edition sought, so activating the penalty from it would
+punish legitimate later editions. Copy it into a ``year`` column to opt in.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from typing import Any
 import pandas as pd
 
 from api.core.atomic import atomic_write_text
+from api.matching import extract_year
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +54,12 @@ TIMESTAMP_COL = "download_timestamp"
 # Direct IIIF link column (optional - for bypassing search with known IIIF
 # manifest URLs)
 DIRECT_LINK_COL = "direct_link"
+
+# Optional query-year column, matched case-insensitively. ``year`` is the
+# explicit opt-in name; the sampling frames' ``earliest_year`` is deliberately
+# excluded so existing corpora keep unchanged ranking until the operator adds
+# a ``year`` column. Without it the edition-year penalty stays dormant.
+YEAR_COLS = ("year",)
 
 _TRUTHY = frozenset({"true", "1", "yes", "y"})
 _FALSY = frozenset({"false", "0", "no", "n"})
@@ -97,6 +111,32 @@ def _parse_status(val: object) -> str:
             if f == 0.0:
                 return "failed"
     return "pending"
+
+
+def get_row_year(row: pd.Series) -> int | None:
+    """Read the optional query year from a works-CSV row.
+
+    Looks up :data:`YEAR_COLS` in order, case-insensitively, and returns the
+    first plausible four-digit year found (``extract_year`` accepts the string,
+    integer, and float forms pandas may produce, and rejects NaN). Returns None
+    when no such column exists or its cell holds no usable year, which leaves
+    the edition-year ranking penalty dormant for that row.
+
+    Args:
+        row: A works DataFrame row.
+
+    Returns:
+        The query year, or None when the row carries none.
+    """
+    lookup = {str(col).strip().lower(): col for col in row.index}
+    for name in YEAR_COLS:
+        col = lookup.get(name)
+        if col is None:
+            continue
+        year = extract_year(row[col])
+        if year is not None:
+            return year
+    return None
 
 
 def load_works_csv(csv_path: str) -> pd.DataFrame:
@@ -485,6 +525,8 @@ __all__ = [
     "STATUS_COL",
     "LINK_COL",
     "DIRECT_LINK_COL",
+    "YEAR_COLS",
+    "get_row_year",
     "load_works_csv",
     "get_pending_works",
     "get_completed_entry_ids",

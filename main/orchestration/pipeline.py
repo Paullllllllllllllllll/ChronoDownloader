@@ -46,6 +46,7 @@ from api.core.config import (
     DEFAULT_MAX_PARALLEL_SEARCHES,
     DEFAULT_MIN_TITLE_SCORE,
     DEFAULT_SEARCH_TIMEOUT_SECONDS,
+    DEFAULT_YEAR_TOLERANCE,
     get_api_key_envvar,
     get_config,
     get_min_title_score,
@@ -235,6 +236,7 @@ def _collect_and_select(
     creator: str | None,
     sel_cfg: dict[str, Any],
     provider_list: list[ProviderTuple],
+    query_year: int | None = None,
 ) -> tuple[list[SearchResult], SearchResult | None, ProviderTuple | None]:
     all_candidates: list[SearchResult] = []
     selected: SearchResult | None = None
@@ -254,6 +256,7 @@ def _collect_and_select(
                 min_title_score,
                 creator_weight,
                 max_candidates_per_provider,
+                query_year,
             )
         )
     else:
@@ -263,6 +266,7 @@ def _collect_and_select(
             creator,
             creator_weight,
             max_candidates_per_provider,
+            query_year,
         )
         selected, selected_provider_tuple = select_best_candidate(
             all_candidates,
@@ -278,6 +282,7 @@ def _prepare_work(
     creator: str | None,
     entry_id: str | None,
     base_output_dir: str,
+    query_year: int | None = None,
 ) -> _PreparedWork | None:
     work_dir, work_stem = compute_work_dir(
         base_output_dir, entry_id, title, creator=creator
@@ -304,6 +309,7 @@ def _prepare_work(
         creator,
         sel_cfg,
         provider_list,
+        query_year,
     )
 
     work_id = compute_work_id(title, creator)
@@ -790,6 +796,9 @@ def _get_selection_config() -> dict[str, Any]:
     sel.setdefault("min_title_score", DEFAULT_MIN_TITLE_SCORE)
     sel.setdefault("search_timeout_seconds", DEFAULT_SEARCH_TIMEOUT_SECONDS)
     sel.setdefault("creator_weight", 0.2)
+    # Recorded in work.json so the effective year window is auditable; the
+    # ranking itself reads the value through get_year_tolerance().
+    sel.setdefault("year_tolerance", DEFAULT_YEAR_TOLERANCE)
     sel.setdefault("max_candidates_per_provider", 5)
     sel.setdefault("download_strategy", "selected_only")
     sel.setdefault("keep_non_selected_metadata", DEFAULT_KEEP_NON_SELECTED_METADATA)
@@ -828,6 +837,7 @@ def search_and_select(
     creator: str | None = None,
     entry_id: str | None = None,
     base_output_dir: str = "downloaded_works",
+    query_year: int | None = None,
 ) -> DownloadTask | None:
     """Phase 1: Search providers and select best candidate.
 
@@ -840,6 +850,8 @@ def search_and_select(
         creator: Optional creator/author name
         entry_id: Optional unique identifier for this work
         base_output_dir: Base directory for downloaded works
+        query_year: Optional year sought; candidates dated outside
+            ``selection.year_tolerance`` around it are penalized in ranking
 
     Returns:
         DownloadTask if a candidate was found, None otherwise.
@@ -850,7 +862,7 @@ def search_and_select(
         "Searching for work: '%s'%s", title, f" by '{creator}'" if creator else ""
     )
 
-    prep = _prepare_work(title, creator, entry_id, base_output_dir)
+    prep = _prepare_work(title, creator, entry_id, base_output_dir, query_year)
     if prep is None:
         return None
 
@@ -1014,6 +1026,7 @@ def process_work(
     entry_id: str | None = None,
     base_output_dir: str = "downloaded_works",
     dry_run: bool = False,
+    query_year: int | None = None,
 ) -> dict[str, Any] | None:
     """Search, select, persist metadata, and download one work.
 
@@ -1027,6 +1040,8 @@ def process_work(
         entry_id: Optional unique identifier for this work
         base_output_dir: Base directory for downloaded works
         dry_run: If True, skip actual downloads
+        query_year: Optional year sought; candidates dated outside
+            ``selection.year_tolerance`` around it are penalized in ranking
 
     Returns:
         Dict with 'status' ('completed', 'failed', 'deferred', or 'dry_run'),
@@ -1035,7 +1050,7 @@ def process_work(
     """
     logger.info("Processing work: '%s'%s", title, f" by '{creator}'" if creator else "")
 
-    prep = _prepare_work(title, creator, entry_id, base_output_dir)
+    prep = _prepare_work(title, creator, entry_id, base_output_dir, query_year)
     if prep is None:
         return None
 
@@ -1187,6 +1202,7 @@ def search_work(
     title: str,
     creator: str | None = None,
     entry_id: str | None = None,
+    query_year: int | None = None,
 ) -> dict[str, Any]:
     """Search all enabled providers for one work and return structured candidates.
 
@@ -1199,6 +1215,8 @@ def search_work(
         title: Work title to search for
         creator: Optional creator/author name
         entry_id: Optional identifier echoed back in the result
+        query_year: Optional year sought; candidates dated outside
+            ``selection.year_tolerance`` around it are penalized in ranking
 
     Returns:
         Dict with 'entry_id', 'query', 'status' ('match', 'no_match', or
@@ -1217,6 +1235,7 @@ def search_work(
         creator,
         sel_cfg,
         provider_list,
+        query_year,
     )
     with contextlib.suppress(Exception):
         clear_all_context()

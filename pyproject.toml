@@ -7,7 +7,7 @@ packages = ["api", "main"]
 
 [project]
 name = "chronodownloader"
-version = "1.21.0"
+version = "1.22.0"
 description = "Discover and download digitized historical sources from 17 digital libraries"
 readme = "README.md"
 license = "MIT"
@@ -22,6 +22,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1",
+]
+# Browser-fingerprint impersonation for providers that reject the requests
+# client's TLS fingerprint (currently BNE). Optional: nothing uses it unless a
+# provider sets network.impersonate in the configuration.
+impersonate = [
+    "curl_cffi>=0.15",
 ]
 
 [dependency-groups]
@@ -58,6 +64,12 @@ exclude = ["verification/"]
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_decorators = false
+
+# curl_cffi is an optional extra; the seam in api/core/network.py imports it
+# lazily and works without it, so a missing package must not fail the check.
+[[tool.mypy.overrides]]
+module = "curl_cffi.*"
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 88

@@ -12,6 +12,7 @@ import logging
 import random
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -22,6 +23,8 @@ from urllib.parse import urlparse
 import requests
 import urllib3
 from requests.adapters import HTTPAdapter
+from requests.structures import CaseInsensitiveDict
+from requests.utils import get_encoding_from_headers
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
 
@@ -305,6 +308,10 @@ def get_circuit_breaker(provider_key: str | None) -> CircuitBreaker | None:
 # Global session (lazy-initialized)
 _SESSION: requests.Session | None = None
 
+# Per-provider sessions for providers that opt into browser impersonation.
+_IMPERSONATED_SESSIONS: dict[str, requests.Session] = {}
+_IMPERSONATED_SESSIONS_LOCK = threading.Lock()
+
 # Map URL hostnames to provider keys for rate limiting and policies
 PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
     "gallica": ("gallica.bnf.fr",),
@@ -459,12 +466,360 @@ def get_rate_limiter(provider_key: str | None) -> RateLimiter | None:
     return rl
 
 
-def build_session() -> requests.Session:
+# =============================================================================
+# Optional browser impersonation (curl_cffi)
+# =============================================================================
+#
+# A few providers reject this tool on its TLS/HTTP2 fingerprint rather than on
+# anything it sends: BNE answers every request from the `requests` client with
+# a Cloudflare 403 while the same request from a browser-fingerprinted client
+# succeeds. `curl_cffi` reproduces such a fingerprint, and ships as an optional
+# extra (`uv sync --extra impersonate`) that no provider uses unless its config
+# opts in through `provider_settings.<provider>.network.impersonate`.
+#
+# The swap has to be invisible to everything downstream. Two things make it so:
+# the session hands back a genuine `requests.Response` reading from the curl
+# body (so status handling, `raise_for_status`, JSON/text decoding, and
+# streaming keep requests' own semantics), and every curl_cffi error -- which
+# lives in a parallel hierarchy that `except requests.exceptions.RequestException`
+# would not catch -- is translated into its requests equivalent at this seam.
+
+# Browser profile used when a provider enables impersonation without naming one.
+DEFAULT_IMPERSONATE_TARGET = "chrome"
+
+# curl_cffi exception class name -> requests equivalent. Matching runs over the
+# raised class's MRO, so the most specific entry wins for free (curl_cffi's
+# ConnectTimeout derives from both its ConnectionError and its Timeout, and its
+# CertificateVerifyError from its SSLError). Names rather than the classes
+# themselves: curl_cffi must not be imported when the extra is absent.
+_CURL_ERROR_CLASS_MAP: dict[str, type[requests.exceptions.RequestException]] = {
+    "ConnectTimeout": requests.exceptions.ConnectTimeout,
+    "ReadTimeout": requests.exceptions.ReadTimeout,
+    "Timeout": requests.exceptions.Timeout,
+    "CertificateVerifyError": requests.exceptions.SSLError,
+    "SSLError": requests.exceptions.SSLError,
+    "ProxyError": requests.exceptions.ProxyError,
+    "TooManyRedirects": requests.exceptions.TooManyRedirects,
+    "ContentDecodingError": requests.exceptions.ContentDecodingError,
+    # A truncated body is a ChunkedEncodingError in requests (urllib3's
+    # ProtocolError), not an HTTPError; curl_cffi files IncompleteRead under
+    # its HTTPError, so it has to be pulled out before the HTTPError entry.
+    "IncompleteRead": requests.exceptions.ChunkedEncodingError,
+    "ChunkedEncodingError": requests.exceptions.ChunkedEncodingError,
+    "InvalidURL": requests.exceptions.InvalidURL,
+    "InvalidSchema": requests.exceptions.InvalidSchema,
+    "MissingSchema": requests.exceptions.MissingSchema,
+    "InvalidHeader": requests.exceptions.InvalidHeader,
+    "HTTPError": requests.exceptions.HTTPError,
+    "DNSError": requests.exceptions.ConnectionError,
+    "ConnectionError": requests.exceptions.ConnectionError,
+    "RequestException": requests.exceptions.RequestException,
+}
+
+# libcurl result codes whose message has to be rewritten, because the retry
+# logic reads transport failure out of urllib3's message text.
+_CURL_COULDNT_RESOLVE_HOST = 6
+_CURL_COULDNT_CONNECT = 7
+_CURL_OPERATION_TIMEDOUT = 28
+
+# curl reports connect-phase and read-phase timeouts under the same result code
+# (28) and never raises its own ConnectTimeout, so the phase is read off the
+# message. requests separates the two, and only the connect-phase one earns the
+# short attempt budget.
+_CURL_CONNECT_PHASE_MARKERS = (
+    "failed to connect",
+    "couldn't connect",
+    "connection timed out",
+    "connection timeout",
+)
+
+
+def _curl_error_code(exc: BaseException) -> int:
+    """Return the libcurl result code carried by a curl_cffi error (0 if none)."""
+    try:
+        return int(getattr(exc, "code", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalize_curl_message(exc: BaseException, code: int) -> str:
+    """Restate a curl error so the message-sniffing retry branches still fire.
+
+    ``make_request`` recognizes a name-resolution failure, and
+    ``is_connect_failure`` a connection that never came up, from the text
+    urllib3 puts in the message. curl phrases both differently ("Could not
+    resolve host", "Failed to connect to ... port 443"), so the equivalent
+    markers are prefixed here; the original text is kept for the log.
+    """
+    text = str(exc)
+    if code == _CURL_COULDNT_RESOLVE_HOST or type(exc).__name__ == "DNSError":
+        return f"NameResolutionError: Failed to resolve host [curl {code}]: {text}"
+    if code == _CURL_COULDNT_CONNECT:
+        return (
+            "NewConnectionError: Failed to establish a new connection "
+            f"[curl {code}]: {text}"
+        )
+    return text
+
+
+def translate_curl_error(
+    exc: BaseException,
+) -> requests.exceptions.RequestException | None:
+    """Return the ``requests`` equivalent of a curl_cffi transport error.
+
+    The retry loops, the circuit breaker, and the connect-failure cap all key
+    off the ``requests`` exception hierarchy and off urllib3's message text.
+    curl_cffi satisfies neither, so its errors are re-raised as the requests
+    exception that carries the same meaning, with the message adjusted where
+    the text itself is load-bearing.
+
+    Args:
+        exc: Exception raised by curl_cffi
+
+    Returns:
+        The equivalent requests exception, or None when ``exc`` is not a
+        curl_cffi error (already a requests exception, or unrelated) and the
+        caller should re-raise it untouched.
+    """
+    if isinstance(exc, requests.exceptions.RequestException):
+        return None
+
+    target: type[requests.exceptions.RequestException] | None = None
+    for klass in type(exc).__mro__:
+        target = _CURL_ERROR_CLASS_MAP.get(klass.__name__)
+        if target is not None:
+            break
+    if target is None:
+        return None
+
+    code = _curl_error_code(exc)
+    if (
+        target is requests.exceptions.Timeout
+        and code == _CURL_OPERATION_TIMEDOUT
+        and any(m in str(exc).lower() for m in _CURL_CONNECT_PHASE_MARKERS)
+    ):
+        target = requests.exceptions.ConnectTimeout
+
+    return target(_normalize_curl_message(exc, code))
+
+
+class _CurlResponseBody:
+    """urllib3-shaped ``raw`` object that feeds a requests.Response from curl.
+
+    ``requests.Response`` reads its body through ``raw.stream()``, which is the
+    single place a mid-stream curl error can surface; translating here keeps
+    the download loop's retry and refund path intact for a connection dropped
+    halfway through a large PDF.
+    """
+
+    def __init__(self, raw: Any, stream: bool) -> None:
+        self._raw = raw
+        self._stream = stream
+
+    def stream(
+        self, amt: int | None = None, decode_content: bool = True
+    ) -> Iterator[bytes]:
+        """Yield the body in ``amt``-sized chunks (curl decodes transparently)."""
+        try:
+            if self._stream:
+                yield from self._raw.iter_content(chunk_size=amt)
+                return
+            content = self._raw.content or b""
+            if not amt or amt <= 0:
+                if content:
+                    yield content
+                return
+            for start in range(0, len(content), amt):
+                yield content[start : start + amt]
+        except Exception as exc:
+            mapped = translate_curl_error(exc)
+            if mapped is None:
+                raise
+            raise mapped from exc
+
+    def close(self) -> None:
+        """Release the underlying curl response."""
+        with contextlib.suppress(Exception):
+            self._raw.close()
+
+
+def adapt_curl_response(raw: Any, url: str, stream: bool) -> requests.Response:
+    """Wrap a curl_cffi response in a real ``requests.Response``.
+
+    Args:
+        raw: curl_cffi response object
+        url: Requested URL, used when the response carries none
+        stream: Whether the request was made with ``stream=True``
+
+    Returns:
+        A requests.Response whose body is read from ``raw``
+    """
+    resp = requests.Response()
+    resp.status_code = int(getattr(raw, "status_code", 0) or 0)
+
+    headers: Any = getattr(raw, "headers", None) or {}
+    items = headers.items() if hasattr(headers, "items") else []
+    resp.headers = CaseInsensitiveDict({str(k): str(v) for k, v in items})
+
+    resp.url = str(getattr(raw, "url", "") or url)
+    reason = getattr(raw, "reason", "")
+    resp.reason = str(reason) if reason else ""
+
+    # Fall back to requests' own header parsing when curl declares no charset,
+    # so ``resp.text`` decodes a provider's XML/JSON exactly as it did before.
+    encoding = getattr(raw, "encoding", None)
+    resp.encoding = (
+        encoding
+        if isinstance(encoding, str)
+        else get_encoding_from_headers(resp.headers)
+    )
+
+    resp.raw = _CurlResponseBody(raw, stream)
+    return resp
+
+
+class ImpersonatingSession(requests.Session):
+    """A ``requests.Session`` that performs its requests through curl_cffi.
+
+    Subclassing keeps the object a real session for every caller and type
+    checker; only ``request`` is overridden, so ``get``/``head`` and the rest
+    route through it unchanged.
+    """
+
+    impersonate: str
+
+    def __init__(self, curl_requests: Any, impersonate: str) -> None:
+        super().__init__()
+        self.impersonate = impersonate
+        self._curl_session = curl_requests.Session(impersonate=impersonate)
+        # curl_cffi sends the complete, self-consistent header set of the
+        # browser it impersonates. Layering this library's own User-Agent on
+        # top would contradict the TLS fingerprint it just claimed, which is
+        # exactly what the bot filter looks for. Per-call headers (a provider's
+        # configured ones) are still passed through.
+        self.headers.clear()
+
+    def request(
+        self, method: Any, url: Any, *args: Any, **kwargs: Any
+    ) -> requests.Response:
+        """Perform one request through curl_cffi, in requests' vocabulary."""
+        if args:
+            raise TypeError(
+                "ImpersonatingSession.request accepts keyword arguments only"
+            )
+
+        url_text = url.decode() if isinstance(url, bytes) else str(url)
+        method_text = method.decode() if isinstance(method, bytes) else str(method)
+
+        stream = bool(kwargs.get("stream") or False)
+        call: dict[str, Any] = {"stream": stream}
+        for key in ("params", "headers", "timeout", "verify", "allow_redirects"):
+            value = kwargs.get(key)
+            if value is not None:
+                call[key] = value
+
+        try:
+            raw = self._curl_session.request(method_text, url_text, **call)
+        except Exception as exc:
+            mapped = translate_curl_error(exc)
+            if mapped is None:
+                raise
+            raise mapped from exc
+
+        return adapt_curl_response(raw, url_text, stream)
+
+    def close(self) -> None:
+        """Close the curl session alongside the requests one."""
+        with contextlib.suppress(Exception):
+            self._curl_session.close()
+        super().close()
+
+
+def _load_curl_requests() -> Any | None:
+    """Import ``curl_cffi.requests``, or return None when the extra is absent."""
+    try:
+        from curl_cffi import requests as curl_requests
+    except ImportError:
+        return None
+    return curl_requests
+
+
+def resolve_impersonate_target(provider_key: str | None) -> str | None:
+    """Return the browser profile a provider is configured to impersonate.
+
+    Reads ``provider_settings.<provider>.network.impersonate``: a browser name
+    ("chrome", "chrome124", "safari17_0", ...), or ``true`` for
+    ``DEFAULT_IMPERSONATE_TARGET``. Absent, ``false``, or empty means the
+    standard HTTP client, which is the default for every provider.
+
+    Args:
+        provider_key: Provider identifier
+
+    Returns:
+        Browser profile name, or None when impersonation is off
+    """
+    if not provider_key:
+        return None
+    raw = get_network_config(provider_key).get("impersonate")
+    if raw is True:
+        return DEFAULT_IMPERSONATE_TARGET
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
+
+
+def _build_impersonating_session(
+    provider_key: str, target: str
+) -> requests.Session | None:
+    """Build a curl_cffi-backed session, or None when it cannot be had."""
+    curl_requests = _load_curl_requests()
+    if curl_requests is None:
+        logger.warning(
+            "Provider %s is configured for browser impersonation "
+            "(network.impersonate=%r) but curl_cffi is not installed; falling "
+            "back to the standard HTTP client, which this provider may reject. "
+            "Install it with: uv sync --extra impersonate",
+            provider_key,
+            target,
+        )
+        return None
+
+    try:
+        session = ImpersonatingSession(curl_requests, target)
+    except Exception as e:
+        logger.warning(
+            "Could not start a curl_cffi session impersonating %r for %s: %s; "
+            "falling back to the standard HTTP client.",
+            target,
+            provider_key,
+            e,
+        )
+        return None
+
+    logger.info(
+        "Using curl_cffi browser impersonation (%s) for %s.", target, provider_key
+    )
+    return session
+
+
+def build_session(provider_key: str | None = None) -> requests.Session:
     """Build a configured requests session with retries and default headers.
+
+    Args:
+        provider_key: Provider the session will serve. When that provider
+            enables ``network.impersonate`` and curl_cffi is installed, the
+            returned session routes through curl_cffi instead; in every other
+            case (the default) the plain session below is returned unchanged.
 
     Returns:
         Configured Session instance
     """
+    target = resolve_impersonate_target(provider_key)
+    if target and provider_key:
+        impersonating = _build_impersonating_session(provider_key, target)
+        if impersonating is not None:
+            return impersonating
+
     session = requests.Session()
 
     # Avoid urllib3 retries on connection errors (DNS/SSL) and on HTTP status
@@ -510,13 +865,32 @@ def build_session() -> requests.Session:
     return session
 
 
-def get_session() -> requests.Session:
-    """Get the global HTTP session (lazy initialization).
+def get_session(provider_key: str | None = None) -> requests.Session:
+    """Get the HTTP session serving a provider (lazy initialization).
+
+    Providers that enable ``network.impersonate`` get their own curl_cffi-backed
+    session, cached per provider; every other provider shares the single global
+    session, exactly as before.
+
+    Args:
+        provider_key: Provider the session will serve (None for the shared one)
 
     Returns:
         Configured Session instance
     """
     global _SESSION
+
+    if provider_key and resolve_impersonate_target(provider_key):
+        with _IMPERSONATED_SESSIONS_LOCK:
+            session = _IMPERSONATED_SESSIONS.get(provider_key)
+            if session is None:
+                # A build that falls back to the plain client is cached too, so
+                # the "curl_cffi is missing" warning is logged once per provider
+                # rather than once per request.
+                session = build_session(provider_key)
+                _IMPERSONATED_SESSIONS[provider_key] = session
+            return session
+
     if _SESSION is None:
         _SESSION = build_session()
     return _SESSION
@@ -542,8 +916,8 @@ def make_request(
         - bytes for other/binary content
         - None on error (including circuit breaker open)
     """
-    session = get_session()
     provider = get_provider_for_url(url)
+    session = get_session(provider)
     net = get_network_config(provider)
 
     # Check circuit breaker before making any requests

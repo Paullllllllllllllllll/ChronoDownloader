@@ -66,6 +66,20 @@
         "headers": { "Accept": "application/json" }
       }
     },
+    "bne": {
+      "max_pages": 0,
+      "min_title_score": 30,
+      "_impersonate_note": "datos.bne.es and bnedigital.bne.es reject the default HTTP client on its TLS fingerprint (403). To enable this provider end to end, install the optional extra (uv sync --extra impersonate) and add \"impersonate\": \"chrome\" to the network block below.",
+      "network": {
+        "delay_ms": 4000,
+        "jitter_ms": 1000,
+        "max_attempts": 5,
+        "base_backoff_s": 2.0,
+        "backoff_multiplier": 1.8,
+        "max_backoff_s": 120.0,
+        "timeout_s": 60
+      }
+    },
     "ddb": {
       "max_pages": 0,
       "min_title_score": 50,
@@ -272,6 +286,7 @@
     "_min_title_score_note": "Loosened deliberately for historical/multilingual titles; the built-in default when this key is absent is 85.",
     "search_timeout_seconds": 60,
     "creator_weight": 0.2,
+    "year_tolerance": 15,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",
     "keep_non_selected_metadata": false

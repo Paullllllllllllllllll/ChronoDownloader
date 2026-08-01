@@ -387,8 +387,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     """
     _ensure_dir(folder_path)
 
-    session = get_session()
     provider = get_provider_for_url(url)
+    session = get_session(provider)
 
     existing, existing_counts = _try_skip_existing(url, folder_path, filename, provider)
     if existing is not None:

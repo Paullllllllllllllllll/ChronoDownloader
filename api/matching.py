@@ -1,8 +1,9 @@
 """Fuzzy matching utilities for ChronoDownloader.
 
-Provides text normalization and similarity scoring for titles and creators.
-Candidate ranking itself lives in :mod:`main.orchestration.selection`, which
-combines these primitives with provider- and metadata-specific boosts.
+Provides text normalization, similarity scoring for titles and creators, and
+year extraction from free-form imprint dates. Candidate ranking itself lives
+in :mod:`main.orchestration.selection`, which combines these primitives with
+provider- and metadata-specific boosts.
 """
 
 from __future__ import annotations
@@ -174,3 +175,45 @@ def creator_score(query_creator: str | None, creators: Iterable[str] | None) -> 
         best = max(best, token_set_ratio(query_creator, c))
 
     return best
+
+
+# Bounds of a plausible imprint year. The lower bound keeps four-digit shelf
+# marks, page counts, and volume numbers out; the upper bound leaves room for
+# a catalogue record dated slightly in the future without admitting a
+# five-digit run (the \b anchors already exclude those).
+MIN_PLAUSIBLE_YEAR = 1000
+MAX_PLAUSIBLE_YEAR = 2100
+
+_YEAR_RE = re.compile(r"\b(\d{4})\b")
+
+
+def extract_year(value: object) -> int | None:
+    """Extract a plausible four-digit year from a free-form value.
+
+    Returns the FIRST four-digit run in ``[MIN_PLAUSIBLE_YEAR,
+    MAX_PLAUSIBLE_YEAR]``, so a range ("1651-1660", "1651/52") yields its
+    opening year and an ISO date ("2019-03-01") yields its year. Values are
+    stringified first, which covers integer and float cells read from a CSV
+    ("1651", "1651.0") as well as ``NaN``.
+
+    Deliberately fails open: anything without such a run -- ``None``, an empty
+    string, a Roman-numeral century ("S. XVIII"), a verbal date ("18. Jh."),
+    or plain garbage -- returns ``None``. Callers treat ``None`` as "no year
+    information", never as a mismatch, so early modern imprints with messy or
+    absent dates are not disadvantaged.
+
+    Args:
+        value: Any value that may carry a year (str, int, float, None).
+
+    Returns:
+        The extracted year, or None when no plausible year is present.
+    """
+    if value is None:
+        return None
+
+    for match in _YEAR_RE.finditer(str(value)):
+        year = int(match.group(1))
+        if MIN_PLAUSIBLE_YEAR <= year <= MAX_PLAUSIBLE_YEAR:
+            return year
+
+    return None

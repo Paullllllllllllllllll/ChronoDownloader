@@ -83,6 +83,7 @@ def _apply_runtime_config_overrides(
     min_title_score = getattr(args, "min_title_score", None)
     search_timeout = getattr(args, "search_timeout", None)
     creator_weight = getattr(args, "creator_weight", None)
+    year_tolerance = getattr(args, "year_tolerance", None)
     max_candidates_per_provider = getattr(args, "max_candidates_per_provider", None)
     download_strategy = getattr(args, "download_strategy", None)
     keep_non_selected_metadata = getattr(args, "keep_non_selected_metadata", None)
@@ -112,6 +113,8 @@ def _apply_runtime_config_overrides(
         sel_cfg["search_timeout_seconds"] = float(search_timeout)
     if creator_weight is not None:
         sel_cfg["creator_weight"] = float(creator_weight)
+    if year_tolerance is not None:
+        sel_cfg["year_tolerance"] = int(max(0, year_tolerance))
     if max_candidates_per_provider is not None:
         sel_cfg["max_candidates_per_provider"] = int(
             max(1, max_candidates_per_provider)
@@ -261,6 +264,7 @@ def _looks_like_cli_invocation(argv: list[str]) -> bool:
         "--min-title-score",
         "--search-timeout",
         "--creator-weight",
+        "--year-tolerance",
         "--max-candidates-per-provider",
         "--download-strategy",
         "--keep-non-selected-metadata",

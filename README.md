@@ -1,4 +1,4 @@
-# ChronoDownloader v1.21.0
+# ChronoDownloader v1.22.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -105,14 +105,16 @@ The rest were unreachable at that time and ship disabled in
 `config.example.json`:
 
 - **Library of Congress** and **BNE** answer 403 behind a
-  Cloudflare bot filter. BNE is a TLS-fingerprint block: a
-  browser-impersonating HTTP client (`curl_cffi` with
-  `impersonate="chrome"`) gets a valid response where the shipped
-  `requests` client gets a challenge page, so adopting one would
-  restore BNE end to end. LoC serves an interactive JS challenge
-  that TLS impersonation does not satisfy, and needs a broader
-  answer; note that `tile.loc.gov` is not behind it, so only the
-  `www.loc.gov` JSON and manifest API is blocked.
+  Cloudflare bot filter. BNE's is a TLS-fingerprint block, and it
+  is answerable: install the optional `impersonate` extra and set
+  `network.impersonate` for the provider (see Configuration, section
+  3), after which both `datos.bne.es` and `bnedigital.bne.es` serve
+  normally. It still ships disabled, since installing the extra is
+  a deliberate choice rather than a default. LoC serves an
+  interactive JS challenge that TLS impersonation does not satisfy,
+  and needs a broader answer; note that `tile.loc.gov` is not
+  behind it, so only the `www.loc.gov` JSON and manifest API is
+  blocked.
 - **British Library**: `sru.bl.uk` no longer resolves and the BNB
   SPARQL host does not complete a TCP handshake. Both search paths
   are dead.
@@ -146,6 +148,16 @@ For development (includes type checkers and test tools):
 ```bash
 uv sync --extra dev
 ```
+
+Browser impersonation, for providers that reject the default HTTP
+client on its TLS fingerprint (currently BNE alone):
+
+```bash
+uv sync --extra impersonate
+```
+
+Nothing changes until a provider opts in through
+`network.impersonate` (Configuration, section 3).
 
 Alternatively, with pip:
 
@@ -359,6 +371,13 @@ ChronoDownloader uses a unified CSV as both input and output.
 **Optional columns**:
 
 - `main_author`: creator/author name (improves ranking)
+- `year`: publication year sought (matched case-insensitively). When
+  present, candidates dated outside `selection.year_tolerance` around
+  it are penalized in ranking so modern reprints do not outrank period
+  editions. Absent column = feature dormant. The sampling frames'
+  `earliest_year` is deliberately not honored (it records a work's
+  first attestation, not the edition sought); copy it into a `year`
+  column to opt in.
 - `direct_link`: IIIF manifest URL for direct download (bypasses
   search)
 - `retrievable`: download status (`True`/`False`/`deferred`/empty,
@@ -494,6 +513,9 @@ optional in interactive).
   fan-out; `0` disables the timeout
 - `--creator-weight FLOAT` -- author match weight (0.0--1.0), applied
   as a positive ranking bonus only
+- `--year-tolerance YEARS` -- overrides `selection.year_tolerance` for
+  this run (`0` = exact-year preference); inert without a CSV `year`
+  column
 - `--max-candidates-per-provider INT`
 - `--download-strategy {selected_only,all}`
 - `--[no-]keep-non-selected-metadata`
@@ -648,6 +670,8 @@ quota management. Each provider key maps to a settings object:
 - `backoff_multiplier`: multiplier for exponential backoff
 - `max_backoff_s`: upper bound for backoff
 - `timeout_s`: request timeout
+- `impersonate`: route this provider through a browser-fingerprinted
+  HTTP client (see below); off everywhere by default
 
 **Circuit breaker** (optional, per-provider): automatically pauses
 a provider after consecutive failures, then retries after a
@@ -672,6 +696,46 @@ breaker and set the threshold to 2--3 with a cooldown of
 A host that refuses connections or drops them silently is retried at
 most twice, since further attempts pay the whole `timeout_s` for
 nothing.
+
+**Browser impersonation** (optional, per-provider): a few providers
+reject this tool on its TLS fingerprint rather than on anything it
+sends. BNE answers every request from the default client with a
+Cloudflare 403, while the identical request from a browser-fingerprinted
+client succeeds. Setting `network.impersonate` routes that one provider
+through [curl_cffi](https://github.com/lexiforest/curl_cffi), which
+reproduces a browser's TLS and HTTP/2 fingerprint:
+
+```json
+{
+  "provider_settings": {
+    "bne": {
+      "max_pages": 0,
+      "network": {
+        "impersonate": "chrome",
+        "delay_ms": 4000,
+        "jitter_ms": 1000,
+        "timeout_s": 60
+      }
+    }
+  }
+}
+```
+
+The value is a browser profile (`"chrome"`, `"chrome124"`,
+`"safari17_0"`, ...); `true` selects `"chrome"`. It needs the optional
+extra (`uv sync --extra impersonate`): without it the run logs one
+warning, falls back to the default client, and the provider answers 403
+as before -- nothing crashes. Every other provider keeps the shared
+session and pays nothing for this.
+
+Pacing, retries, the circuit breaker, and the budget apply identically
+to an impersonating provider: curl's transport errors are translated
+into the same exceptions the default client raises, including the DNS
+and connect-failure cases that carry a shortened attempt budget.
+
+Whether impersonating a browser is appropriate for a given library is
+the operator's decision, not a default: the extra is not installed by
+`uv sync` and no provider enables it in `config.example.json`.
 
 **Quota parameters** (quota-limited providers only):
 
@@ -800,6 +864,7 @@ To adjust for slow providers, increase `delay_ms` and
     "min_title_score": 85,
     "search_timeout_seconds": 60,
     "creator_weight": 0.2,
+    "year_tolerance": 15,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",
     "keep_non_selected_metadata": false
@@ -831,6 +896,16 @@ To adjust for slow providers, increase `delay_ms` and
   override
 - `creator_weight`: weight of creator match in scoring
   (0.0--1.0)
+- `year_tolerance`: half-width, in years, of the window around the
+  CSV's query year inside which a candidate's imprint year counts as
+  a period match (default 15 when the key is absent). Beyond the
+  window a ranking penalty of 0.5 points per year applies, capped at
+  25 points, so a modern reprint sinks below a period edition of the
+  same title. It is a ranking penalty only: `min_title_score` still
+  gates the pure title score, and the term fails open (no query year,
+  no candidate date, or an unparseable date such as `S. XVIII` costs
+  nothing). `0` = exact-year preference. Inert unless the CSV carries
+  a `year` column
 - `max_candidates_per_provider`: limit search results per
   provider
 - `download_strategy`: `selected_only` or `all`
@@ -1223,6 +1298,31 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.22.0** (1 August 2026) -- Decision close-out release. BNE is
+  answerable again: both of its hosts reject the default client on its TLS
+  fingerprint alone, so an optional `impersonate` extra (curl_cffi) can now
+  be enabled per provider through `network.impersonate`. The swap happens at
+  one seam, `build_session`/`get_session`: an opted-in provider gets a
+  curl-backed session that hands back real `requests.Response` objects, and
+  curl's parallel exception hierarchy is translated into the requests one,
+  so retry budgets, the connect-failure cap, the circuit breaker's
+  blocked-versus-missing split, and the rate limiter behave identically for
+  both clients; without the extra the run logs one warning and falls back,
+  and with no provider opted in nothing changes at all (verified live: a BNE
+  SPARQL search returns hits and a PDF page-range download succeeds where
+  the default client gets 403). `selection.year_tolerance` is no longer
+  inert: it drives a capped linear ranking penalty (0.5 points per year
+  beyond the window, capped at 25) on candidates dated outside the window
+  around the CSV's explicit `year` column, keeping modern reprints from
+  outranking period editions; it fails open on missing or unparseable dates,
+  never affects the `min_title_score` gate, and deliberately ignores the
+  sampling frames' `earliest_year` (first attestation, not the edition
+  sought) so existing corpora keep unchanged ranking until a `year` column
+  is added. New `--year-tolerance` flag. Removed dead public surface:
+  `DownloadBudget.log_summary` and `DownloadScheduler.get_pending_tasks`
+  (zero callers; the latter returned a snapshot stale on return);
+  `CircuitBreaker.is_available` retained as the documented passive check.
+  1,576 tests pass.
 - **v1.21.0** (1 August 2026) -- Fifth and final maintenance round. Two
   network defects that made a dead provider expensive are fixed: a blanket
   rejection of the client (401/403) now feeds the circuit breaker instead of

@@ -5,6 +5,10 @@ from the main pipeline to improve modularity and testability.
 
 Supports parallel provider searches via daemon worker threads when
 selection.max_parallel_searches > 1 in config.
+
+Ranking combines the title score with a creator bonus, a quality boost, and
+an edition-year penalty governed by ``selection.year_tolerance``; only the
+pure title score is gated by ``min_title_score``.
 """
 
 from __future__ import annotations
@@ -22,14 +26,24 @@ from api.core.config import (
     get_min_title_score,
     get_provider_setting,
     get_search_timeout,
+    get_year_tolerance,
 )
-from api.matching import creator_score, title_score
+from api.matching import creator_score, extract_year, title_score
 from api.model import SearchResult, convert_to_searchresult
 
 logger = logging.getLogger(__name__)
 
 # Type alias for provider tuple
 ProviderTuple = tuple[str, Callable[..., Any], Callable[..., Any], str]
+
+# Shape of the edition-year penalty (see :func:`year_penalty`). Fixed rather
+# than configurable: ``selection.year_tolerance`` already expresses the only
+# judgement a corpus makes, namely how wide the "same edition period" window
+# is. The slope and cap are calibrated against the ranking total, whose other
+# terms are the 0-100 title score, a creator bonus of at most 100 *
+# creator_weight, and a quality boost of at most 3.5.
+YEAR_PENALTY_PER_YEAR = 0.5
+MAX_YEAR_PENALTY = 25.0
 
 
 def _run_with_timeout(
@@ -119,8 +133,55 @@ def prepare_search_result(
     return sr
 
 
+def year_penalty(
+    query_year: int | None, candidate_date: str | None, tolerance: int
+) -> float:
+    """Ranking penalty for a candidate imprint dated outside the query window.
+
+    The research unit is the EDITION, so a modern reprint or e-book must not
+    outrank a period edition of the same title. Candidates whose year falls
+    inside ``[query_year - tolerance, query_year + tolerance]`` are unpenalized;
+    beyond it the penalty grows linearly at :data:`YEAR_PENALTY_PER_YEAR` per
+    year of excess distance and is capped at :data:`MAX_YEAR_PENALTY`, so a
+    candidate 50 or more years outside the window takes the full penalty and no
+    more. This is a ranking penalty only -- never a gate -- so ``min_title_score``
+    (which reads the pure title score) is unaffected and a wrongly-dated record
+    can still be selected when nothing better exists.
+
+    Fails open in every direction: no query year, no candidate date, or a date
+    from which no plausible four-digit year can be read (Roman-numeral
+    centuries, verbal dates, empty imprints) all yield 0.0. Since the term is a
+    penalty and never a bonus, a candidate WITHOUT a date can never outrank an
+    otherwise identical candidate WITH a matching date.
+
+    Args:
+        query_year: Year sought, or None when the query carries no year.
+        candidate_date: Free-form date string from the provider record.
+        tolerance: Half-width of the unpenalized window, in years.
+
+    Returns:
+        Penalty in ranking points, 0.0 <= p <= MAX_YEAR_PENALTY.
+    """
+    if query_year is None:
+        return 0.0
+
+    candidate_year = extract_year(candidate_date)
+    if candidate_year is None:
+        return 0.0
+
+    excess = abs(candidate_year - query_year) - max(0, tolerance)
+    if excess <= 0:
+        return 0.0
+
+    return min(MAX_YEAR_PENALTY, YEAR_PENALTY_PER_YEAR * excess)
+
+
 def score_candidate(
-    sr: SearchResult, query_title: str, query_creator: str | None, creator_weight: float
+    sr: SearchResult,
+    query_title: str,
+    query_creator: str | None,
+    creator_weight: float,
+    query_year: int | None = None,
 ) -> dict[str, Any]:
     """Compute matching score for a search result candidate.
 
@@ -129,15 +190,20 @@ def score_candidate(
         query_title: Query title
         query_creator: Optional query creator
         creator_weight: Weight for creator matching (0.0-1.0)
+        query_year: Optional year sought; when None the year term is inert and
+            no configuration is read
 
     Returns:
         Dictionary with keys ``score`` (pure title score, used for the
         ``min_title_score`` gate), ``creator_score``, ``creator_bonus``,
-        ``boost`` (quality signals), and ``total`` (ranking score).
+        ``boost`` (quality signals), ``year_penalty``, ``candidate_year``, and
+        ``total`` (ranking score).
 
     Per the matching decision, ``min_title_score`` gates the pure title score
     only; creator similarity contributes a positive ranking bonus and never
-    penalizes a candidate that lacks creator metadata.
+    penalizes a candidate that lacks creator metadata. The year term is the
+    mirror image: a pure penalty on the ranking total (see
+    :func:`year_penalty`), so an undated candidate is never advantaged.
     """
     title = float(title_score(query_title, sr.title, method="token_set"))
 
@@ -152,7 +218,16 @@ def score_candidate(
     if sr.item_url:
         boost += 0.5
 
-    total = title + creator_bonus + boost
+    # Without a query year the feature is dormant: no config read, no penalty,
+    # and a ranking total byte-identical to the pre-feature behavior.
+    if query_year is None:
+        penalty = 0.0
+        candidate_year = None
+    else:
+        candidate_year = extract_year(sr.date)
+        penalty = year_penalty(query_year, sr.date, get_year_tolerance())
+
+    total = title + creator_bonus + boost - penalty
 
     return {
         "score": title,
@@ -160,12 +235,18 @@ def score_candidate(
         "creator_score": cs,
         "creator_bonus": creator_bonus,
         "boost": boost,
+        "year_penalty": penalty,
+        "candidate_year": candidate_year,
         "total": total,
     }
 
 
 def attach_scores(
-    sr: SearchResult, query_title: str, query_creator: str | None, creator_weight: float
+    sr: SearchResult,
+    query_title: str,
+    query_creator: str | None,
+    creator_weight: float,
+    query_year: int | None = None,
 ) -> None:
     """Compute and attach matching scores to a SearchResult's raw dict.
 
@@ -174,8 +255,9 @@ def attach_scores(
         query_title: Query title
         query_creator: Optional query creator
         creator_weight: Weight for creator matching
+        query_year: Optional year sought (see :func:`score_candidate`)
     """
-    scores = score_candidate(sr, query_title, query_creator, creator_weight)
+    scores = score_candidate(sr, query_title, query_creator, creator_weight, query_year)
     sr.raw.setdefault("__matching__", {}).update(scores)
 
 
@@ -243,6 +325,7 @@ def collect_candidates_sequential(
     min_title_score: float,
     creator_weight: float,
     max_candidates_per_provider: int,
+    query_year: int | None = None,
 ) -> tuple[list[SearchResult], SearchResult | None, ProviderTuple | None]:
     """Collect candidates using sequential first-hit strategy.
 
@@ -256,6 +339,7 @@ def collect_candidates_sequential(
         min_title_score: Global minimum score threshold (used as fallback)
         creator_weight: Weight for creator matching
         max_candidates_per_provider: Max results per provider
+        query_year: Optional year sought, used for the edition-year penalty
 
     Returns:
         Tuple of (all_candidates, selected, selected_provider_tuple)
@@ -279,7 +363,7 @@ def collect_candidates_sequential(
             temp: list[tuple[float, SearchResult]] = []
             for it in results:
                 sr = prepare_search_result(pkey, pname, it)
-                attach_scores(sr, title, creator, creator_weight)
+                attach_scores(sr, title, creator, creator_weight, query_year)
                 all_candidates.append(sr)
 
                 sc = sr.raw.get("__matching__", {})
@@ -320,6 +404,7 @@ def _search_single_provider(
     creator: str | None,
     max_candidates_per_provider: int,
     creator_weight: float,
+    query_year: int | None = None,
 ) -> tuple[str, str, list[SearchResult]]:
     """Search a single provider and return scored candidates.
 
@@ -331,6 +416,7 @@ def _search_single_provider(
         creator: Optional creator name
         max_candidates_per_provider: Max results to request
         creator_weight: Weight for creator matching
+        query_year: Optional year sought, used for the edition-year penalty
 
     Returns:
         Tuple of (provider_key, provider_name, list of scored SearchResults)
@@ -345,7 +431,7 @@ def _search_single_provider(
         if results:
             for it in results:
                 sr = prepare_search_result(pkey, pname, it)
-                attach_scores(sr, title, creator, creator_weight)
+                attach_scores(sr, title, creator, creator_weight, query_year)
                 candidates.append(sr)
     except Exception:
         logger.exception("Error during search with %s for '%s'", pname, title)
@@ -359,6 +445,7 @@ def collect_candidates_all(
     creator: str | None,
     creator_weight: float,
     max_candidates_per_provider: int,
+    query_year: int | None = None,
 ) -> list[SearchResult]:
     """Collect candidates from all providers.
 
@@ -370,6 +457,7 @@ def collect_candidates_all(
         creator: Optional creator name
         creator_weight: Weight for creator matching
         max_candidates_per_provider: Max results per provider
+        query_year: Optional year sought, used for the edition-year penalty
 
     Returns:
         List of all SearchResult candidates with scores attached
@@ -378,7 +466,12 @@ def collect_candidates_all(
 
     if max_workers <= 1 or len(provider_list) <= 1:
         return _collect_candidates_exhaustive(
-            provider_list, title, creator, creator_weight, max_candidates_per_provider
+            provider_list,
+            title,
+            creator,
+            creator_weight,
+            max_candidates_per_provider,
+            query_year,
         )
 
     return _collect_candidates_parallel(
@@ -388,6 +481,7 @@ def collect_candidates_all(
         creator_weight,
         max_candidates_per_provider,
         max_workers,
+        query_year,
     )
 
 
@@ -397,6 +491,7 @@ def _collect_candidates_exhaustive(
     creator: str | None,
     creator_weight: float,
     max_candidates_per_provider: int,
+    query_year: int | None = None,
 ) -> list[SearchResult]:
     """Sequential candidate collection that always queries all providers.
 
@@ -416,7 +511,7 @@ def _collect_candidates_exhaustive(
 
             for it in results:
                 sr = prepare_search_result(pkey, pname, it)
-                attach_scores(sr, title, creator, creator_weight)
+                attach_scores(sr, title, creator, creator_weight, query_year)
                 all_candidates.append(sr)
 
         except Exception:
@@ -433,6 +528,7 @@ def _parallel_search_worker(
     creator_weight: float,
     semaphore: threading.BoundedSemaphore,
     box: dict[str, Any],
+    query_year: int | None = None,
 ) -> None:
     """Run one provider search in a daemon thread, gated by ``semaphore``.
 
@@ -452,6 +548,7 @@ def _parallel_search_worker(
             creator,
             max_candidates_per_provider,
             creator_weight,
+            query_year,
         )
         box["candidates"] = candidates
     finally:
@@ -466,6 +563,7 @@ def _collect_candidates_parallel(
     creator_weight: float,
     max_candidates_per_provider: int,
     max_workers: int,
+    query_year: int | None = None,
 ) -> list[SearchResult]:
     """Parallel candidate collection using daemon worker threads.
 
@@ -510,6 +608,7 @@ def _collect_candidates_parallel(
                 creator_weight,
                 semaphore,
                 box,
+                query_year,
             ),
             daemon=True,
         )

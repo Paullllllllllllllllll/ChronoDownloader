@@ -232,25 +232,6 @@ class DownloadBudget:
             if work_id:
                 self._inc(self.per_work, work_id, content_type, size_bytes)
 
-    def log_summary(self) -> None:
-        """Log a summary of current download statistics."""
-        with self._lock:
-            logger.info("=== Download Budget Summary ===")
-            logger.info("Images: %.2f GB", self.total_images_bytes / (1024**3))
-            logger.info("PDFs: %.2f GB", self.total_pdfs_bytes / (1024**3))
-            logger.info("Metadata: %.2f MB", self.total_metadata_bytes / (1024**2))
-            logger.info("Total works tracked: %d", len(self.per_work))
-
-            if len(self.per_work) <= 10:
-                for wid, stats in self.per_work.items():
-                    logger.info(
-                        "  Work %s: images=%.1fMB, pdfs=%.1fMB, metadata=%.1fKB",
-                        wid,
-                        stats.get("images", 0) / (1024**2),
-                        stats.get("pdfs", 0) / (1024**2),
-                        stats.get("metadata", 0) / 1024,
-                    )
-
     # Legacy compatibility methods
     def allow_new_file(self, provider: str | None, work_id: str | None) -> bool:
         """Return True while the budget is not exhausted (legacy compatibility).

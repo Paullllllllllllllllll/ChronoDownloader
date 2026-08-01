@@ -509,15 +509,6 @@ class DownloadScheduler:
 
         return results
 
-    def get_pending_tasks(self) -> list[DownloadTask]:
-        """Get list of currently pending/running tasks.
-
-        Returns:
-            List of pending DownloadTask objects
-        """
-        with self._lock:
-            return list(self._futures.values())
-
     def request_shutdown(self) -> None:
         """Signal that no more tasks should be accepted."""
         self._shutdown_event.set()

@@ -14,6 +14,8 @@ Expected CSV columns (from bib_sampling.ipynb):
 - entry_id: Unique identifier
 - retrievable: Download status (True/False/empty)
 - link: Item URL (populated after download)
+- year: Optional query year; when present it drives the edition-year
+  ranking penalty, otherwise that penalty stays dormant
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from main.data.works_csv import (
     LINK_COL,
     TITLE_COL,
     backup_works_csv,
+    get_row_year,
     mark_deferred,
     mark_failed,
     mark_success,
@@ -387,13 +390,15 @@ def _parse_work_row(
     row: pd.Series,
     index: Any,
     logger: logging.Logger,
-) -> tuple[Any, Any, Any, str | None, bool] | None:
+) -> tuple[Any, Any, Any, str | None, bool, int | None] | None:
     """Extract and validate the searchable fields from a works_df row.
 
-    Returns ``(title, creator, entry_id, direct_link, title_missing)`` when the
-    row is processable, or ``None`` (after logging a skip warning) when the row
-    must be skipped due to a missing entry_id or a missing title without a
-    usable direct IIIF link. Callers increment their own skip counter on None.
+    Returns ``(title, creator, entry_id, direct_link, title_missing,
+    query_year)`` when the row is processable, or ``None`` (after logging a
+    skip warning) when the row must be skipped due to a missing entry_id or a
+    missing title without a usable direct IIIF link. Callers increment their
+    own skip counter on None. ``query_year`` is None unless the CSV carries a
+    year column (see :func:`main.data.works_csv.get_row_year`).
 
     Args:
         row: DataFrame row
@@ -422,7 +427,7 @@ def _parse_work_row(
         )
         return None
 
-    return title, creator, entry_id, direct_link, title_missing
+    return title, creator, entry_id, direct_link, title_missing, get_row_year(row)
 
 
 def _mark_no_match_failed(
@@ -494,7 +499,7 @@ def _run_sequential(
             if parsed is None:
                 skipped += 1
                 continue
-            title, creator, entry_id, direct_link, title_missing = parsed
+            title, creator, entry_id, direct_link, title_missing, query_year = parsed
 
             if direct_link:
                 logger.info(
@@ -519,6 +524,7 @@ def _run_sequential(
                         str(entry_id),
                         output_dir,
                         dry_run=dry_run,
+                        query_year=query_year,
                     )
                     or {}
                 )
@@ -761,7 +767,7 @@ def _run_parallel(
             if parsed is None:
                 skipped_count += 1
                 continue
-            title, creator, entry_id, direct_link, title_missing = parsed
+            title, creator, entry_id, direct_link, title_missing, query_year = parsed
 
             if direct_link:
                 # Direct IIIF download - handle synchronously in parallel mode
@@ -836,6 +842,7 @@ def _run_parallel(
                         None if pd.isna(creator) else str(creator),
                         None if pd.isna(entry_id) else str(entry_id),
                         output_dir,
+                        query_year=query_year,
                     )
                 except Exception:
                     # One failing row must not abort the whole batch; the row
