@@ -58,11 +58,30 @@ SEE_ALSO_PROPERTY = "http://www.w3.org/2000/01/rdf-schema#seeAlso"
 PDF_PAGE_CHUNK = 25
 MAX_PDF_CHUNKS = 400
 
+# Spanish orthography uses exactly these seven non-ASCII letters. The endpoint
+# offers no accent-insensitive comparison, so an unaccented user query would
+# never match an accented title ("novisimo" vs "novísimo"). Both sides of the
+# CONTAINS filter are therefore folded onto ASCII through the same table: the
+# query string in Python, the title literal by a REPLACE chain in SPARQL.
+_ACCENT_FOLDING: tuple[tuple[str, str], ...] = (
+    ("á", "a"),
+    ("é", "e"),
+    ("í", "i"),
+    ("ó", "o"),
+    ("ú", "u"),
+    ("ü", "u"),
+    ("ñ", "n"),
+)
+
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
-# datos.bne.es resource ids: a letter prefix (a, bimo, XX, Mi ...) plus digits.
-_CATALOG_ID_RE = re.compile(r"^[A-Za-z]{0,4}\d[A-Za-z0-9]*$")
+# datos.bne.es resource ids: a letter prefix (a, bimo, XX, Mi ...) plus digits,
+# optionally preceded by a parenthesised MARC organization code, as in
+# "(CaPaEBR)a6232137". The pattern stays deliberately narrow because the id is
+# interpolated unescaped into the seeAlso SPARQL query: no quotes, angle
+# brackets, backslashes, or whitespace can pass.
+_CATALOG_ID_RE = re.compile(r"^(?:\([A-Za-z]{1,10}\))?[A-Za-z]{0,4}\d[A-Za-z0-9]*$")
 
 
 def _bindings(data: Any) -> list[dict[str, Any]]:
@@ -156,16 +175,45 @@ def _resolve_digital_id(value: str) -> str | None:
     return extract_digital_id(_lookup_digital_url(resource_id))
 
 
+def fold_accents(value: str) -> str:
+    """Lowercase *value* and map Spanish accented letters onto plain ASCII.
+
+    Args:
+        value: Arbitrary text.
+
+    Returns:
+        The lowercased, accent-folded form used on the query side of the
+        title filter.
+    """
+    folded = value.lower()
+    for accented, plain in _ACCENT_FOLDING:
+        folded = folded.replace(accented, plain)
+    return folded
+
+
+def _folded_sparql_expression(expression: str) -> str:
+    """Wrap a SPARQL expression in the fold applied to *fold_accents*.
+
+    The accented characters are literal single-character regexes, so the
+    chain is a plain transliteration and carries no regex metacharacters.
+    """
+    folded = f"LCASE({expression})"
+    for accented, plain in _ACCENT_FOLDING:
+        folded = f"REPLACE({folded}, '{accented}', '{plain}')"
+    return folded
+
+
 def _build_search_query(title: str, limit: int) -> str:
     """Build the SPARQL query for digitised BNE editions matching *title*."""
 
-    t = escape_sparql_string(title)
+    t = escape_sparql_string(fold_accents(title))
+    folded_title = _folded_sparql_expression("?title")
     return f"""
         SELECT DISTINCT ?id ?title ?digital ?creator ?date WHERE {{
             ?id a <{MANIFESTATION_CLASS}> .
             ?id <{LABEL_PROPERTY}> ?title .
             ?id <{SEE_ALSO_PROPERTY}> ?digital .
-            FILTER(CONTAINS(LCASE(?title), LCASE('{t}')))
+            FILTER(CONTAINS({folded_title}, '{t}'))
             FILTER(STRSTARTS(STR(?digital), '{DIGITAL_BASE_URL}/'))
             OPTIONAL {{ ?id <{CREATOR_PROPERTY}> ?creator . }}
             OPTIONAL {{ ?id <{DATE_PROPERTY}> ?date . }}

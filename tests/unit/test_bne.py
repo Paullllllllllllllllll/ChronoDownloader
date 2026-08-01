@@ -20,11 +20,14 @@ from unittest.mock import patch
 import pytest
 
 from api.providers.bne import (
+    _ACCENT_FOLDING,
     DIGITAL_BASE_URL,
     PDF_PAGE_CHUNK,
     _build_search_query,
+    _catalog_resource_id,
     download_bne_work,
     extract_digital_id,
+    fold_accents,
     search_bne,
 )
 
@@ -205,6 +208,90 @@ class TestSearchQuery:
 
 
 # ---------------------------------------------------------------------------
+# Accent folding
+# ---------------------------------------------------------------------------
+
+
+class TestAccentFolding:
+    """Unaccented queries must reach accented Spanish titles.
+
+    datos.bne.es offers no accent-insensitive comparison, so a plain
+    ``CONTAINS(LCASE(?title), 'novisimo')`` misses "Novísimo arte de cocina"
+    (verified live on 01.08.2026: 0 bindings unaccented, 1 accented). Both
+    sides of the filter are folded onto ASCII with one shared table.
+    """
+
+    @pytest.mark.parametrize(
+        ("raw", "folded"),
+        [
+            ("Novísimo arte de cocina", "novisimo arte de cocina"),
+            ("La cocina española antigua", "la cocina espanola antigua"),
+            ("Pardo Bazán", "pardo bazan"),
+            ("Martínez Montiño", "martinez montino"),
+            ("MENÚ", "menu"),
+            ("cigüeña", "ciguena"),
+            ("arte de cocina", "arte de cocina"),
+            ("", ""),
+        ],
+    )
+    def test_query_side_is_lowercased_and_folded(self, raw: str, folded: str) -> None:
+        assert fold_accents(raw) == folded
+
+    @pytest.mark.parametrize(("accented", "plain"), _ACCENT_FOLDING)
+    def test_every_table_entry_folds_on_both_sides(
+        self, accented: str, plain: str
+    ) -> None:
+        """The Python fold and the SPARQL REPLACE chain share one table."""
+        assert fold_accents(accented) == plain
+        query = _build_search_query("cocina", 8)
+        assert f"'{accented}', '{plain}'" in query
+
+    def test_title_variable_is_wrapped_in_the_folding_construct(self) -> None:
+        query = _build_search_query("cocina", 8)
+        assert "REPLACE(LCASE(?title)" in query
+        assert query.count("REPLACE(") == len(_ACCENT_FOLDING)
+        assert "CONTAINS(REPLACE(" in query
+
+    def test_accented_query_is_folded_before_embedding(self) -> None:
+        """The literal handed to CONTAINS carries no accents of its own."""
+        query = _build_search_query("Novísimo Arte de Cocina", 8)
+        assert "'novisimo arte de cocina'))" in query
+        assert "novísimo" not in query
+
+    def test_unaccented_query_is_left_alone(self) -> None:
+        query = _build_search_query("novisimo arte de cocina", 8)
+        assert "'novisimo arte de cocina'))" in query
+
+    def test_folding_does_not_break_quote_escaping(self) -> None:
+        """Folding runs before escaping and must not swallow the guard."""
+        query = _build_search_query("L'Art de Cocína", 8)
+        assert "l\\'art de cocina" in query
+        assert "'l'art" not in query
+
+    def test_backslashes_stay_escaped(self) -> None:
+        query = _build_search_query("cocina\\española", 8)
+        assert "cocina\\\\espanola" in query
+
+    def test_injection_attempt_cannot_close_the_literal(self) -> None:
+        query = _build_search_query("x')) . ?s ?p ?o #", 8)
+        assert "x\\')) . ?s ?p ?o #" in query
+        assert "'x'))" not in query
+        # The FILTER/OPTIONAL skeleton is unchanged: still one CONTAINS,
+        # one STRSTARTS, two OPTIONAL clauses.
+        assert query.count("FILTER(") == 2
+        assert query.count("OPTIONAL") == 2
+
+    def test_search_sends_the_folded_query(self) -> None:
+        with patch(
+            "api.providers.bne.make_request", return_value=SPARQL_SEARCH_RESPONSE
+        ) as mock_request:
+            search_bne("Novísimo", max_results=1)
+
+        query = mock_request.call_args.kwargs["params"]["query"]
+        assert "'novisimo'))" in query
+
+
+# ---------------------------------------------------------------------------
 # search_bne
 # ---------------------------------------------------------------------------
 
@@ -342,6 +429,48 @@ class TestExtractDigitalId:
     )
     def test_rejects_catalogue_namespace(self, value: str | None) -> None:
         assert extract_digital_id(value) is None
+
+
+class TestCatalogResourceId:
+    """Catalogue ids feed an unescaped SPARQL lookup, so the guard is narrow.
+
+    It must still admit every shape ``search_bne`` actually stores in
+    ``raw["catalog_id"]`` -- including the parenthesised MARC organization
+    code that datos.bne.es emits for Alma-sourced records.
+    """
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("bimo0001244675", "bimo0001244675"),
+            ("XX3469244", "XX3469244"),
+            ("https://datos.bne.es/resource/bima0000020829", "bima0000020829"),
+            ("(CaPaEBR)a6232137", "(CaPaEBR)a6232137"),
+            (
+                "https://datos.bne.es/resource/(CaPaEBR)a6232137",
+                "(CaPaEBR)a6232137",
+            ),
+        ],
+    )
+    def test_accepts_live_id_shapes(self, value: str, expected: str) -> None:
+        assert _catalog_resource_id(value) == expected
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",
+            "(CaPaEBR)",
+            "(Ca')x1",
+            "a1' } UNION { ?s ?p ?o ",
+            "<https://evil.example/>",
+            "a1 OR 1=1",
+            "a1\\x",
+            "(OrganizationCodeFarTooLong)a1",
+            "https://example.com/resource/a6232137",
+        ],
+    )
+    def test_rejects_unsafe_or_foreign_ids(self, value: str) -> None:
+        assert _catalog_resource_id(value) is None
 
 
 # ---------------------------------------------------------------------------
