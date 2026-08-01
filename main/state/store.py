@@ -180,7 +180,7 @@ class StateManager:
 
         On Windows a transiently open state file (AV scanner, file viewer)
         raises PermissionError; a short bounded retry mirrors
-        ``api.core.atomic._atomic_replace`` so a momentary lock is not
+        ``api.core.atomic.replace_with_retry`` so a momentary lock is not
         misdiagnosed as corruption.
         """
         import time

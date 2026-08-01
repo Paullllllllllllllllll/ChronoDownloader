@@ -23,7 +23,15 @@ _REPLACE_ATTEMPTS = 5
 _REPLACE_BASE_SLEEP_S = 0.1
 
 
-def _atomic_replace(path: str, tmp_path: str) -> None:
+def replace_with_retry(path: str, tmp_path: str) -> None:
+    """Promote ``tmp_path`` onto ``path``, retrying a transient Windows lock.
+
+    On failure the temp file is removed and the error re-raised.
+
+    Args:
+        path: Destination path.
+        tmp_path: Fully written temporary file to promote.
+    """
     try:
         for attempt in range(_REPLACE_ATTEMPTS):
             try:
@@ -66,7 +74,7 @@ def atomic_write_text(
         with contextlib.suppress(OSError):
             os.remove(tmp_path)
         raise
-    _atomic_replace(path, tmp_path)
+    replace_with_retry(path, tmp_path)
 
 
 def atomic_write_json(
@@ -88,4 +96,4 @@ def atomic_write_json(
     atomic_write_text(path, text)
 
 
-__all__ = ["atomic_write_text", "atomic_write_json"]
+__all__ = ["atomic_write_text", "atomic_write_json", "replace_with_retry"]

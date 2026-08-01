@@ -24,7 +24,7 @@ from urllib.parse import unquote, urlparse
 
 import requests
 
-from .atomic import atomic_write_json
+from .atomic import atomic_write_json, replace_with_retry
 from .budget import get_budget
 from .config import (
     get_download_config,
@@ -495,6 +495,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
 
         if not _BUDGET.allow_new_file(provider, work_id):
             logger.warning("Download budget stop-policy tripped; skipping %s", url)
+            release_counter(name_key)
             return None
 
         # Classify the payload into its budget bucket by extension so PDF and
@@ -516,6 +517,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 url,
                 content_len_int,
             )
+            release_counter(name_key)
             return None
 
         # Stream into a temporary <name>.part file and only promote it to the
@@ -534,9 +536,17 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         bytes_written = 0
 
         def _discard_partial() -> None:
-            """Remove the .part file and refund any bytes already booked."""
+            """Drop the .part file, refund its bytes, and free its page number.
+
+            Every discard reaches here, so the sequence number reserved by
+            _build_standardized_filename above is handed back on all of them.
+            Spending it would leave a permanent hole in the page numbering:
+            the next page lands at image_002 with nothing at image_001, and a
+            downstream consumer reads the gap as a missing page.
+            """
             _safe_remove(part_path)
             _BUDGET.refund(budget_type, work_id, bytes_written)
+            release_counter(name_key)
 
         # Buffer the leading bytes so the post-write validators need not reopen
         # the just-written file (which triggers a Defender re-scan on Windows).
@@ -582,9 +592,6 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 e,
             )
             _discard_partial()
-            # Hand back the sequence number this attempt reserved, so the
-            # retry writes p00005_..._image_001 rather than _image_002.
-            release_counter(name_key)
             raise
         except OSError as e:
             # A disk-side failure will not be cured by another attempt.
@@ -661,7 +668,11 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 return None
 
         try:
-            os.replace(part_path, filepath)
+            # A fully downloaded, fully validated multi-megabyte PDF is exactly
+            # what Defender opens to scan on close, and a bare os.replace threw
+            # it away on the first transient lock. Same bounded retry the state
+            # and CSV writers already use.
+            replace_with_retry(filepath, part_path)
         except OSError as e:
             logger.error("Failed to finalize download %s: %s", filepath, e)
             _discard_partial()

@@ -118,6 +118,56 @@ def test_midstream_connection_error_is_retried(
     assert _objects_files(folder) == ["book_unknown.pdf"]
 
 
+def test_every_discard_gives_the_page_number_back(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """A discard on any path must not spend a page's sequence number.
+
+    Only the mid-stream retry handed the number back, so every other
+    discard -- a short read, a validation failure, a budget refusal --
+    permanently burned one. The IIIF service loop tries several URLs for the
+    SAME page, so one failed candidate pushed the page that did download to
+    image_002 and left a phantom gap at image_001.
+    """
+    payload = b"\xff\xd8\xff\xe0" + b"x" * 512
+
+    def short_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload[:16]
+
+    def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload
+
+    def _as_cm(response: MagicMock) -> MagicMock:
+        cm = MagicMock()
+        cm.__enter__ = MagicMock(return_value=response)
+        cm.__exit__ = MagicMock(return_value=False)
+        return cm
+
+    # First candidate declares more bytes than it delivers, so the download is
+    # discarded as incomplete; the second candidate for the same page works.
+    session = MagicMock()
+    session.get.side_effect = [
+        _as_cm(
+            _make_response(
+                {"Content-Type": "image/jpeg", "Content-Length": str(len(payload))},
+                short_iter,
+            )
+        ),
+        _as_cm(_make_response({"Content-Type": "image/jpeg"}, good_iter)),
+    ]
+    folder = str(tmp_path / "work")
+
+    dl_mod._BUDGET._exhausted = False
+    with patch.object(dl_mod, "get_session", return_value=session):
+        assert dl_mod.download_file("https://example.org/a.jpg", folder, "page") is None
+        assert (
+            dl_mod.download_file("https://example.org/b.jpg", folder, "page")
+            is not None
+        )
+
+    assert _objects_files(folder) == ["page_unknown_image_001.jpg"]
+
+
 def test_write_failure_refunds_all_booked_bytes(
     tmp_path: Any, mock_config: dict[str, Any]
 ) -> None:
