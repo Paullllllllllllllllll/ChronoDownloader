@@ -121,6 +121,8 @@ def run_batch_downloads(
         on_submit: Optional callback when a task is submitted (parallel mode)
         on_complete: Optional callback when a task completes (parallel mode)
         csv_path: Path to the source CSV for status updates (unified CSV mode)
+        enable_background_retry: Whether to retry ready deferred items before
+            the batch loop runs (and drop the rows they complete)
 
     Returns:
         Dictionary with execution statistics:

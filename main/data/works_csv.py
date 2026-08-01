@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Thread-safe lock for CSV updates
 _csv_lock = threading.Lock()
 
-_csv_cache: dict[str, tuple[pd.DataFrame, float]] = {}
+_csv_cache: dict[str, tuple[pd.DataFrame, tuple[float, int]]] = {}
 
 # Column names from the sampling notebook
 ENTRY_ID_COL = "entry_id"
@@ -222,17 +222,28 @@ def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
     atomic_write_text(csv_path, csv_text)
 
 
-def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
-    mtime = 0.0
+def _csv_stat(csv_path: str) -> tuple[float, int]:
+    """Return the (mtime, size) signature of ``csv_path`` (zeros if absent).
+
+    Keying the cache on mtime alone missed an external edit that landed in
+    the same filesystem tick (FAT32 and some network shares have two-second
+    mtime granularity); the stale frame was then written back over it. This
+    matches the signature main.data.index already uses.
+    """
     try:
-        mtime = os.path.getmtime(csv_path)
-    except Exception:
-        mtime = 0.0
+        st = os.stat(csv_path)
+    except OSError:
+        return (0.0, 0)
+    return (st.st_mtime, st.st_size)
+
+
+def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
+    key = _csv_stat(csv_path)
 
     cached = _csv_cache.get(csv_path)
     if cached is not None:
-        df, cached_mtime = cached
-        if cached_mtime == mtime:
+        df, cached_key = cached
+        if cached_key == key:
             return df
 
     # Read every cell verbatim as text: the status writers rewrite the WHOLE
@@ -242,17 +253,13 @@ def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
     # dtype=str + keep_default_na=False all untouched cells round-trip
     # byte-identically; _parse_status already classifies the string forms.
     df = pd.read_csv(csv_path, encoding="utf-8", dtype=str, keep_default_na=False)
-    _csv_cache[csv_path] = (df, mtime)
+    _csv_cache[csv_path] = (df, _csv_stat(csv_path))
     return df
 
 
 def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
     _save_csv(df, csv_path)
-    try:
-        mtime = os.path.getmtime(csv_path)
-    except Exception:
-        mtime = 0.0
-    _csv_cache[csv_path] = (df, mtime)
+    _csv_cache[csv_path] = (df, _csv_stat(csv_path))
 
 
 def mark_success(

@@ -86,7 +86,7 @@ Examples:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run searches and create folders, but skip downloads.",
+        help="Search and select only; write nothing and download nothing.",
     )
 
     parser.add_argument(

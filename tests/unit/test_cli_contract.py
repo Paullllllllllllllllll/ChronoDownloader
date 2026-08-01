@@ -88,9 +88,7 @@ class TestBatchExitCodes:
                     "skipped": 0,
                 },
             ),
-            patch("main.cli.commands.batch.get_deferred_queue") as mq,
         ):
-            mq.return_value.get_pending.return_value = []
             code = run_batch_cli(
                 _batch_args(csv_file=csv_path),
                 mock_config,
@@ -126,9 +124,7 @@ class TestBatchExitCodes:
                     "skipped": 0,
                 },
             ),
-            patch("main.cli.commands.batch.get_deferred_queue") as mq,
         ):
-            mq.return_value.get_pending.return_value = []
             code = run_batch_cli(
                 _batch_args(csv_file=csv_path, json_summary=True),
                 mock_config,
@@ -372,6 +368,77 @@ class TestVerifyCommand:
 
         args = _batch_args(output_dir=out_dir, verify=True)
         assert _run_verify_command(args) == 0
+
+    def test_verify_sees_direct_iiif_works_beside_index_rows(
+        self, tmp_path: Any
+    ) -> None:
+        """Direct-IIIF downloads write no index row, by documented design.
+
+        The index scan used to short-circuit the directory scan, so in any
+        mixed corpus every direct-IIIF work became invisible to --verify: a
+        corrupt one stayed "completed", was never re-downloaded, and the
+        command still exited 0.
+        """
+        from main.cli.commands.verify import run_verify
+
+        out_dir = str(tmp_path / "out")
+        search_dir = self._make_work(
+            out_dir,
+            "search_work",
+            {"item.pdf": b"%PDF-1.4 content"},
+            work_json={"status": "completed"},
+        )
+        self._make_work(
+            out_dir,
+            "iiif_work",
+            {"item.pdf": b"<html>error page</html>"},
+            work_json={"status": "completed"},
+        )
+        self._write_index(
+            out_dir,
+            [
+                {
+                    "work_id": "W1",
+                    "entry_id": "E1",
+                    "work_dir": search_dir,
+                    "status": "completed",
+                }
+            ],
+        )
+
+        stats = run_verify(out_dir)
+        assert stats == {"total": 2, "ok": 1, "partial": 1}
+        with open(
+            os.path.join(out_dir, "iiif_work", "work.json"), encoding="utf-8"
+        ) as f:
+            assert json.load(f)["status"] == "partial"
+
+    def test_verify_does_not_double_count_indexed_work_dirs(
+        self, tmp_path: Any
+    ) -> None:
+        """A work present in both the index and the scan is verified once."""
+        from main.cli.commands.verify import run_verify
+
+        out_dir = str(tmp_path / "out")
+        work_dir = self._make_work(
+            out_dir,
+            "search_work",
+            {"item.pdf": b"%PDF-1.4 content"},
+            work_json={"status": "completed"},
+        )
+        self._write_index(
+            out_dir,
+            [
+                {
+                    "work_id": "W1",
+                    "entry_id": "E1",
+                    "work_dir": work_dir,
+                    "status": "completed",
+                }
+            ],
+        )
+
+        assert run_verify(out_dir) == {"total": 1, "ok": 1, "partial": 0}
 
 
 class TestLimitArgument:

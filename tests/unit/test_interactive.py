@@ -524,3 +524,62 @@ class TestConfigWorkflowIntegration:
         assert workflow.config.config_path is not None
         assert workflow.config.csv_path is not None
         assert workflow.config.output_dir is not None
+
+
+class TestInteractiveSessionDeferredAccounting:
+    """The session summary must report this run's deferrals, not the backlog.
+
+    The deferred queue is user-level: it spans every corpus and every previous
+    run. ``run_batch_downloads`` computes the honest per-run delta, and the
+    session summary used to overwrite it with ``len(get_pending())``, so a
+    run that deferred nothing reported another corpus's whole backlog under
+    Results and offered to retry it.
+    """
+
+    def _config(self, output_dir: str, csv_path: str) -> DownloadConfiguration:
+        config = DownloadConfiguration()
+        config.mode = "csv"
+        config.csv_path = csv_path
+        config.output_dir = output_dir
+        config.dry_run = False
+        return config
+
+    def test_batch_delta_survives_a_preexisting_backlog(
+        self, temp_dir: str, sample_csv_file: str
+    ) -> None:
+        from main.ui import interactive as mod
+
+        backlog = [object()] * 7
+        shown: dict[str, Any] = {}
+
+        def _capture(**kwargs: Any) -> None:
+            shown.update(kwargs)
+
+        with (
+            patch.object(ConsoleUI, "enable_ansi"),
+            patch.object(
+                mod,
+                "process_csv_batch_with_stats",
+                return_value={
+                    "processed": 3,
+                    "succeeded": 3,
+                    "failed": 0,
+                    "deferred": 0,
+                },
+            ),
+            patch.object(mod, "get_deferred_queue") as queue,
+            patch(
+                "main.orchestration.pipeline.load_enabled_apis",
+                return_value=[("p", object(), object(), "P")],
+            ),
+            patch(
+                "main.orchestration.pipeline.filter_enabled_providers_for_keys",
+                side_effect=lambda providers: providers,
+            ),
+            patch.object(ConsoleUI, "print_session_summary", side_effect=_capture),
+        ):
+            queue.return_value.get_pending.return_value = backlog
+            mod.run_interactive_session(self._config(temp_dir, sample_csv_file))
+
+        assert shown.get("deferred") == 0
+        assert shown.get("succeeded") == 3

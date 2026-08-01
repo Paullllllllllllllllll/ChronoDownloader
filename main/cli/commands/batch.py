@@ -16,7 +16,6 @@ from main.data.works_csv import (
     load_works_csv,
 )
 from main.orchestration.execution import run_batch_downloads
-from main.state.deferred import get_deferred_queue
 
 from ..exit_codes import EXIT_FAILURES, EXIT_OK, EXIT_USAGE
 from ..overrides import _filter_pending_rows, _split_csv_values
@@ -131,16 +130,9 @@ def run_batch_cli(
         enable_background_retry=True,
     )
 
-    queue = get_deferred_queue()
-    deferred_count = len(queue.get_pending())
-
-    if deferred_count > 0:
-        logger.info(
-            "%d download(s) deferred due to quota limits. Ready items are "
-            "retried automatically at the start of the next run.",
-            deferred_count,
-        )
-
+    # run_batch_downloads has already logged the honest "N deferred by this
+    # run; M pending in the queue" line. Repeating len(get_pending()) here
+    # attributed every other corpus's backlog to this batch.
     logger.info(
         "Batch complete: %d processed, %d succeeded, %d failed, %d deferred",
         stats.get("processed", 0),

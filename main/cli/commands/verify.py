@@ -107,11 +107,20 @@ def _cell_text(value: Any) -> str | None:
 def _iter_work_dirs(output_dir: str) -> list[tuple[str, str | None, str | None]]:
     """Return ``(work_dir, work_id, entry_id)`` triples to verify.
 
-    Prefers index.csv (authoritative), falling back to scanning subdirectories.
-    Rows that were never downloaded are skipped, and a work_dir recorded
-    relative to a different working directory is retried under ``output_dir``.
+    Unions the index.csv rows (authoritative, and the only source of work_id
+    and entry_id) with a scan of the output directory. The scan is not a
+    fallback: direct-IIIF downloads deliberately write no index row, so a
+    mixed corpus would otherwise hide every one of them behind a non-empty
+    index. Rows that were never downloaded are skipped, and a work_dir
+    recorded relative to a different working directory is retried under
+    ``output_dir``.
     """
     triples: list[tuple[str, str | None, str | None]] = []
+    seen: set[str] = set()
+
+    def _key(path: str) -> str:
+        return os.path.normcase(os.path.abspath(path))
+
     df = read_index_csv(output_dir)
     if df is not None and "work_dir" in df.columns:
         for _, row in df.iterrows():
@@ -127,16 +136,17 @@ def _iter_work_dirs(output_dir: str) -> list[tuple[str, str | None, str | None]]
                 relocated = os.path.join(output_dir, os.path.basename(wd.rstrip("/\\")))
                 if os.path.isdir(relocated):
                     wd = relocated
+            if _key(wd) in seen:
+                continue
+            seen.add(_key(wd))
             triples.append(
                 (wd, _cell_text(row.get("work_id")), _cell_text(row.get("entry_id")))
             )
-        if triples:
-            return triples
 
     if os.path.isdir(output_dir):
         for name in sorted(os.listdir(output_dir)):
             wd = os.path.join(output_dir, name)
-            if not os.path.isdir(wd):
+            if not os.path.isdir(wd) or _key(wd) in seen:
                 continue
             if not (
                 os.path.isdir(os.path.join(wd, "objects"))

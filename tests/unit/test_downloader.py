@@ -481,12 +481,9 @@ class TestRunCli:
             with patch("main.cli.commands.batch.run_batch_downloads") as mock_batch:
                 mock_batch.return_value = {"processed": 2, "succeeded": 2}
 
-                with patch("main.cli.commands.batch.get_deferred_queue") as mock_queue:
-                    mock_queue.return_value.get_pending.return_value = []
+                run_cli(mock_args, mock_config)
 
-                    run_cli(mock_args, mock_config)
-
-                    mock_batch.assert_called_once()
+                mock_batch.assert_called_once()
 
     def test_run_cli_handles_deferred_downloads(
         self,
@@ -511,12 +508,7 @@ class TestRunCli:
                     "deferred": 1,
                 }
 
-                with patch("main.cli.commands.batch.get_deferred_queue") as mock_queue:
-                    mock_deferred = MagicMock()
-                    mock_deferred.get_pending.return_value = [MagicMock()]
-                    mock_queue.return_value = mock_deferred
-
-                    run_cli(mock_args, mock_config)
+                run_cli(mock_args, mock_config)
 
     def test_run_cli_lists_providers_and_exits_early(
         self,

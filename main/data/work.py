@@ -130,7 +130,14 @@ def check_work_status(
                 if status == "completed":
                     return True, "status=completed in work.json"
             except Exception:
-                pass
+                # Falling through re-downloads the work, which is the safe
+                # direction -- but silently, so a corrupt work.json looked
+                # exactly like a work that was never completed.
+                logger.debug(
+                    "Unreadable work.json at %s; treating work as not completed",
+                    work_json_path,
+                    exc_info=True,
+                )
 
     elif resume_mode == "skip_if_has_objects" and os.path.isdir(objects_dir):
         try:
@@ -147,7 +154,11 @@ def check_work_status(
             if files:
                 return True, f"objects/ contains {len(files)} file(s)"
         except Exception:
-            pass
+            logger.debug(
+                "Could not list %s; treating work as not downloaded",
+                objects_dir,
+                exc_info=True,
+            )
 
     return False, ""
 

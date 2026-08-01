@@ -407,7 +407,7 @@ class InteractiveWorkflow:
         for csv_file in Path(".").glob("*.csv"):
             name = csv_file.stem
             try:
-                df = pd.read_csv(csv_file)
+                df = pd.read_csv(csv_file, encoding="utf-8")
                 count = len(df)
                 collections.append((str(csv_file), f"{name} ({count} works)"))
             except Exception:
@@ -419,7 +419,7 @@ class InteractiveWorkflow:
             for csv_file in collections_dir.glob("*.csv"):
                 name = csv_file.stem
                 try:
-                    df = pd.read_csv(csv_file)
+                    df = pd.read_csv(csv_file, encoding="utf-8")
                     count = len(df)
                     collections.append((str(csv_file), f"{name} ({count} works)"))
                 except Exception:
@@ -782,7 +782,7 @@ def process_single_work(
     output_dir: str,
     dry_run: bool,
     log: logging.Logger,
-) -> bool:
+) -> str:
     """Process a single work.
 
     Args:
@@ -794,7 +794,9 @@ def process_single_work(
         log: Logger instance
 
     Returns:
-        True if processed successfully
+        The outcome status: ``"completed"``, ``"deferred"``, ``"dry_run"``,
+        or ``"failed"``. A quota deferral is deliberately distinguished from
+        a failure, matching the CLI's accounting.
     """
     log.info(
         "Processing single work: '%s'%s", title, f" by '{creator}'" if creator else ""
@@ -808,11 +810,15 @@ def process_single_work(
         dry_run=dry_run,
     )
 
-    # A dry run (or a deferral, which returns None) is not a completed download;
-    # report honest success so the session summary reflects reality.
+    # A dry run performs no download, so it is neither success nor failure.
     if dry_run:
-        return True
-    return result is not None and result.get("status") == "completed"
+        return "dry_run"
+    if not isinstance(result, dict):
+        return "failed"
+    # process_work returns {"status": "deferred"} for a quota deferral; the
+    # CLI counts that separately, and so must the interactive summary.
+    status = str(result.get("status") or "failed")
+    return status if status in ("completed", "deferred", "dry_run") else "failed"
 
 
 def run_interactive_session(
@@ -886,6 +892,11 @@ def run_interactive_session(
         "deferred": 0,
     }
 
+    # Baseline for the modes that do not compute their own deferred delta.
+    # The queue is user-level and spans every corpus and every previous run,
+    # so only the growth during this session belongs in the session summary.
+    deferred_before = len(get_deferred_queue().get_pending())
+
     if config.mode == "csv" or config.mode == "collection":
         result_stats = process_csv_batch_with_stats(
             config.csv_path or "",
@@ -898,18 +909,18 @@ def run_interactive_session(
         )
         stats.update(result_stats)
     elif config.mode == "single":
-        if process_single_work(
+        single_status = process_single_work(
             config.single_title or "",
             config.single_creator,
             config.single_entry_id or "W0001",
             config.output_dir,
             config.dry_run,
             log,
-        ):
-            stats["processed"] = 1
+        )
+        stats["processed"] = 1
+        if single_status == "completed":
             stats["succeeded"] = 1
-        else:
-            stats["processed"] = 1
+        elif single_status == "failed":
             stats["failed"] = 1
     elif config.mode == "search":
         result = pipeline.search_work(
@@ -953,17 +964,20 @@ def run_interactive_session(
             elif status != "dry_run":
                 stats["failed"] += 1
 
-    # Handle deferred downloads
-    deferred_queue = get_deferred_queue()
-    pending = deferred_queue.get_pending()
-    deferred_count = len(pending)
-    stats["deferred"] = deferred_count
+    # Handle deferred downloads. The batch modes already carry the honest
+    # per-run delta from run_batch_downloads; overwriting it with the whole
+    # backlog broke the parts-sum-to-total invariant of the session summary
+    # whenever the queue held items from another corpus.
+    pending = get_deferred_queue().get_pending()
+    if config.mode not in ("csv", "collection"):
+        stats["deferred"] = max(0, len(pending) - deferred_before)
 
     if pending:
         log.info(
-            "%d download(s) were deferred due to quota limits. Ready items are "
-            "retried automatically at the start of the next run.",
-            deferred_count,
+            "%d download(s) deferred by this run; %d pending in the queue. Ready "
+            "items are retried automatically at the start of the next run.",
+            stats["deferred"],
+            len(pending),
         )
 
     # Calculate duration
