@@ -1,4 +1,4 @@
-# ChronoDownloader v1.18.0
+# ChronoDownloader v1.19.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1167,6 +1167,25 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.19.0** (1 August 2026) -- Decision release resolving the open items
+  from the three-round maintenance sweep. Config defaults are unified behind
+  single authoritative constants (on_exceed now defaults to "stop",
+  keep_non_selected_metadata to false; an inconsistency that gave the
+  parallel path four workers where the batch path gave one is fixed), with
+  templates annotated where they deliberately opt into looser values and a
+  new test module pinning every default against re-drift. Six confirmed
+  dead public symbols are removed (combined_match_score, parse_year,
+  get_processed_work_ids, is_provider_available, get_provider_cooldown,
+  and run_with_mode_detection's never-invoked handler parameters) --
+  breaking only for external importers. The BNE connector is migrated off
+  the retired iiif.bne.es host (NXDOMAIN since BNE's move to BNE Digital)
+  onto SPARQL-bridged bnedigital.bne.es PDF page-range downloads, verified
+  live; note both BNE hosts currently reject the requests client's TLS
+  fingerprint, so enabling the provider end-to-end needs a
+  browser-impersonating HTTP client. Finally, the six-way duplicated
+  per-page image loop (Gallica, Polona, DDB, DPLA, LoC, Europeana) is
+  consolidated onto the shared IIIF helper (-247 lines), live-verified via
+  Gallica. 1,276 tests pass.
 - **v1.18.0** (31 July 2026) -- Fifth-round maintenance audit release. Two
   connectors were downloading several times the bytes a work needs and
   discarding most of them: SBB collected page images from every METS
