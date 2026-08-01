@@ -76,7 +76,7 @@ extraction pipeline.
 | British Library | UK | No | Yes |
 | MDZ | Germany | No | Yes |
 | Polona | Poland | No | Yes |
-| Biblioteca Nacional de Espana | Spain | No | Yes |
+| Biblioteca Nacional de Espana | Spain | No | No |
 | HathiTrust | US | Optional | Yes |
 | Wellcome Collection | UK | No | Yes |
 | Anna's Archive | Global (Aggregator) | Optional* | No |
@@ -580,7 +580,7 @@ quota management. Each provider key maps to a settings object:
       "free_only": true,
       "prefer": "pdf",
       "allow_drm": false,
-      "max_files": 3,
+      "max_files": 2,
       "max_pages": 50,
       "network": {
         "delay_ms": 200,
@@ -634,7 +634,8 @@ breaker and set the threshold to 2--3 with a cooldown of
   (0 = unlimited). For Google Books, `max_pages` bounds the
   page-by-page image extraction fallback (default 50).
 - `max_files`: maximum files per work (for Google Books, the
-  direct PDF/EPUB download cap, distinct from `max_pages`)
+  direct PDF/EPUB download cap, distinct from `max_pages`;
+  default 2, which covers a volume's PDF plus its EPUB)
 - `free_only`: only download free/public domain works
 - `prefer`: preferred download format (`pdf` or `epub`)
 - `allow_drm`: whether to allow DRM-protected content
@@ -647,7 +648,7 @@ To adjust for slow providers, increase `delay_ms` and
 ```json
 {
   "download": {
-    "resume_mode": "skip_if_has_objects",
+    "resume_mode": "skip_completed",
     "prefer_pdf_over_images": true,
     "download_manifest_renderings": true,
     "max_renderings_per_manifest": 1,
@@ -661,7 +662,7 @@ To adjust for slow providers, increase `delay_ms` and
       ".pdf", ".epub", ".jpg", ".jpeg",
       ".png", ".jp2", ".tif", ".tiff"
     ],
-    "max_parallel_downloads": 4,
+    "max_parallel_downloads": 3,
     "provider_concurrency": {
       "default": 2,
       "annas_archive": 1,
@@ -676,8 +677,11 @@ To adjust for slow providers, increase `delay_ms` and
 ```
 
 - `resume_mode`: how to handle previously processed works
+  (default `skip_completed`)
   - `skip_completed`: skip if `work.json` records `status=completed`
-  - `skip_if_has_objects`: skip if `objects/` has files
+  - `skip_if_has_objects`: skip if `objects/` has files; faster on
+    large reruns, but a work interrupted mid-download is skipped
+    while still incomplete
   - `resume_from_csv`: skip if `retrievable=True` in CSV
   - `reprocess_all`: always reprocess
 - `prefer_pdf_over_images`: skip page images when PDF/EPUB
@@ -685,13 +689,13 @@ To adjust for slow providers, increase `delay_ms` and
 - `download_manifest_renderings`: download PDFs/EPUBs linked in
   IIIF manifests
 - `max_renderings_per_manifest`: maximum rendering files per
-  manifest
+  manifest (default 1)
 - `rendering_mime_whitelist`: allowed MIME types for renderings
 - `overwrite_existing`: overwrite existing files
 - `include_metadata`: save metadata JSON files
 - `allowed_object_extensions`: file extensions to download
 - `max_parallel_downloads`: concurrent download workers
-  (1 = sequential)
+  (default 1 = sequential; `config.example.json` opts into 3)
 - `provider_concurrency`: per-provider concurrent download
   limits; prevents overwhelming rate-limited APIs
 - `worker_timeout_s`: total ceiling in seconds for the download phase
@@ -721,7 +725,9 @@ To adjust for slow providers, increase `delay_ms` and
   (0 = unlimited)
 - `per_work.*`: maximum per individual work
 - `on_exceed`: action when limit exceeded (`skip`: skip file and
-  continue; `stop`: abort processing)
+  continue; `stop`: abort processing). Default `stop`, so a
+  configured ceiling halts the run instead of quietly degrading
+  into per-file skipping
 
 ### 6. Selection Strategy
 
@@ -729,7 +735,7 @@ To adjust for slow providers, increase `delay_ms` and
 {
   "selection": {
     "strategy": "collect_and_select",
-    "max_parallel_searches": 5,
+    "max_parallel_searches": 3,
     "provider_hierarchy": [
       "mdz", "bnf_gallica", "e_rara", "slub",
       "internet_archive", "annas_archive",
@@ -740,7 +746,7 @@ To adjust for slow providers, increase `delay_ms` and
     "creator_weight": 0.2,
     "max_candidates_per_provider": 5,
     "download_strategy": "selected_only",
-    "keep_non_selected_metadata": true
+    "keep_non_selected_metadata": false
   }
 }
 ```
@@ -751,11 +757,14 @@ To adjust for slow providers, increase `delay_ms` and
   - `sequential_first_hit`: search in order, stop at first
     match above threshold (faster)
 - `max_parallel_searches`: concurrent provider searches
-  (1 = sequential)
+  (default 1 = sequential; `config.example.json` opts into 3)
 - `provider_hierarchy`: ordered list of preferred providers
 - `min_title_score`: minimum fuzzy match score (0--100); use
   50--60 for multilingual/historical collections, 70--85 for
-  modern English collections
+  modern English collections. The default when the key is absent
+  is 85: a loose fallback risks downloading the wrong work, so a
+  permissive threshold has to be set deliberately (as
+  `config.example.json` does, with 35 for early modern titles)
 - `search_timeout_seconds`: per-provider search timeout in
   seconds (default 60); a provider whose search exceeds it is
   logged at WARNING and dropped so one slow provider cannot stall
@@ -770,11 +779,13 @@ To adjust for slow providers, increase `delay_ms` and
   provider
 - `download_strategy`: `selected_only` or `all`
 - `keep_non_selected_metadata`: save metadata for non-selected
-  candidates
+  candidates (default `false`; every candidate and its score is
+  recorded in `work.json` regardless, so this only controls the
+  extra per-candidate metadata files)
 
-With `max_parallel_searches: 5`, searching 5 providers completes
-in approximately 1 second versus approximately 5 seconds
-sequentially.
+Parallel searching scales close to linearly: with
+`max_parallel_searches: 5`, searching five providers takes about
+as long as the slowest one rather than the sum of all five.
 
 ### 7. Naming Conventions
 
@@ -893,7 +904,7 @@ per-provider semaphores.
 ```json
 {
   "download": {
-    "max_parallel_downloads": 4,
+    "max_parallel_downloads": 3,
     "provider_concurrency": {
       "default": 2,
       "annas_archive": 1,
@@ -1127,7 +1138,8 @@ responses.
 
 **Downloads are very slow?**
 
-Enable parallel downloads (`max_parallel_downloads: 4`), use
+Downloads run sequentially unless you say otherwise, so start by
+setting `max_parallel_downloads` to 3 or more. Beyond that, use the
 `sequential_first_hit` strategy, enable only fast providers, or
 increase `provider_concurrency` for high-throughput providers.
 

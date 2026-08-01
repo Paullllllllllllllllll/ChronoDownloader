@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..core.config import get_download_config
+from ..core.config import DEFAULT_MAX_RENDERINGS_PER_MANIFEST, get_download_config
 from ..core.download import download_file
 
 logger = logging.getLogger(__name__)
@@ -45,9 +45,14 @@ def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     ]
 
     try:
-        limit = int(dl_cfg.get("max_renderings_per_manifest", 1) or 1)
+        limit = int(
+            dl_cfg.get(
+                "max_renderings_per_manifest", DEFAULT_MAX_RENDERINGS_PER_MANIFEST
+            )
+            or DEFAULT_MAX_RENDERINGS_PER_MANIFEST
+        )
     except Exception:
-        limit = 1
+        limit = DEFAULT_MAX_RENDERINGS_PER_MANIFEST
 
     def _collect_renderings(obj: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []

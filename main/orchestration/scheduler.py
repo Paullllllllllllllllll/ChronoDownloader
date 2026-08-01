@@ -20,7 +20,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
-from api.core.config import get_config
+from api.core.config import DEFAULT_MAX_PARALLEL_DOWNLOADS, get_config
 from api.core.context import (
     clear_all_context,
     reset_counters,
@@ -200,7 +200,8 @@ def get_parallel_download_config() -> dict[str, Any]:
     dl = dict(cfg.get("download", {}) or {})
 
     # Defaults for parallel downloads
-    dl.setdefault("max_parallel_downloads", 1)  # 1 = sequential (backward compatible)
+    # 1 = sequential (backward compatible); see api.core.config for the constant
+    dl.setdefault("max_parallel_downloads", DEFAULT_MAX_PARALLEL_DOWNLOADS)
     dl.setdefault(
         "provider_concurrency",
         {

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from api.core.budget import DownloadBudget, budget_exhausted, get_budget
+from api.core.config import DEFAULT_ON_EXCEED
 
 
 class TestDownloadBudget:
@@ -135,8 +136,25 @@ class TestDownloadBudget:
         assert fresh_budget.exhausted() is True
 
     def test_policy_default(self, fresh_budget: DownloadBudget) -> None:
-        """Test default policy is 'skip'."""
+        """An absent on_exceed key resolves to the shared default, 'stop'."""
         with patch("api.core.budget.get_download_limits", return_value={}):
+            assert fresh_budget._policy() == DEFAULT_ON_EXCEED == "stop"
+
+    def test_policy_unrecognized_value_falls_back_to_default(
+        self, fresh_budget: DownloadBudget
+    ) -> None:
+        """A typo'd policy must not silently become the permissive one."""
+        with patch(
+            "api.core.budget.get_download_limits",
+            return_value={"on_exceed": "halt"},
+        ):
+            assert fresh_budget._policy() == DEFAULT_ON_EXCEED
+
+    def test_policy_skip_is_honored(self, fresh_budget: DownloadBudget) -> None:
+        """An explicit 'skip' still overrides the stricter default."""
+        with patch(
+            "api.core.budget.get_download_limits", return_value={"on_exceed": "skip"}
+        ):
             assert fresh_budget._policy() == "skip"
 
     def test_policy_stop(self, fresh_budget: DownloadBudget) -> None:

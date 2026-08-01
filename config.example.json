@@ -125,7 +125,7 @@
       "free_only": true,
       "prefer": "pdf",
       "allow_drm": false,
-      "max_files": 1000,
+      "max_files": 2,
       "max_pages": 50,
       "min_title_score": 50,
       "network": {
@@ -219,10 +219,10 @@
     }
   },
   "download": {
-    "resume_mode": "skip_if_has_objects",
+    "resume_mode": "skip_completed",
     "prefer_pdf_over_images": true,
     "download_manifest_renderings": true,
-    "max_renderings_per_manifest": 5,
+    "max_renderings_per_manifest": 1,
     "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
     "overwrite_existing": false,
     "include_metadata": true,
@@ -231,6 +231,7 @@
     "_resume_mode_options": ["skip_completed", "reprocess_all", "skip_if_has_objects", "resume_from_csv"],
     "_resume_mode_note": "resume_from_csv uses the retrievable column in the source CSV for resume logic",
     "max_parallel_downloads": 3,
+    "_max_parallel_downloads_note": "Deliberate opt-in; the built-in default when this key is absent is 1 (sequential).",
     "provider_concurrency": {
       "default": 2,
       "annas_archive": 1,
@@ -249,6 +250,7 @@
   "selection": {
     "strategy": "collect_and_select",
     "max_parallel_searches": 3,
+    "_max_parallel_searches_note": "Deliberate opt-in; the built-in default when this key is absent is 1 (sequential).",
     "provider_hierarchy": [
       "mdz",
       "slub",
@@ -267,6 +269,7 @@
       "hathitrust"
     ],
     "min_title_score": 35,
+    "_min_title_score_note": "Loosened deliberately for historical/multilingual titles; the built-in default when this key is absent is 85.",
     "search_timeout_seconds": 60,
     "creator_weight": 0.2,
     "max_candidates_per_provider": 5,

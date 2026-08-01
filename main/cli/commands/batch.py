@@ -8,6 +8,7 @@ import logging
 import os
 from typing import Any
 
+from api.core.config import resolve_max_parallel_downloads
 from main.data.works_csv import (
     DIRECT_LINK_COL,
     TITLE_COL,
@@ -110,7 +111,7 @@ def run_batch_cli(
         return EXIT_OK
 
     dl_config = config.get("download", {})
-    max_parallel = int(dl_config.get("max_parallel_downloads", 1) or 1)
+    max_parallel = resolve_max_parallel_downloads(dl_config)
 
     logger.info("Starting downloader. Output directory: %s", args.output_dir)
     logger.info(

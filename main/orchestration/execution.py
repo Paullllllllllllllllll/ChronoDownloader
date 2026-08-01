@@ -28,6 +28,7 @@ from typing import Any, cast
 import pandas as pd
 
 from api.core.budget import budget_exhausted
+from api.core.config import resolve_max_parallel_downloads
 from api.iiif import (
     download_from_iiif_manifest,
     is_direct_download_enabled,
@@ -174,9 +175,7 @@ def run_batch_downloads(
 
     # Determine effective parallel settings
     dl_config = config.get("download", {})
-    max_parallel = max_workers_override or int(
-        dl_config.get("max_parallel_downloads", 1) or 1
-    )
+    max_parallel = resolve_max_parallel_downloads(dl_config, max_workers_override)
 
     # Use parallel mode only when configured and not dry-run
     if use_parallel and max_parallel > 1 and not dry_run:
@@ -617,9 +616,7 @@ def _run_parallel(
     """
     # Get parallel download settings
     dl_config = get_parallel_download_config()
-    max_workers = max_workers_override or int(
-        dl_config.get("max_parallel_downloads", 4) or 4
-    )
+    max_workers = resolve_max_parallel_downloads(dl_config, max_workers_override)
     provider_concurrency = dict(dl_config.get("provider_concurrency", {}) or {})
     # worker_timeout_s semantics: 0 (or omitted) = wait indefinitely for the
     # whole batch; a positive value is a TOTAL ceiling for the batch wait

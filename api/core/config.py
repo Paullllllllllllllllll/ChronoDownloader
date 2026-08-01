@@ -23,9 +23,20 @@ logger = logging.getLogger(__name__)
 _CONFIG_CACHE: dict[str, Any] | None = None
 _API_KEYS_CACHE: dict[str, Any] | None = None
 
-# Code default for the per-provider search timeout (seconds). Consumed by
-# api.core.config.get_search_timeout and mirrored in config.example.json.
+# Single source of truth for every config default that more than one module has
+# to agree on. Each constant is the value used when the corresponding key is
+# absent from the loaded configuration; no module may re-spell one of these
+# values as a literal fallback. A shipped template (config.example.json) may
+# still carry a deliberately different, tuned value -- the constants define the
+# safe behavior of a config that simply omits the key.
 DEFAULT_SEARCH_TIMEOUT_SECONDS = 60.0
+DEFAULT_MIN_TITLE_SCORE = 85.0
+DEFAULT_MAX_RENDERINGS_PER_MANIFEST = 1
+DEFAULT_RESUME_MODE = "skip_completed"
+DEFAULT_KEEP_NON_SELECTED_METADATA = False
+DEFAULT_ON_EXCEED = "stop"
+DEFAULT_MAX_PARALLEL_DOWNLOADS = 1
+DEFAULT_MAX_PARALLEL_SEARCHES = 1
 
 
 def get_config(force_reload: bool = False) -> dict[str, Any]:
@@ -182,7 +193,7 @@ def get_download_config() -> dict[str, Any]:
     # Apply defaults
     dl.setdefault("prefer_pdf_over_images", True)
     dl.setdefault("download_manifest_renderings", True)
-    dl.setdefault("max_renderings_per_manifest", 1)
+    dl.setdefault("max_renderings_per_manifest", DEFAULT_MAX_RENDERINGS_PER_MANIFEST)
     dl.setdefault(
         "rendering_mime_whitelist", ["application/pdf", "application/epub+zip"]
     )
@@ -253,6 +264,39 @@ def get_network_config(provider_key: str | None) -> dict[str, Any]:
     return net
 
 
+def resolve_max_parallel_downloads(
+    download_config: dict[str, Any], override: int | None = None
+) -> int:
+    """Resolve the effective number of download workers.
+
+    Every read path (batch CLI, execution, interactive summary) funnels through
+    this helper so a single configuration can never yield two different worker
+    counts. ``override`` is a per-run CLI/interactive value; a falsy override
+    defers to the config, and a falsy or unusable config value resolves to
+    ``DEFAULT_MAX_PARALLEL_DOWNLOADS`` (sequential).
+
+    Args:
+        download_config: The ``download`` config section.
+        override: Optional per-run worker-count override.
+
+    Returns:
+        Worker count, never below 1.
+    """
+    raw = override or download_config.get(
+        "max_parallel_downloads", DEFAULT_MAX_PARALLEL_DOWNLOADS
+    )
+    try:
+        workers = int(raw or DEFAULT_MAX_PARALLEL_DOWNLOADS)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Ignoring non-numeric max_parallel_downloads: %r; running %d worker(s).",
+            raw,
+            DEFAULT_MAX_PARALLEL_DOWNLOADS,
+        )
+        return DEFAULT_MAX_PARALLEL_DOWNLOADS
+    return max(1, workers)
+
+
 def get_download_limits() -> dict[str, Any]:
     """Get download limits configuration section.
 
@@ -294,7 +338,9 @@ def get_resume_mode() -> str:
     """Get the resume mode for processing works.
 
     Resume modes:
-    - "skip_completed": Skip works with status="completed" in work.json (default)
+    - "skip_completed": Skip works with status="completed" in work.json
+      (``DEFAULT_RESUME_MODE``; a work whose run was interrupted before
+      work.json was finalized is reprocessed rather than silently skipped)
     - "reprocess_all": Reprocess all works regardless of status
     - "skip_if_has_objects": Skip works that have files in objects/ directory
     - "resume_from_csv": Resume purely from the source CSV's retrievable column;
@@ -304,16 +350,23 @@ def get_resume_mode() -> str:
     Returns:
         Resume mode string
     """
-    return str(get_download_config().get("resume_mode", "skip_completed"))
+    return str(get_download_config().get("resume_mode", DEFAULT_RESUME_MODE))
 
 
 def get_min_title_score(
-    provider_key: str | None = None, default: float = 50.0
+    provider_key: str | None = None,
+    default: float = DEFAULT_MIN_TITLE_SCORE,
 ) -> float:
     """Get minimum title score threshold, with optional per-provider override.
 
     Checks provider_settings.<provider_key>.min_title_score first,
     then falls back to selection.min_title_score, then to default.
+
+    The fallback is deliberately strict: an absent threshold must not let a
+    loosely-matching candidate through, since the consequence is downloading
+    the wrong work. Collections that need a looser gate set the value
+    explicitly (config.example.json ships 35 for historical/multilingual
+    material).
 
     Args:
         provider_key: Provider identifier (e.g., 'annas_archive', 'mdz')

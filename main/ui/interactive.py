@@ -24,7 +24,11 @@ import pandas as pd
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from api.core.config import get_config, get_download_config
+from api.core.config import (
+    get_config,
+    get_download_config,
+    resolve_max_parallel_downloads,
+)
 from api.iiif import is_iiif_manifest_url
 from api.providers import PROVIDERS
 from main.data.works_csv import (
@@ -189,7 +193,7 @@ class InteractiveWorkflow:
                 key_settings["Format preference"] = "PDF over images"
             if dl_config.get("max_total_size_gb"):
                 key_settings["Max total size"] = f"{dl_config['max_total_size_gb']} GB"
-            if int(dl_config.get("max_parallel_downloads", 1) or 1) > 1:
+            if resolve_max_parallel_downloads(dl_config) > 1:
                 key_settings["Parallel downloads"] = dl_config["max_parallel_downloads"]
 
             if key_settings:
@@ -472,7 +476,7 @@ class InteractiveWorkflow:
         # Parallel download options (only for batch modes)
         if self.config.mode in ("csv", "collection"):
             dl_config = get_download_config()
-            config_max_parallel = int(dl_config.get("max_parallel_downloads", 1) or 1)
+            config_max_parallel = resolve_max_parallel_downloads(dl_config)
 
             if config_max_parallel > 1:
                 # Config already enables parallelism
@@ -610,7 +614,7 @@ class InteractiveWorkflow:
                     )
                 else:
                     dl_config = get_download_config()
-                    workers = int(dl_config.get("max_parallel_downloads", 1) or 1)
+                    workers = resolve_max_parallel_downloads(dl_config)
                     print(
                         f"    {ConsoleUI.CYAN}*{ConsoleUI.RESET} "
                         f"Parallel downloads: {workers} workers (from config)"

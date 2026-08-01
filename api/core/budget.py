@@ -10,7 +10,7 @@ import logging
 import threading
 from typing import Any, NamedTuple
 
-from .config import get_download_limits
+from .config import DEFAULT_ON_EXCEED, get_download_limits
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class DownloadBudget:
         "pdfs_gb": 3,
         "metadata_mb": 10
       },
-      "on_exceed": "skip"  # "skip" | "stop"
+      "on_exceed": "stop"  # "skip" | "stop"; default DEFAULT_ON_EXCEED
     }
     """
 
@@ -78,11 +78,22 @@ class DownloadBudget:
         except Exception:
             return None
 
+    @staticmethod
+    def _normalize_policy(raw: Any) -> str:
+        """Normalize a raw on_exceed value to 'skip' or 'stop'.
+
+        Absent, null, or unrecognized values resolve to ``DEFAULT_ON_EXCEED``,
+        so the configured budget ceilings actually halt a run instead of being
+        silently downgraded to per-file skipping.
+        """
+        pol = str(raw or DEFAULT_ON_EXCEED).lower()
+        if pol == "skip":
+            return "skip"
+        return "stop" if pol == "stop" else DEFAULT_ON_EXCEED
+
     def _policy(self) -> str:
         """Get the on_exceed policy: 'skip' or 'stop'."""
-        dl = get_download_limits()
-        pol = str(dl.get("on_exceed", "skip") or "skip").lower()
-        return "stop" if pol == "stop" else "skip"
+        return self._normalize_policy(get_download_limits().get("on_exceed"))
 
     def resolve_limits(self, content_type: str, work_id: str | None) -> _Limits:
         """Resolve the applicable byte limits + policy for one download.
@@ -105,9 +116,7 @@ class DownloadBudget:
             else:
                 max_work = self._gb_to_bytes(per_work_limits.get(f"{content_type}_gb"))
 
-        pol = str(dl.get("on_exceed", "skip") or "skip").lower()
-        policy = "stop" if pol == "stop" else "skip"
-        return _Limits(max_total, max_work, policy)
+        return _Limits(max_total, max_work, self._normalize_policy(dl.get("on_exceed")))
 
     def exhausted(self) -> bool:
         """Check if the download budget has been exhausted."""

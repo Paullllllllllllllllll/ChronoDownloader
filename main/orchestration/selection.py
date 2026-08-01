@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from api.core.config import (
+    DEFAULT_MAX_PARALLEL_SEARCHES,
     get_config,
     get_min_title_score,
     get_provider_setting,
@@ -306,9 +307,11 @@ def _get_max_parallel_searches() -> int:
     cfg = get_config()
     sel = cfg.get("selection", {})
     try:
-        return max(1, int(sel.get("max_parallel_searches", 1)))
+        return max(
+            1, int(sel.get("max_parallel_searches", DEFAULT_MAX_PARALLEL_SEARCHES))
+        )
     except (TypeError, ValueError):
-        return 1
+        return DEFAULT_MAX_PARALLEL_SEARCHES
 
 
 def _search_single_provider(

@@ -94,7 +94,10 @@ class TestGetSelectionConfigExtended:
         assert sel["creator_weight"] == 0.2
         assert sel["max_candidates_per_provider"] == 5
         assert sel["download_strategy"] == "selected_only"
-        assert sel["keep_non_selected_metadata"] is True
+        # Both shipped templates set this false; work.json still records every
+        # candidate and its score, so the default only governs the extra
+        # per-candidate metadata files.
+        assert sel["keep_non_selected_metadata"] is False
         assert sel["max_parallel_searches"] == 1
 
     @patch(

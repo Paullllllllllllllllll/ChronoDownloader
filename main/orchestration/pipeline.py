@@ -42,6 +42,10 @@ if TYPE_CHECKING:
     from main.orchestration.scheduler import DownloadTask
 
 from api.core.config import (
+    DEFAULT_KEEP_NON_SELECTED_METADATA,
+    DEFAULT_MAX_PARALLEL_SEARCHES,
+    DEFAULT_MIN_TITLE_SCORE,
+    DEFAULT_SEARCH_TIMEOUT_SECONDS,
     get_api_key_envvar,
     get_config,
     get_min_title_score,
@@ -236,7 +240,7 @@ def _collect_and_select(
     selected: SearchResult | None = None
     selected_provider_tuple: ProviderTuple | None = None
 
-    min_title_score = float(sel_cfg.get("min_title_score", 85))
+    min_title_score = float(sel_cfg.get("min_title_score", DEFAULT_MIN_TITLE_SCORE))
     creator_weight = float(sel_cfg.get("creator_weight", 0.2))
     max_candidates_per_provider = int(sel_cfg.get("max_candidates_per_provider", 5))
 
@@ -387,7 +391,10 @@ def _try_ranked_fallbacks(
                 # provider be attempted as a fallback with a title score its own
                 # stricter config would reject (and vice-versa).
                 provider_threshold = get_min_title_score(
-                    sr.provider_key, default=float(sel_cfg.get("min_title_score", 85))
+                    sr.provider_key,
+                    default=float(
+                        sel_cfg.get("min_title_score", DEFAULT_MIN_TITLE_SCORE)
+                    ),
                 )
                 if float(sc.get("score", 0.0)) < float(provider_threshold):
                     continue
@@ -624,7 +631,9 @@ def _save_candidate_search_results(prep: _PreparedWork) -> None:
 
 
 def _persist_candidates_metadata(prep: _PreparedWork) -> None:
-    if not prep.sel_cfg.get("keep_non_selected_metadata", True):
+    if not prep.sel_cfg.get(
+        "keep_non_selected_metadata", DEFAULT_KEEP_NON_SELECTED_METADATA
+    ):
         return
     with work_context(
         work_id=prep.work_id, entry_id=prep.entry_id, name_stem=prep.work_stem
@@ -772,18 +781,18 @@ def _get_selection_config() -> dict[str, Any]:
     cfg = get_config()
     sel = dict(cfg.get("selection", {}) or {})
 
-    # Defaults
+    # Defaults (see api.core.config for the shared default constants)
     sel.setdefault("strategy", "collect_and_select")  # or "sequential_first_hit"
     sel.setdefault(
-        "max_parallel_searches", 1
+        "max_parallel_searches", DEFAULT_MAX_PARALLEL_SEARCHES
     )  # 1 = sequential, >1 = parallel provider searches
     sel.setdefault("provider_hierarchy", [])
-    sel.setdefault("min_title_score", 85)
-    sel.setdefault("search_timeout_seconds", 60.0)
+    sel.setdefault("min_title_score", DEFAULT_MIN_TITLE_SCORE)
+    sel.setdefault("search_timeout_seconds", DEFAULT_SEARCH_TIMEOUT_SECONDS)
     sel.setdefault("creator_weight", 0.2)
     sel.setdefault("max_candidates_per_provider", 5)
     sel.setdefault("download_strategy", "selected_only")
-    sel.setdefault("keep_non_selected_metadata", True)
+    sel.setdefault("keep_non_selected_metadata", DEFAULT_KEEP_NON_SELECTED_METADATA)
 
     return sel
 
@@ -1069,7 +1078,9 @@ def process_work(
 
     selected = prep.selected
     _persist_work_json(prep, status="pending")
-    if prep.sel_cfg.get("keep_non_selected_metadata", True):
+    if prep.sel_cfg.get(
+        "keep_non_selected_metadata", DEFAULT_KEEP_NON_SELECTED_METADATA
+    ):
         _save_candidate_search_results(prep)
 
     download_deferred = False

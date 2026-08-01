@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://www.googleapis.com/books/v1/volumes"
 
+# Default cap on direct PDF/EPUB downloads per work when
+# provider_settings.google_books.max_files is absent. A Google Books volume
+# normally offers at most one PDF and one EPUB, so 2 covers the whole item
+# without pulling in near-duplicate renderings.
+DEFAULT_MAX_FILES = 2
+
+# Default cap on the page-by-page image extraction fallback, used when
+# provider_settings.google_books.max_pages is absent.
+DEFAULT_MAX_PAGES = 50
+
 
 def _api_key() -> str | None:
     """Get Google Books API key from environment."""
@@ -48,25 +58,24 @@ def _gb_allow_drm() -> bool:
 
 def _gb_max_files() -> int:
     """Get maximum number of files to download per work."""
-    val = get_provider_setting("google_books", "max_files", 2)
+    val = get_provider_setting("google_books", "max_files", DEFAULT_MAX_FILES)
     try:
         return int(val)
     except Exception:
-        return 2
+        return DEFAULT_MAX_FILES
 
 
 def _gb_max_pages() -> int:
     """Get maximum number of page images to extract per work.
 
     Distinct from ``max_files`` (the direct-download file cap); this bounds the
-    page-by-page image extraction fallback. Defaults to the extractor's own
-    sane default of 50.
+    page-by-page image extraction fallback.
     """
-    val = get_provider_setting("google_books", "max_pages", 50)
+    val = get_provider_setting("google_books", "max_pages", DEFAULT_MAX_PAGES)
     try:
         return int(val)
     except Exception:
-        return 50
+        return DEFAULT_MAX_PAGES
 
 
 def search_google_books(
