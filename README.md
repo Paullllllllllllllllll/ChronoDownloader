@@ -52,7 +52,8 @@ extraction pipeline.
 - **Budget management**: content-type download budgets (images,
   PDFs, metadata) at global and per-work levels
 - **Rate limiting**: per-provider delays, jitter, exponential
-  backoff, and adaptive circuit breaker for repeated 429s
+  backoff, and an adaptive circuit breaker that pauses a provider
+  which rate-limits, errors, or rejects the client repeatedly
 - **Quota system**: daily quota tracking with deferred download
   queue and automatic background retries
 - **Resume modes**: skip completed, skip if objects exist, resume
@@ -103,19 +104,28 @@ title-driven batches.
 The rest were unreachable at that time and ship disabled in
 `config.example.json`:
 
-- **Library of Congress** and **BNE** answer 403 behind a bot
-  filter. BNE is a TLS-fingerprint block -- `curl` gets a valid
-  response where the `requests` client does not -- so a
-  browser-impersonating HTTP client would restore it. LoC blocks
-  `curl` identically, so it is a broader bot rule.
+- **Library of Congress** and **BNE** answer 403 behind a
+  Cloudflare bot filter. BNE is a TLS-fingerprint block: a
+  browser-impersonating HTTP client (`curl_cffi` with
+  `impersonate="chrome"`) gets a valid response where the shipped
+  `requests` client gets a challenge page, so adopting one would
+  restore BNE end to end. LoC serves an interactive JS challenge
+  that TLS impersonation does not satisfy, and needs a broader
+  answer; note that `tile.loc.gov` is not behind it, so only the
+  `www.loc.gov` JSON and manifest API is blocked.
 - **British Library**: `sru.bl.uk` no longer resolves and the BNB
   SPARQL host does not complete a TCP handshake. Both search paths
   are dead.
 - **SLUB Dresden** returns HTTP 500 naming an expired certificate on
   its own upstream index; nothing to fix client-side.
 - **SBB Digital Collections**: `sru.gbv.de` resolves but accepts no
-  connection. Note that one search there costs roughly 18 minutes
-  before returning empty (5 query variants x 8 attempts x 40 s).
+  connection.
+
+A provider that rejects every request now trips its own circuit
+breaker, and a host that never completes a connection is retried
+twice rather than for the full budget, so a dead endpoint costs
+seconds per search rather than minutes and is skipped entirely for
+the rest of the cooldown.
 - **Anna's Archive** rotates mirror domains; the shipped base URL
   points at whichever mirror last resolved, and may need updating.
 
@@ -647,9 +657,21 @@ cooldown period.
 - `circuit_breaker_threshold`: consecutive failures before pause
 - `circuit_breaker_cooldown_s`: seconds before testing again
 
+A failure is an exhausted retry budget (429 storm, 5xx storm, timeout),
+a connection that never came up, an unresolvable hostname, or a blanket
+rejection of the client (401/403). A missing or malformed resource
+(400/404/410/422) is not: the provider answered correctly about that
+URL. Successes reset the count, so only a provider that fails
+consecutively is paused.
+
 To handle repeated 429 errors from a provider, enable the circuit
 breaker and set the threshold to 2--3 with a cooldown of
 600--3,600 seconds.
+
+`max_attempts` applies in full only once a connection is established.
+A host that refuses connections or drops them silently is retried at
+most twice, since further attempts pay the whole `timeout_s` for
+nothing.
 
 **Quota parameters** (quota-limited providers only):
 
@@ -719,9 +741,12 @@ To adjust for slow providers, increase `delay_ms` and
   available
 - `download_manifest_renderings`: download PDFs/EPUBs linked in
   IIIF manifests
-- `max_renderings_per_manifest`: maximum rendering files per
-  manifest (default 1)
-- `rendering_mime_whitelist`: allowed MIME types for renderings
+- `max_renderings_per_manifest`: maximum rendering files obtained
+  per manifest (default 1). Counts files downloaded, not attempts,
+  so a dead rendering does not hide the working one behind it
+- `rendering_mime_whitelist`: allowed MIME types for renderings. A
+  rendering that declares no MIME type is admitted on a `.pdf` or
+  `.epub` URL suffix instead
 - `overwrite_existing`: overwrite existing files
 - `include_metadata`: save metadata JSON files
 - `allowed_object_extensions`: file extensions to download
