@@ -321,6 +321,11 @@ def mark_success(
 
         except Exception:
             logger.exception("Failed to mark entry %s as success", entry_id)
+            # The cache holds the in-place mutation but the file on disk does
+            # not, and the cache key is the unchanged file stat -- so without
+            # this drop the next successful write would commit a change this
+            # run already reported as failed.
+            _csv_cache.pop(csv_path, None)
             return False
 
 
@@ -374,6 +379,11 @@ def mark_failed(
 
         except Exception:
             logger.exception("Failed to mark entry %s as failed", entry_id)
+            # The cache holds the in-place mutation but the file on disk does
+            # not, and the cache key is the unchanged file stat -- so without
+            # this drop the next successful write would commit a change this
+            # run already reported as failed.
+            _csv_cache.pop(csv_path, None)
             return False
 
 
@@ -422,6 +432,11 @@ def mark_deferred(
 
         except Exception:
             logger.exception("Failed to mark entry %s as deferred", entry_id)
+            # The cache holds the in-place mutation but the file on disk does
+            # not, and the cache key is the unchanged file stat -- so without
+            # this drop the next successful write would commit a change this
+            # run already reported as failed.
+            _csv_cache.pop(csv_path, None)
             return False
 
 

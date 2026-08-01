@@ -57,11 +57,13 @@ def _apply_pre_config() -> argparse.Namespace:
 
     The maintenance flags are handled before full mode detection; this
     pre-parse ensures a ``--config custom.json`` override still applies.
+
+    It uses the real parser rather than a two-argument throwaway: a parser
+    that knows only ``csv_file`` and ``--config`` reads the *value* of any
+    other flag as the positional, so ``--status --log-level DEBUG`` reported
+    "CSV file not found: DEBUG".
     """
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("csv_file", nargs="?", default=None)
-    pre.add_argument("--config", default=None)
-    pre_args, _ = pre.parse_known_args()
+    pre_args, _ = create_cli_parser().parse_known_args()
     if pre_args.config:
         os.environ["CHRONO_CONFIG_PATH"] = pre_args.config
     return pre_args

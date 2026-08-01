@@ -13,6 +13,7 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
+from api.core.atomic import atomic_write_json
 from api.core.config import get_config, get_resume_mode
 from api.core.naming import build_work_directory_name, warn_if_path_too_long
 from api.matching import normalize_text
@@ -188,8 +189,7 @@ def update_work_status(
         if download_info:
             work_meta["download"] = download_info
 
-        with open(work_json_path, "w", encoding="utf-8") as f:
-            json.dump(work_meta, f, indent=2, ensure_ascii=False)
+        atomic_write_json(work_json_path, work_meta)
     except Exception as e:
         logger.warning("Failed to update work.json status: %s", e)
 
@@ -225,8 +225,7 @@ def create_work_json(
         "selected": selected,
     }
     try:
-        with open(work_json_path, "w", encoding="utf-8") as f:
-            json.dump(work_meta, f, indent=2, ensure_ascii=False)
+        atomic_write_json(work_json_path, work_meta)
     except Exception:
         logger.exception("Failed to write work.json to %s", work_json_path)
 

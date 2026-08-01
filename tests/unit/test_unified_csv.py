@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -489,3 +490,40 @@ class TestColumnConstants:
     def test_link_col(self) -> None:
         """Test LINK_COL constant."""
         assert LINK_COL == "link"
+
+
+class TestFailedWriteDoesNotLeakThroughTheCache:
+    """A write that raised must not be committed by the next successful one.
+
+    The status writers mutate the cached DataFrame in place and only then
+    write. When the write failed the mutation stayed in the cache under the
+    file's unchanged stat key, so it was served again and persisted by an
+    unrelated later call -- the ledger then disagreed with what the run had
+    reported.
+    """
+
+    def test_failed_mark_is_not_resurrected(self, tmp_path: Any) -> None:
+        from unittest.mock import patch
+
+        import main.data.works_csv as wc
+
+        csv_path = str(tmp_path / "works.csv")
+        pd.DataFrame(
+            {
+                ENTRY_ID_COL: ["E001", "E002"],
+                TITLE_COL: ["A", "B"],
+                CREATOR_COL: ["X", "Y"],
+            }
+        ).to_csv(csv_path, index=False)
+
+        wc._csv_cache.clear()
+        with patch.object(wc, "_save_csv", side_effect=OSError("disk full")):
+            assert mark_failed(csv_path, "E002") is False
+
+        assert mark_success(csv_path, "E001", "http://x", "P") is True
+
+        df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+        e002 = df.loc[df[ENTRY_ID_COL] == "E002"].iloc[0]
+        assert str(e002[STATUS_COL]).strip() == ""
+        e001 = df.loc[df[ENTRY_ID_COL] == "E001"].iloc[0]
+        assert str(e001[STATUS_COL]).strip().lower() == "true"

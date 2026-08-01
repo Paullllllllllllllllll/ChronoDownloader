@@ -499,3 +499,35 @@ class TestParallelNoMatchCsv:
         df = pd.read_csv(csv_path)
         status = str(df.loc[df["entry_id"] == "E1", "retrievable"].iloc[0])
         assert status.strip().lower() == "false"
+
+
+class TestMaintenancePreParse:
+    """The pre-parse for --status must not mistake a flag value for the CSV.
+
+    It used a throwaway parser that knew only csv_file and --config, so
+    parse_known_args handed it the value of whatever flag came next:
+    "--status --log-level DEBUG" printed "CSV file not found: DEBUG".
+    """
+
+    @staticmethod
+    def _csv_file_for(argv: list[str]) -> str | None:
+        from main.cli.entry import _apply_pre_config
+
+        with patch("sys.argv", ["prog", *argv]):
+            return _apply_pre_config().csv_file  # type: ignore[no-any-return]
+
+    def test_flag_values_are_not_read_as_the_csv_path(self) -> None:
+        assert self._csv_file_for(["--status", "--output_dir", "some_dir"]) is None
+        assert self._csv_file_for(["--status", "--log-level", "DEBUG"]) is None
+        assert self._csv_file_for(["--status"]) is None
+
+    def test_a_real_positional_still_arrives(self) -> None:
+        assert self._csv_file_for(["works.csv", "--status"]) == "works.csv"
+        assert self._csv_file_for(["--status", "works.csv"]) == "works.csv"
+
+    def test_config_override_still_applies(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CHRONO_CONFIG_PATH", None)
+            self._csv_file_for(["--status", "--config", "custom.json"])
+            assert os.environ.get("CHRONO_CONFIG_PATH") == "custom.json"
+            os.environ.pop("CHRONO_CONFIG_PATH", None)

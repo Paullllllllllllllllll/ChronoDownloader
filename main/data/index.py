@@ -157,6 +157,9 @@ def update_index_csv(base_output_dir: str, row: dict[str, Any]) -> None:
             _index_cache[index_path] = (rows, mtime, size)
         except Exception:
             logger.exception("Failed to update index.csv")
+            # The cached rows were mutated in place before the write; drop
+            # them so a failed write is not committed by the next one.
+            _index_cache.pop(_index_path(base_output_dir), None)
 
 
 def _cell(value: Any) -> str:
