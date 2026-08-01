@@ -336,6 +336,44 @@ class TestRunSequential:
         "main.orchestration.execution.is_direct_download_enabled", return_value=False
     )
     @patch("main.orchestration.execution.pipeline")
+    def test_sequential_counts_deferrals_without_a_csv(
+        self, mock_pipeline: MagicMock, mock_direct: MagicMock
+    ) -> None:
+        """The deferral count must not depend on CSV write-back.
+
+        Sequential mode had no deferred counter at all, and its deferred
+        branch was gated on write_csv -- the same CSV dependency round 2
+        removed from the succeeded and failed counters.
+        """
+        import logging
+
+        mock_pipeline.process_work.return_value = {
+            "status": "deferred",
+            "item_url": "",
+            "provider": "IA",
+        }
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book A", "Book B"],
+                "main_author": ["Author", "Author"],
+                "entry_id": ["E001", "E002"],
+            }
+        )
+        stats = _run_sequential(
+            works_df,
+            "/output",
+            False,
+            logging.getLogger("test"),
+            csv_path=None,
+        )
+        assert stats["deferred"] == 2
+        assert stats["succeeded"] == 0
+        assert stats["failed"] == 0
+
+    @patch(
+        "main.orchestration.execution.is_direct_download_enabled", return_value=False
+    )
+    @patch("main.orchestration.execution.pipeline")
     @patch("main.orchestration.execution.budget_exhausted", return_value=True)
     def test_stops_on_budget_exhausted(
         self, mock_budget: MagicMock, mock_pipeline: MagicMock, mock_direct: MagicMock
@@ -425,6 +463,42 @@ class TestRunBatchDownloads:
             enable_background_retry=False,
         )
         assert stats["deferred"] == 0
+
+    @patch("main.orchestration.execution._run_sequential")
+    @patch("main.orchestration.execution.get_deferred_queue")
+    def test_a_redeferred_work_is_still_counted(
+        self, mock_queue: MagicMock, mock_seq: MagicMock
+    ) -> None:
+        """A queue-length delta cannot see a deferral that dedupes.
+
+        DeferredQueue.add returns the existing item when the same work is
+        deferred again, so the queue does not grow and the delta reported
+        zero -- the steady state for any quota-blocked corpus.
+        """
+        mock_seq.return_value = {
+            "processed": 1,
+            "succeeded": 0,
+            "failed": 0,
+            "skipped": 0,
+            "deferred": 1,
+        }
+        mock_queue.return_value.get_pending.return_value = ["already-queued"]
+
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book"],
+                "main_author": ["Author"],
+                "entry_id": ["E001"],
+            }
+        )
+        stats = run_batch_downloads(
+            works_df,
+            "/output",
+            {},
+            use_parallel=False,
+            enable_background_retry=False,
+        )
+        assert stats["deferred"] == 1
 
     @patch("main.orchestration.execution._run_sequential")
     @patch("main.orchestration.execution.get_deferred_queue")

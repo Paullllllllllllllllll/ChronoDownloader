@@ -170,11 +170,6 @@ def run_batch_downloads(
                     drop_count,
                 )
 
-    # Snapshot the queue before the batch so the reported "deferred" count is
-    # this run's, not the whole backlog's. The eager retry above has already
-    # drained whatever it completed.
-    pending_before = len(get_deferred_queue().get_pending())
-
     # Determine effective parallel settings
     dl_config = config.get("download", {})
     max_parallel = resolve_max_parallel_downloads(dl_config, max_workers_override)
@@ -194,13 +189,15 @@ def run_batch_downloads(
     else:
         stats = _run_sequential(works_df, output_dir, dry_run, logger, csv_path)
 
-    # Add deferred count to stats. get_pending() spans the whole user-level
-    # queue -- every corpus, every previous run -- so reporting it verbatim
-    # attributed another batch's backlog to this one in the log line, the
-    # "Batch complete" summary and the --json output. Report the delta.
-    queue = get_deferred_queue()
-    deferred_total = len(queue.get_pending())
-    stats["deferred"] = max(0, deferred_total - pending_before)
+    # get_pending() spans the whole user-level queue -- every corpus, every
+    # previous run -- so reporting it verbatim attributed another batch's
+    # backlog to this one. Neither is a queue-length delta the answer: a work
+    # deferred again after an earlier run dedupes against the item already
+    # queued, leaving the length unmoved and this run's deferrals reported as
+    # zero, which is the steady state for a quota-blocked corpus. Both runners
+    # count their own deferrals, so take the count from them.
+    deferred_total = len(get_deferred_queue().get_pending())
+    stats["deferred"] = int(stats.get("deferred", 0))
 
     if deferred_total > 0:
         logger.info(
@@ -489,6 +486,7 @@ def _run_sequential(
     succeeded = 0
     failed = 0
     skipped = 0
+    deferred = 0
 
     for index, row in works_df.iterrows():
         try:
@@ -557,10 +555,14 @@ def _run_sequential(
                     logger.warning(
                         "Failed to mark entry %s as failed in source CSV", entry_id
                     )
-        elif status == "deferred" and write_csv and csv_path:
+        elif status == "deferred":
+            # Counted whatever the CSV settings are: gating the count on
+            # write_csv is the same CSV dependency round 2 removed from the
+            # succeeded and failed counters.
+            deferred += 1
             # Quota deferral: mark retriable (mirrors parallel mode) rather
             # than leaving the row silently pending.
-            if mark_deferred(csv_path, str(entry_id)):
+            if write_csv and csv_path and mark_deferred(csv_path, str(entry_id)):
                 logger.debug("Marked entry %s as deferred in source CSV", entry_id)
         # Other statuses (dry_run, no_match) - don't update CSV
         # result is None means skipped (resume) - don't update CSV
@@ -585,6 +587,7 @@ def _run_sequential(
         "succeeded": succeeded,
         "failed": failed,
         "skipped": skipped,
+        "deferred": deferred,
     }
 
 
@@ -944,6 +947,7 @@ def _run_parallel(
         + direct_iiif_failed
         + no_match_failed,
         "skipped": skipped_count,
+        "deferred": deferred_completions[0],
     }
 
 
