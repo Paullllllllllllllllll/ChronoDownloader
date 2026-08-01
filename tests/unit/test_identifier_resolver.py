@@ -77,8 +77,11 @@ class TestBuildManifestUrl:
         ]
 
     def test_polona(self) -> None:
+        """The retired /iiif/item/ path answers 404 'No route for path'."""
         urls = build_manifest_url("polona", "abc123def")
-        assert urls == ["https://polona.pl/iiif/item/abc123def/manifest.json"]
+        assert urls == [
+            "https://polona.pl/api/search-service/search/iiif/abc123def/manifest.json"
+        ]
 
     def test_bne_is_native_download_only(self) -> None:
         """BNE Digital publishes no IIIF manifests, and the iiif.bne.es host

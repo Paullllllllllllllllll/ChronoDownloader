@@ -37,7 +37,7 @@ MANIFEST_TEMPLATES: dict[str, str | list[str]] = {
     "loc": "https://www.loc.gov/item/{id}/manifest.json",
     "british_library": "https://api.bl.uk/metadata/iiif/ark:/81055/{id}/manifest.json",
     "hathitrust": "https://babel.hathitrust.org/cgi/imgsrv/manifest/{id}",
-    "polona": "https://polona.pl/iiif/item/{id}/manifest.json",
+    "polona": "https://polona.pl/api/search-service/search/iiif/{id}/manifest.json",
     "europeana": "https://iiif.europeana.eu/presentation/{id}/manifest",
 }
 

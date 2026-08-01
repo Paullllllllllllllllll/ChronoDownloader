@@ -1,12 +1,16 @@
-"""Connector for the Polona.pl API."""
+"""Connector for the Polona.pl API.
+
+Polona is an Angular single-page application: ``https://polona.pl/search/``
+returns a content-free HTML shell, so the former link-scraping search could
+never yield a hit. The SPA talks to a documented Spring gateway at
+``https://polona.pl/api`` (see ``/api/search-service/api-docs``); this module
+uses that gateway directly.
+"""
 
 from __future__ import annotations
 
 import logging
-import urllib.parse
 from typing import Any
-
-from bs4 import BeautifulSoup
 
 from ..core.config import prefer_pdf_over_images
 from ..core.download import save_json
@@ -20,56 +24,118 @@ from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
 
-# The previous JSON API endpoints appear to have changed. As a reliable fallback,
-# query the website search page and parse item links, then use the stable IIIF manifest.
-SEARCH_PAGE_URL = "https://polona.pl/search/?query={query}"
-IIIF_MANIFEST_URL = "https://polona.pl/iiif/item/{item_id}/manifest.json"
+API_BASE_URL = "https://polona.pl/api"
+SEARCH_URL = f"{API_BASE_URL}/search-service/search/simple"
+# The old Cantaloupe-style URL (https://polona.pl/iiif/item/<id>/manifest.json)
+# answers "404 No route for path"; manifests are served by the search service.
+IIIF_MANIFEST_URL = (
+    f"{API_BASE_URL}/search-service/search/iiif/{{item_id}}/manifest.json"
+)
+ITEM_URL = "https://polona.pl/preview/{item_id}"
+
+
+def _first_value(fields: Any, name: str) -> str | None:
+    """Return the first non-empty entry of a Polona metadata field.
+
+    Polona wraps every metadata field as ``{"name": ..., "values": [...],
+    "labels": {...}, "type": ...}``.
+
+    Args:
+        fields: A ``basicFields``/``expandedFields``/``hiddenFields`` mapping.
+        name: Field name to read (e.g. ``"title"``).
+
+    Returns:
+        The first non-empty value as a string, or ``None``.
+    """
+    if not isinstance(fields, dict):
+        return None
+    field = fields.get(name)
+    if not isinstance(field, dict):
+        return None
+    values = field.get("values")
+    if isinstance(values, list):
+        for value in values:
+            if value:
+                return str(value)
+    return None
+
+
+def _thumbnail_url(attributes: Any) -> str | None:
+    """Resolve the gateway-relative thumbnail path of a search hit.
+
+    Args:
+        attributes: The ``attributes`` mapping of a Polona hit.
+
+    Returns:
+        An absolute thumbnail URL, or ``None`` when the hit carries none.
+    """
+    if not isinstance(attributes, dict):
+        return None
+    thumbnail = attributes.get("thumbnail")
+    if not isinstance(thumbnail, dict):
+        return None
+    value = thumbnail.get("stringValue")
+    if not value:
+        return None
+    value = str(value)
+    return f"{API_BASE_URL}{value}" if value.startswith("/") else value
 
 
 def search_polona(
     title: str, creator: str | None = None, max_results: int = 3
 ) -> list[SearchResult]:
-    """Search Polona by parsing the public search page for item links.
+    """Search Polona through the public search-service gateway.
 
-    Note: Polona does not expose a stable, documented JSON search for items.
-    This parser targets links of the form /item/<id>/ and extracts up to max_results.
+    Args:
+        title: Title terms to search for.
+        creator: Optional creator terms, appended to the query.
+        max_results: Maximum number of results to return.
+
+    Returns:
+        List of SearchResult objects whose ``source_id`` is the Polona
+        ``objectId`` (a UUID) that the download path needs.
     """
 
     query = title if not creator else f"{title} {creator}"
-    url = SEARCH_PAGE_URL.format(query=urllib.parse.quote_plus(query))
     logger.info("Searching Polona for: %s", title)
-    html = make_request(url)
+    # All four parameters are mandatory; omitting ``sort`` yields HTTP 400.
+    data = make_request(
+        SEARCH_URL,
+        params={
+            "query": query,
+            "page": 0,
+            "pageSize": max(1, max_results),
+            "sort": "RELEVANCE",
+        },
+    )
+    if not isinstance(data, dict):
+        logger.warning("Polona: search returned no usable JSON for %r", query)
+        return []
 
     results: list[SearchResult] = []
-    if isinstance(html, str):
-        soup = BeautifulSoup(html, "html.parser")
-        seen = set()
-        # Find item links
-        for a in soup.select('a[href^="/item/"]'):
-            href = a.get("href", "")
-            # Expect /item/<numeric or uuid>/
-            try:
-                path = str(href).split("?")[0] if href else ""
-                parts = [p for p in path.strip("/").split("/") if p]
-                if len(parts) >= 2 and parts[0] == "item":
-                    item_id = parts[1]
-                    if item_id not in seen:
-                        seen.add(item_id)
-                        title_text = a.get("title") or a.get_text(strip=True) or "N/A"
-                        raw = {
-                            "title": title_text,
-                            "creator": creator or None,
-                            "id": item_id,
-                            "item_url": f"https://polona.pl/item/{item_id}",
-                        }
-                        results.append(convert_to_searchresult("Polona", raw))
-                        if len(results) >= max_results:
-                            break
-            except Exception:
-                logger.debug(
-                    "Polona: skipping unparsable item link %r", href, exc_info=True
-                )
-                continue
+    for hit in data.get("hits") or []:
+        if not isinstance(hit, dict):
+            continue
+        object_id = hit.get("objectId")
+        if not object_id:
+            continue
+
+        basic = hit.get("basicFields")
+        raw: dict[str, Any] = {
+            "title": _first_value(basic, "title") or "",
+            "creator": _first_value(basic, "creatorForSearch"),
+            "date": (
+                _first_value(basic, "dateDescriptive")
+                or _first_value(hit.get("hiddenFields"), "date")
+            ),
+            "id": str(object_id),
+            "item_url": ITEM_URL.format(item_id=object_id),
+            "thumbnail": _thumbnail_url(hit.get("attributes")),
+        }
+        results.append(convert_to_searchresult("Polona", raw))
+        if len(results) >= max_results:
+            break
+
     return results
 
 
