@@ -73,6 +73,37 @@ def _api_key() -> str | None:
     return os.getenv(get_api_key_envvar("ddb", "DDB_API_KEY"))
 
 
+# DDB's "view" array is an unlabeled, heterogeneous list of display snippets
+# whose length varies per record (3 to 9 in one live result set), so a fixed
+# index cannot mean anything: index 6 returned the document type
+# ("Monografie"), the publisher ("Fleischhauer & Spohn") and the extent
+# statement ("XXIV, 400 Seiten") as the author. The entries that really are
+# people carry a German role marker, which is the only thing in the array
+# that identifies itself.
+_VIEW_CREATOR_RE = re.compile(r"^(.*?)\s*\((?:Verfasser|Autor)\S*\)$")
+
+
+def _creator_from_view(view: Any) -> str | None:
+    """Pull the author out of a DDB "view" array.
+
+    Args:
+        view: The record's ``view`` value, of any shape
+
+    Returns:
+        Author name without its role marker, or None when the record
+        names no author
+    """
+    if not isinstance(view, list):
+        return None
+    for entry in view:
+        if not isinstance(entry, str):
+            continue
+        match = _VIEW_CREATOR_RE.match(entry.strip())
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return None
+
+
 def search_ddb(
     title: str, creator: str | None = None, max_results: int = 3
 ) -> list[SearchResult]:
@@ -117,13 +148,7 @@ def search_ddb(
                     str(item_title).replace("<match>", "").replace("</match>", "")
                 )
 
-                # Extract creator from view array if available. The DDB API may
-                # return a dict or a shorter list here; only index when it is a
-                # list long enough to hold the provider/creator at index 6.
-                item_creator = None
-                view = item.get("view")
-                if isinstance(view, list) and len(view) > 6:
-                    item_creator = view[6]  # Provider/creator is often at index 6
+                item_creator = _creator_from_view(item.get("view"))
 
                 ddb_id = item.get("id")
                 raw = {

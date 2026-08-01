@@ -149,6 +149,55 @@ class TestSearchWellcome:
         with patch("api.providers.wellcome.make_request", return_value=None):
             assert search_wellcome("cookery") == []
 
+    def test_contributors_and_production_are_requested(self) -> None:
+        """Both ride along on the same request, so they cost nothing."""
+        with patch(
+            "api.providers.wellcome.make_request", return_value={"results": []}
+        ) as mock_req:
+            search_wellcome("cookery")
+
+        include = mock_req.call_args.kwargs["params"]["include"]
+        assert "contributors" in include
+        assert "production" in include
+        assert "items" in include
+
+    def test_creator_and_date_reach_the_result(self) -> None:
+        """Every Wellcome hit used to arrive with no author and no year.
+
+        creator was hard-coded None and production was never requested, so
+        Wellcome candidates forfeited the whole creator ranking bonus and
+        left the year column of the run index empty.
+        """
+        work = dict(PRESENTATION_WORK)
+        work["contributors"] = [
+            {"agent": {"label": "Briggs, Emily.", "type": "Person"}, "primary": True}
+        ]
+        work["production"] = [
+            {
+                "label": "London : School Board for London, [1890].",
+                "dates": [{"label": "[1890]", "type": "Period"}],
+            }
+        ]
+        with patch(
+            "api.providers.wellcome.make_request", return_value={"results": [work]}
+        ):
+            result = search_wellcome("cookery")[0]
+
+        assert result.creators == ["Briggs, Emily."]
+        assert result.date == "[1890]"
+
+    def test_a_work_naming_nobody_stays_empty(self) -> None:
+        work = dict(PRESENTATION_WORK)
+        work["contributors"] = [{"agent": {}}, {"not": "a contributor"}]
+        work["production"] = [{"label": "London", "dates": []}]
+        with patch(
+            "api.providers.wellcome.make_request", return_value={"results": [work]}
+        ):
+            result = search_wellcome("cookery")[0]
+
+        assert result.creators == []
+        assert result.date is None
+
 
 class TestDownloadWellcomeWork:
     """A manifest-bearing result downloads through the shared IIIF strategy."""

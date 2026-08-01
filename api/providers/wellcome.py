@@ -109,6 +109,43 @@ def _extract_manifest_urls(work: dict[str, Any]) -> list[str]:
     return manifests
 
 
+def _first_contributor(work: dict[str, Any]) -> str | None:
+    """Return the first named contributor of a catalogue work.
+
+    Args:
+        work: Wellcome catalogue work document
+
+    Returns:
+        Contributor label, or None when the work names nobody
+    """
+    for contributor in work.get("contributors") or []:
+        if not isinstance(contributor, dict):
+            continue
+        label = (contributor.get("agent") or {}).get("label")
+        if label:
+            return str(label).strip() or None
+    return None
+
+
+def _production_date(work: dict[str, Any]) -> str | None:
+    """Return the printed publication date of a catalogue work.
+
+    Args:
+        work: Wellcome catalogue work document
+
+    Returns:
+        Date label as printed ("[1890]"), or None
+
+    """
+    for event in work.get("production") or []:
+        if not isinstance(event, dict):
+            continue
+        for date in event.get("dates") or []:
+            if isinstance(date, dict) and date.get("label"):
+                return str(date["label"]).strip() or None
+    return None
+
+
 def search_wellcome(
     title: str, creator: str | None = None, max_results: int = 3
 ) -> list[SearchResult]:
@@ -132,8 +169,13 @@ def search_wellcome(
     # larger value 400s and make_request then returns no results).
     page_size = min(100, max(25, max_results * 5))
     params = {
+        # contributors and production ride along on the same request, so the
+        # creator and the printed date cost nothing extra. Asking only for
+        # items left every Wellcome candidate with no author and no year:
+        # unranked against providers that supply one, and an empty year
+        # column in the run index.
         "query": q,
-        "include": "items",
+        "include": "items,contributors,production",
         "pageSize": page_size,
     }
     logger.info("Searching Wellcome Collection for: %s", title)
@@ -149,7 +191,8 @@ def search_wellcome(
         work_id = work.get("id")
         raw = {
             "title": work.get("title") or "",
-            "creator": None,
+            "creator": _first_contributor(work),
+            "date": _production_date(work),
             "id": work_id,
             "item_url": f"https://wellcomecollection.org/works/{work_id}"
             if work_id

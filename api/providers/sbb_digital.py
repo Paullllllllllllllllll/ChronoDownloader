@@ -21,7 +21,7 @@ from ..model import (
     resolve_item_field,
     resolve_item_id,
 )
-from ..query_helpers import escape_sru_literal
+from ..query_helpers import escape_sru_literal, mods_creator, mods_date
 
 logger = logging.getLogger(__name__)
 
@@ -97,14 +97,11 @@ def search_sbb_digital(
                 if subtitle_el is not None and subtitle_el.text:
                     item_title = f"{item_title} {subtitle_el.text.strip()}"
 
-                creator_el = mods.find(".//mods:name/mods:displayForm", ns)
-                if creator_el is None:
-                    creator_el = mods.find(".//mods:name/mods:namePart", ns)
-                item_creator = (
-                    creator_el.text.strip()
-                    if creator_el is not None and creator_el.text
-                    else None
-                )
+                # Direct children only: ``.//mods:name`` also matches a
+                # ``<subject><name>`` heading, i.e. a person the work is
+                # about rather than its creator.
+                item_creator = mods_creator(mods, ns)
+                item_date = mods_date(mods, ns)
 
                 record_id = None
                 for rec_id in mods.findall(
@@ -130,6 +127,7 @@ def search_sbb_digital(
                 raw = {
                     "title": item_title,
                     "creator": item_creator,
+                    "date": item_date,
                     "id": record_id,
                     "item_url": ITEM_URL.format(ppn=record_id),
                     "mets_url": METS_URL.format(ppn=record_id),

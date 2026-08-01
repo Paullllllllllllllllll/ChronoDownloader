@@ -18,7 +18,7 @@ from ..model import (
     resolve_item_field,
     resolve_item_id,
 )
-from ..query_helpers import escape_sru_literal
+from ..query_helpers import escape_sru_literal, mods_creator, mods_date
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +85,11 @@ def search_e_rara(
                 title_el.text.strip() if title_el is not None and title_el.text else ""
             )
 
-            creator_el = mods.find(".//mods:name/mods:displayForm", ns)
-            if creator_el is None:
-                creator_el = mods.find(".//mods:name/mods:namePart", ns)
-            item_creator = (
-                creator_el.text.strip()
-                if creator_el is not None and creator_el.text
-                else None
-            )
+            # Direct children only: ``.//mods:name`` also matches a
+            # ``<subject><name>`` heading, i.e. a person the work is about
+            # rather than its creator.
+            item_creator = mods_creator(mods, ns)
+            item_date = mods_date(mods, ns)
 
             vlid = None
             prefix = None
@@ -110,6 +107,7 @@ def search_e_rara(
             raw = {
                 "title": item_title,
                 "creator": item_creator,
+                "date": item_date,
                 "id": vlid,
                 "prefix": prefix,
                 "item_url": ITEM_URL.format(prefix=prefix, vlid=vlid)
