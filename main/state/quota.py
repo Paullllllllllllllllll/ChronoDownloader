@@ -221,7 +221,21 @@ class QuotaManager:
             quotas_data = state_manager.get_quotas()
 
             for provider_key, quota_data in quotas_data.items():
-                self._quotas[provider_key] = ProviderQuota.from_dict(quota_data)
+                # Per-record recovery, as in DeferredQueue._load_queue: one
+                # malformed record (a null daily_limit, a non-dict value) used
+                # to abort the whole load, and _get_or_create_quota then minted
+                # fresh zeroed counters that the next save wrote back over the
+                # real ones -- letting every provider run its full limit again.
+                try:
+                    self._quotas[provider_key] = ProviderQuota.from_dict(quota_data)
+                except Exception as e:
+                    logger.warning(
+                        "Skipping malformed quota record for %s (%s): %r",
+                        provider_key,
+                        e,
+                        quota_data,
+                    )
+                    continue
 
             if self._quotas:
                 logger.info("Loaded quota state for %d provider(s)", len(self._quotas))
@@ -287,18 +301,22 @@ class QuotaManager:
                     get_provider_setting(provider_key, "quota_reset_wait_hours", 24),
                 )
 
-            self._quotas[provider_key] = ProviderQuota(
+            quota = ProviderQuota(
                 provider_key=provider_key,
                 daily_limit=_coerce_int(daily_limit, 10, provider_key, "daily_limit"),
                 reset_hours=_coerce_int(reset_hours, 24, provider_key, "reset_hours"),
                 period_start=datetime.now(UTC).isoformat(),
             )
+            self._quotas[provider_key] = quota
             self._save_state()
+            # Log the coerced values, not the raw ones: logging arguments are
+            # evaluated whatever the level, so int() on a malformed config
+            # value raised here the very error _coerce_int exists to absorb.
             logger.debug(
                 "Initialized quota tracking for %s: %d downloads per %d hours",
                 provider_key,
-                int(daily_limit),
-                int(reset_hours),
+                quota.daily_limit,
+                quota.reset_hours,
             )
 
         return self._quotas[provider_key]

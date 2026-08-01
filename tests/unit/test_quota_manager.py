@@ -646,6 +646,63 @@ class TestCoerceInt:
 
         assert _coerce_int({"nested": "dict"}, 10, "test_provider", "daily_limit") == 10
 
+    def test_malformed_limit_does_not_escape_through_the_log_line(self) -> None:
+        """The guard was defeated by the log call that follows it.
+
+        Logging arguments are evaluated whatever the level, so int() on the
+        RAW config value raised the very error _coerce_int absorbs -- taking
+        down --quota-status and booking every work of that provider failed.
+        """
+        from main.state.quota import QuotaManager
+
+        QuotaManager._instance = None
+        try:
+            manager = QuotaManager()
+            manager._state_manager = MagicMock()
+            manager._quotas.clear()
+            with patch(
+                "main.state.quota.get_provider_setting",
+                side_effect=lambda _p, key, default=None: {
+                    "quota": {"enabled": True, "daily_limit": "875/day"},
+                }.get(key, default),
+            ):
+                quota = manager._get_or_create_quota("test_provider")
+            assert quota.daily_limit == 10  # coerced default
+            assert quota.reset_hours == 24
+        finally:
+            QuotaManager._instance = None
+
+    def test_one_malformed_record_does_not_drop_the_others(self) -> None:
+        """A single bad record used to abort the whole load.
+
+        _get_or_create_quota then minted fresh zeroed counters and the next
+        save wrote them back over the real ones, so every provider could run
+        its full daily limit a second time.
+        """
+        from main.state.quota import QuotaManager
+
+        QuotaManager._instance = None
+        try:
+            manager = QuotaManager()
+            state_manager = MagicMock()
+            state_manager.get_quotas.return_value = {
+                "broken": {"provider_key": "broken", "daily_limit": None},
+                "healthy": {
+                    "provider_key": "healthy",
+                    "daily_limit": 875,
+                    "reset_hours": 24,
+                    "downloads_used": 870,
+                },
+            }
+            manager._state_manager = state_manager
+            manager._quotas.clear()
+            manager._load_state()
+
+            assert "broken" not in manager._quotas
+            assert manager._quotas["healthy"].downloads_used == 870
+        finally:
+            QuotaManager._instance = None
+
 
 class TestQuotaSavePropagation:
     """A save that never reached disk must be visible in the log.
