@@ -19,6 +19,7 @@ import requests
 
 from api.core import download as dl_mod
 from api.core.budget import DownloadBudget
+from api.core.network import CONNECT_FAILURE_MAX_ATTEMPTS
 
 
 def _make_session(response: MagicMock) -> MagicMock:
@@ -351,6 +352,67 @@ def test_non_retryable_status_records_success_on_breaker(
 
     assert result is None
     mock_cb.record_success.assert_called_once()
+    mock_cb.record_failure.assert_not_called()
+
+
+def test_blocked_status_records_failure_on_breaker(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """A 403 during download_file must record failure on the breaker.
+
+    A blanket rejection of the client says nothing good about the provider:
+    counting it as a success meant a provider that 403s every request never
+    tripped its own breaker and was re-dialled for every remaining work.
+    """
+    resp = MagicMock()
+    resp.status_code = 403
+    resp.headers = {}
+
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=resp)
+    cm.__exit__ = MagicMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = cm
+
+    mock_cb = MagicMock()
+    mock_cb.allow_request.return_value = True
+
+    folder = str(tmp_path / "work")
+    dl_mod._BUDGET._exhausted = False
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch.object(dl_mod, "get_circuit_breaker", return_value=mock_cb),
+    ):
+        result = dl_mod.download_file("https://example.org/blocked.pdf", folder, "book")
+
+    assert result is None
+    mock_cb.record_failure.assert_called_once()
+    mock_cb.record_success.assert_not_called()
+
+
+def test_download_fast_fails_on_connect_level_death(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """A host that never accepts a connection gets the short retry budget."""
+    session = MagicMock()
+    session.get.side_effect = requests.exceptions.ConnectTimeout(
+        "Connection to dead.example timed out. (connect timeout=40)"
+    )
+
+    mock_cb = MagicMock()
+    mock_cb.allow_request.return_value = True
+
+    folder = str(tmp_path / "work")
+    dl_mod._BUDGET._exhausted = False
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch.object(dl_mod, "get_circuit_breaker", return_value=mock_cb),
+        patch("api.core.download.time.sleep"),
+    ):
+        result = dl_mod.download_file("https://dead.example/book.pdf", folder, "book")
+
+    assert result is None
+    assert session.get.call_count == CONNECT_FAILURE_MAX_ATTEMPTS
 
 
 class TestSaveJsonBudget:

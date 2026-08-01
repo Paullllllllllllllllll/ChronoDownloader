@@ -164,6 +164,91 @@ class CircuitBreaker:
             return 0.0
 
 
+# Non-retryable client errors, split by what they say about the provider.
+#
+# A resource error (400/404/410/422) is an answer about *this* URL: the
+# transport and the provider are healthy, so it records a breaker success.
+# Without that, a half-open probe spent on a permanently dead URL would leave
+# the breaker stuck HALF_OPEN and throttle a working provider to one request
+# per cooldown.
+#
+# A blanket rejection of the client (401/403) is different: the provider is
+# refusing us, not the URL. It must feed the breaker, or a provider that
+# rejects every request (a bot filter, a missing API key) is retried at full
+# cost for the whole run and never trips its own breaker.
+RESOURCE_ERROR_STATUSES = frozenset({400, 404, 410, 422})
+CLIENT_BLOCKED_STATUSES = frozenset({401, 403})
+NON_RETRYABLE_STATUSES = RESOURCE_ERROR_STATUSES | CLIENT_BLOCKED_STATUSES
+
+# Attempts granted to a connection that was never established (DNS failure,
+# refused connection, connect timeout). A host that drops SYNs costs the full
+# timeout on every attempt, so paying the whole per-provider retry budget for
+# it burns minutes per request and buys nothing; one retry covers a transient
+# blip, and the breaker takes over from there. Errors raised *after* a
+# connection was established (read timeouts, mid-stream resets) keep the full
+# budget.
+CONNECT_FAILURE_MAX_ATTEMPTS = 2
+
+_CONNECT_FAILURE_MARKERS = (
+    "newconnectionerror",
+    "connecttimeouterror",
+    "failed to establish a new connection",
+    "connection refused",
+    "actively refused",  # Windows WinError 10061
+    "network is unreachable",
+    "no route to host",
+)
+
+
+def is_connect_failure(exc: BaseException) -> bool:
+    """Report whether an exception means the connection was never established.
+
+    Args:
+        exc: Exception raised by the HTTP layer
+
+    Returns:
+        True for connect-level death (refused, unreachable, connect timeout),
+        False for failures that happened after a connection was up
+    """
+    if isinstance(exc, requests.exceptions.ConnectTimeout):
+        return True
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _CONNECT_FAILURE_MARKERS)
+
+
+def connect_aware_attempt_cap(exc: BaseException, max_attempts: int) -> int:
+    """Cap the retry budget for connect-level failures.
+
+    Args:
+        exc: Exception raised by the HTTP layer
+        max_attempts: Configured per-provider attempt budget
+
+    Returns:
+        ``max_attempts``, or the shorter connect-failure budget
+    """
+    if is_connect_failure(exc):
+        return min(max_attempts, CONNECT_FAILURE_MAX_ATTEMPTS)
+    return max_attempts
+
+
+def record_client_error(
+    cb: CircuitBreaker | None, status_code: int, provider: str = ""
+) -> None:
+    """Feed a non-retryable client error to the breaker on the correct side.
+
+    Args:
+        cb: Circuit breaker for the provider, or None when disabled
+        status_code: HTTP status that ended the request
+        provider: Provider key, for log messages
+    """
+    if cb is None:
+        return
+    if status_code in CLIENT_BLOCKED_STATUSES:
+        cb.record_failure(provider or "unknown")
+    else:
+        cb.record_success()
+
+
 # Per-provider circuit breakers
 _CIRCUIT_BREAKERS: dict[str, CircuitBreaker] = {}
 _CIRCUIT_BREAKERS_LOCK = threading.Lock()
@@ -567,13 +652,8 @@ def make_request(
                 continue
 
             # Non-retryable client errors
-            if resp.status_code in (400, 401, 403, 404, 410, 422):
-                # The server answered, so the transport is healthy: record the
-                # outcome, or a half-open probe spent on a dead URL would leave
-                # the breaker half-open and throttle a working provider to one
-                # request per cooldown.
-                if cb:
-                    cb.record_success()
+            if resp.status_code in NON_RETRYABLE_STATUSES:
+                record_client_error(cb, resp.status_code, provider or "unknown")
                 logger.warning(
                     "Non-retryable HTTP %s for %s; not retrying", resp.status_code, url
                 )
@@ -599,8 +679,12 @@ def make_request(
 
             return resp.content
 
-        except requests.exceptions.Timeout:
-            if attempt < max_attempts:
+        except requests.exceptions.Timeout as e:
+            # ConnectTimeout subclasses Timeout, so a host that silently drops
+            # SYNs lands here; it gets the short connect budget, not the full
+            # one (which would cost timeout_s per attempt for nothing).
+            attempt_cap = connect_aware_attempt_cap(e, max_attempts)
+            if attempt < attempt_cap:
                 sleep_s = min(
                     base_backoff * (backoff_mult ** (attempt - 1)), max_backoff
                 )
@@ -609,7 +693,7 @@ def make_request(
                     url,
                     sleep_s,
                     attempt,
-                    max_attempts,
+                    attempt_cap,
                 )
                 time.sleep(sleep_s)
                 continue
@@ -648,6 +732,11 @@ def make_request(
                     time.sleep(sleep_s)
                     continue
                 logger.warning("Name resolution error for %s: %s; not retrying", url, e)
+                # A host that does not resolve is a provider-level outage, not
+                # a bad URL: feed the breaker so the rest of the run stops
+                # re-dialling a dead hostname once per work.
+                if cb:
+                    cb.record_failure(provider or "unknown")
                 return None
 
             # Handle SSL certificate verification errors
@@ -685,8 +774,11 @@ def make_request(
                 )
                 return None
 
-            # Generic retry for other errors
-            if attempt < max_attempts:
+            # Generic retry for other errors. A connection that never came up
+            # (refused, unreachable) gets the short budget; errors raised after
+            # the connection was established keep the full one.
+            attempt_cap = connect_aware_attempt_cap(e, max_attempts)
+            if attempt < attempt_cap:
                 sleep_s = min(
                     base_backoff * (backoff_mult ** (attempt - 1)), max_backoff
                 )
@@ -696,7 +788,7 @@ def make_request(
                     e,
                     sleep_s,
                     attempt,
-                    max_attempts,
+                    attempt_cap,
                 )
                 time.sleep(sleep_s)
                 continue

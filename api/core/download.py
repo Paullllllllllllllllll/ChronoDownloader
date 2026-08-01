@@ -42,10 +42,13 @@ from .context import (
 )
 from .naming import get_provider_slug, sanitize_filename, to_snake_case
 from .network import (
+    NON_RETRYABLE_STATUSES,
+    connect_aware_attempt_cap,
     get_circuit_breaker,
     get_provider_for_url,
     get_rate_limiter,
     get_session,
+    record_client_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -744,13 +747,10 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                         time.sleep(sleep_s)
                     continue
 
-                if response.status_code in (400, 401, 403, 404, 410, 422):
-                    # The server answered, so the transport is healthy: record
-                    # the outcome, or a half-open probe spent on a dead URL
-                    # would leave the breaker half-open and throttle a working
-                    # provider to one request per cooldown.
-                    if cb:
-                        cb.record_success()
+                if response.status_code in NON_RETRYABLE_STATUSES:
+                    # A missing resource leaves the provider healthy; a blanket
+                    # rejection of the client does not. See record_client_error.
+                    record_client_error(cb, response.status_code, provider or "unknown")
                     logger.error(
                         "Non-retryable HTTP %s for %s; aborting download",
                         response.status_code,
@@ -785,7 +785,9 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             # retried with backoff like make_request; previously any such
             # error on the initial GET aborted the download outright, so the
             # configured max_attempts never applied to the download path.
-            if attempt < max_attempts:
+            # A connection that never came up gets the short budget instead.
+            attempt_cap = connect_aware_attempt_cap(e, max_attempts)
+            if attempt < attempt_cap:
                 sleep_s = _calculate_backoff(attempt, None)
                 logger.warning(
                     "Request error for %s: %s; sleeping %.1fs (attempt %d/%d)",
@@ -793,7 +795,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     e,
                     sleep_s,
                     attempt,
-                    max_attempts,
+                    attempt_cap,
                 )
                 time.sleep(sleep_s)
                 continue

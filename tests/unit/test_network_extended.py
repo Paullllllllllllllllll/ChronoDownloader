@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from api.core.network import (
     _CIRCUIT_BREAKERS,
+    CONNECT_FAILURE_MAX_ATTEMPTS,
     CircuitBreaker,
     CircuitState,
     build_session,
+    connect_aware_attempt_cap,
     get_circuit_breaker,
     get_provider_for_url,
+    is_connect_failure,
     make_json_request,
     make_request,
 )
@@ -192,12 +197,14 @@ class TestGetProviderForUrlExtended:
 
 
 class TestMakeRequestNonRetryableRecordsSuccess:
-    """A non-retryable status (400/401/403/404/410/422) records success.
+    """Non-retryable statuses split by what they say about the provider.
 
-    Pre-fix, aborting on a non-retryable status returned None without ever
-    touching the breaker, so a half-open probe spent on a permanently-dead
-    URL left the breaker stuck HALF_OPEN and throttled a working provider to
-    one request per cooldown indefinitely.
+    A resource error (400/404/410/422) records success: aborting without
+    touching the breaker left a half-open probe spent on a permanently-dead
+    URL stuck HALF_OPEN, throttling a working provider to one request per
+    cooldown indefinitely. A blanket rejection of the client (401/403)
+    records failure instead, or a provider that rejects every request never
+    trips its own breaker and is re-dialled at full cost for the whole run.
     """
 
     def setup_method(self) -> None:
@@ -206,12 +213,13 @@ class TestMakeRequestNonRetryableRecordsSuccess:
     def teardown_method(self) -> None:
         _CIRCUIT_BREAKERS.clear()
 
-    def test_404_records_success_on_breaker(self) -> None:
+    @staticmethod
+    def _request_with_status(status: int) -> MagicMock:
         mock_cb = MagicMock()
         mock_cb.allow_request.return_value = True
 
         resp = MagicMock()
-        resp.status_code = 404
+        resp.status_code = status
         resp.headers = {}
 
         session = MagicMock()
@@ -222,10 +230,154 @@ class TestMakeRequestNonRetryableRecordsSuccess:
             patch("api.core.network.get_circuit_breaker", return_value=mock_cb),
             patch("api.core.network.get_network_config", return_value={}),
         ):
-            result = make_request("https://example.org/missing")
+            assert make_request("https://example.org/probe") is None
+        return mock_cb
 
-        assert result is None
+    def test_404_records_success_on_breaker(self) -> None:
+        mock_cb = self._request_with_status(404)
         mock_cb.record_success.assert_called_once()
+        mock_cb.record_failure.assert_not_called()
+
+    def test_resource_errors_record_success(self) -> None:
+        for status in (400, 410, 422):
+            mock_cb = self._request_with_status(status)
+            assert mock_cb.record_success.call_count == 1, status
+            mock_cb.record_failure.assert_not_called()
+
+    def test_client_blocked_statuses_record_failure(self) -> None:
+        for status in (401, 403):
+            mock_cb = self._request_with_status(status)
+            assert mock_cb.record_failure.call_count == 1, status
+            mock_cb.record_success.assert_not_called()
+
+    def test_repeated_403_trips_the_breaker(self) -> None:
+        """A provider that 403s everything must eventually be skipped."""
+        cb = CircuitBreaker(failure_threshold=3, cooldown_seconds=300.0)
+
+        resp = MagicMock()
+        resp.status_code = 403
+        resp.headers = {}
+        session = MagicMock()
+        session.get.return_value = resp
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=cb),
+            patch("api.core.network.get_network_config", return_value={}),
+        ):
+            for _ in range(3):
+                make_request("https://example.org/blocked")
+            assert cb.state == CircuitState.OPEN
+            calls_before = session.get.call_count
+            make_request("https://example.org/blocked")
+
+        # Fourth call is short-circuited: no further HTTP request is made.
+        assert session.get.call_count == calls_before
+
+    def test_dns_failure_records_failure_on_breaker(self) -> None:
+        mock_cb = MagicMock()
+        mock_cb.allow_request.return_value = True
+
+        session = MagicMock()
+        session.get.side_effect = requests.exceptions.ConnectionError(
+            "HTTPSConnectionPool(host='gone.example'): Max retries exceeded "
+            "(Caused by NameResolutionError('Failed to resolve gone.example'))"
+        )
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=mock_cb),
+            patch("api.core.network.get_network_config", return_value={}),
+        ):
+            assert make_request("https://gone.example/api") is None
+
+        assert session.get.call_count == 1  # not retried
+        mock_cb.record_failure.assert_called_once()
+
+
+# ============================================================================
+# Connect-level failures
+# ============================================================================
+
+
+class TestConnectFailureFastFail:
+    """A host that never accepts a connection must not burn the full budget.
+
+    sru.gbv.de silently drops SYNs: every attempt costs the whole timeout, so
+    one search spent minutes exhausting max_attempts before failing anyway.
+    Errors raised after a connection was established keep the full budget,
+    since those are the genuinely transient ones.
+    """
+
+    def test_connect_timeout_is_connect_level(self) -> None:
+        assert is_connect_failure(requests.exceptions.ConnectTimeout("timed out"))
+
+    def test_refused_and_unreachable_are_connect_level(self) -> None:
+        for msg in (
+            "Failed to establish a new connection: [Errno 111] Connection refused",
+            "NewConnectionError: [WinError 10061] actively refused it",
+            "[Errno 101] Network is unreachable",
+            "ConnectTimeoutError(Connection to sru.gbv.de timed out.)",
+        ):
+            assert is_connect_failure(requests.exceptions.ConnectionError(msg)), msg
+
+    def test_midstream_errors_keep_the_full_budget(self) -> None:
+        for exc in (
+            requests.exceptions.ConnectionError(
+                "Connection aborted, RemoteDisconnected"
+            ),
+            requests.exceptions.ConnectionError("Connection reset by peer"),
+            requests.exceptions.ReadTimeout("Read timed out. (read timeout=30)"),
+            requests.exceptions.ChunkedEncodingError("incomplete chunked read"),
+        ):
+            assert not is_connect_failure(exc), exc
+            assert connect_aware_attempt_cap(exc, 25) == 25
+
+    def test_cap_shortens_only_connect_failures(self) -> None:
+        dead = requests.exceptions.ConnectTimeout("timed out")
+        assert connect_aware_attempt_cap(dead, 8) == CONNECT_FAILURE_MAX_ATTEMPTS
+        # Never lengthens a budget that is already shorter than the cap.
+        assert connect_aware_attempt_cap(dead, 1) == 1
+
+    def test_make_request_stops_early_on_connect_timeout(self) -> None:
+        mock_cb = MagicMock()
+        mock_cb.allow_request.return_value = True
+
+        session = MagicMock()
+        session.get.side_effect = requests.exceptions.ConnectTimeout(
+            "Connection to sru.gbv.de timed out. (connect timeout=40)"
+        )
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=mock_cb),
+            patch(
+                "api.core.network.get_network_config",
+                return_value={"max_attempts": 8, "base_backoff_s": 0.0},
+            ),
+            patch("api.core.network.time.sleep"),
+        ):
+            assert make_request("https://sru.gbv.de/gvk") is None
+
+        assert session.get.call_count == CONNECT_FAILURE_MAX_ATTEMPTS
+        mock_cb.record_failure.assert_called_once()
+
+    def test_make_request_keeps_full_budget_for_read_timeout(self) -> None:
+        session = MagicMock()
+        session.get.side_effect = requests.exceptions.ReadTimeout("Read timed out.")
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=None),
+            patch(
+                "api.core.network.get_network_config",
+                return_value={"max_attempts": 4, "base_backoff_s": 0.0},
+            ),
+            patch("api.core.network.time.sleep"),
+        ):
+            assert make_request("https://example.org/slow") is None
+
+        assert session.get.call_count == 4
 
 
 # ============================================================================
