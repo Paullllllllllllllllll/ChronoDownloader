@@ -55,7 +55,8 @@ sampled_books.csv
 /essential_monographies_1_downloads/
 /essential_monographies_2_downloads/
 # Hands-on verification outputs (downloaded content; kept locally, not versioned)
-/verification/b*/
+# Numbered batch directories only: /verification/baseline/ is tracked.
+/verification/b[0-9]*/
 /verification/dryrun/
 
 # Staging test outputs
