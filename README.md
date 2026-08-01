@@ -1,4 +1,4 @@
-# ChronoDownloader v1.19.0
+# ChronoDownloader v1.20.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1198,6 +1198,30 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.20.0** (1 August 2026) -- Fourth maintenance round, driven by a live
+  probe of all 17 search endpoints. Three providers were silently returning
+  nothing and are repaired: Polona now queries its JSON gateway instead of
+  scraping the HTML shell of a JavaScript application, and its manifest route
+  is corrected; Wellcome follows the catalogue's migration from per-image
+  locations to Presentation-API manifests, which had reduced a healthy API
+  answering with nearly two thousand hits to an empty result list; and the
+  Anna's Archive base URL points at a mirror that still resolves. BNE's SPARQL
+  filter folds accents on both sides, so an unaccented query finally reaches
+  an accented Spanish title, and its catalogue-id guard admits the
+  parenthesised organization code the connector's own search stores. The
+  "N/A" title sentinel is retired everywhere: it normalized to a string
+  scoring 35 to 36 against short queries, at or above the shipped threshold,
+  so a record whose title could not be read outranked genuine matches, while
+  MDZ and Wellcome went further and echoed the query back as a flawless
+  hundred-percent match. Metadata writes are now bound by the metadata budget
+  rather than merely counted against it, DDB's aggregated manifest hosts are
+  paced by the rate limiter and circuit breaker, and a partial page set is
+  logged instead of passing as complete. On the application side, the
+  interactive session summary reports this run's quota deferrals instead of
+  the whole user-level backlog, a deferral is no longer filed as a failure,
+  and `--verify` unions its index rows with a directory scan so direct-IIIF
+  works stop being invisible in a mixed corpus. The README records which
+  endpoints were reachable and why the others were not.
 - **v1.19.0** (1 August 2026) -- Decision release resolving the open items
   from the three-round maintenance sweep. Config defaults are unified behind
   single authoritative constants (on_exceed now defaults to "stop",
