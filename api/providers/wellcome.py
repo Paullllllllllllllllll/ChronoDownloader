@@ -4,9 +4,14 @@ Docs:
 - Catalogue v2: https://developers.wellcomecollection.org/api/catalogue
 - IIIF (Image API): https://developers.wellcomecollection.org/docs/iiif
 
-We search /catalogue/v2/works with include=items and pick locations of type
-"iiif-image" which point to info.json. From that we derive the IIIF Image API
-service base and download full-size images.
+We search /catalogue/v2/works with include=items. Historically every digitised
+work carried an "iiif-image" location pointing at an info.json, from which the
+Image API service base was derived directly. Wellcome has since moved to
+Presentation-API locations: live responses now carry "iiif-presentation"
+manifest URLs and no "iiif-image" entries at all, so an image-only filter
+discards every hit and the provider returns nothing. Both location types are
+therefore accepted, and a manifest is resolved to its image services on the
+download path.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from ..core.budget import budget_exhausted
 from ..core.config import get_provider_setting
 from ..core.download import download_file
 from ..core.network import make_request
-from ..iiif import download_one_from_service
+from ..iiif import download_iiif_manifest_and_images, download_one_from_service
 from ..model import (
     SearchResult,
     convert_to_searchresult,
@@ -39,8 +44,15 @@ def _max_images() -> int | None:
         Max images limit (0 or None means all images)
     """
     val = get_provider_setting("wellcome", "max_images", None)
-    if isinstance(val, int):
-        return val
+    if val is not None:
+        # JSON admits "50" and 50.0 as readily as 50; an isinstance(int) test
+        # dropped both to the env fallback and silently uncapped the work.
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid provider_settings.wellcome.max_images=%r; ignoring.", val
+            )
     # fallback env (optional)
     try:
         return int(os.getenv("WELLCOME_MAX_IMAGES", "0"))
@@ -71,6 +83,30 @@ def _extract_image_services(work: dict[str, Any]) -> list[str]:
                     base = url[: -len("/info.json")]
                     services.append(base)
     return services
+
+
+def _extract_manifest_urls(work: dict[str, Any]) -> list[str]:
+    """Return the IIIF Presentation manifest URLs of a Work doc.
+
+    Wellcome's current catalogue responses expose digitised content as
+    ``iiif-presentation`` locations rather than the per-image
+    ``iiif-image``/info.json locations this connector was written against.
+
+    Args:
+        work: Wellcome work dictionary.
+
+    Returns:
+        List of IIIF Presentation manifest URLs.
+    """
+    manifests: list[str] = []
+    for item in work.get("items", []) or []:
+        for loc in item.get("locations", []) or []:
+            if (loc.get("locationType") or {}).get("id") != "iiif-presentation":
+                continue
+            url = loc.get("url")
+            if url and url not in manifests:
+                manifests.append(str(url))
+    return manifests
 
 
 def search_wellcome(
@@ -107,17 +143,19 @@ def search_wellcome(
         return results
     for work in data.get("results", []) or []:
         services = _extract_image_services(work)
-        if not services:
+        manifests = _extract_manifest_urls(work)
+        if not services and not manifests:
             continue
         work_id = work.get("id")
         raw = {
-            "title": work.get("title") or title,
+            "title": work.get("title") or "",
             "creator": None,
             "id": work_id,
             "item_url": f"https://wellcomecollection.org/works/{work_id}"
             if work_id
             else None,
             "image_services": services,
+            "iiif_manifest": manifests[0] if manifests else None,
             "thumbnail": (work.get("thumbnail") or {}).get("url"),
         }
         results.append(convert_to_searchresult("Wellcome Collection", raw))
@@ -143,14 +181,25 @@ def download_wellcome_work(
     """
     work_id = resolve_item_id(item_data)
     services = resolve_item_field(item_data, "image_services", default=[]) or []
+    manifest_url = resolve_item_field(item_data, "iiif_manifest")
     title = resolve_item_field(item_data, "title", attr="title", default="")
 
     # Refetch work if needed
-    if work_id and not services:
+    if work_id and not services and not manifest_url:
         url = f"{CATALOGUE_WORKS_URL}/{work_id}"
         work = make_request(url, params={"include": "items"})
         if isinstance(work, dict):
             services = _extract_image_services(work)
+            manifests = _extract_manifest_urls(work)
+            manifest_url = manifests[0] if manifests else None
+
+    # A Presentation manifest is the shape Wellcome now serves; resolve it
+    # through the shared IIIF strategy, which saves the manifest, tries PDF or
+    # EPUB renderings, and falls back to per-canvas images under the budget.
+    if not services and manifest_url:
+        return download_iiif_manifest_and_images(
+            str(manifest_url), output_folder, "wellcome", work_id or "work"
+        )
 
     if not services:
         logger.info(
