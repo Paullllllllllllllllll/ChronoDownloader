@@ -207,6 +207,58 @@ class TestSearchQuery:
         assert "l\\'art de cocina" in query
 
 
+class TestHistoricalDateFilter:
+    """Modern reprints must not consume the result budget.
+
+    Unconstrained, "cocina" returned six 2019 e-books in its first twelve
+    hits. The date property is free text -- bare years, bracketed years,
+    ranges, "Anno 1762", century notation and Roman numerals -- so nothing
+    can be parsed into a number and the filter is a membership test that
+    deliberately fails open on both undated records and records whose date
+    holds no four-digit year.
+    """
+
+    def test_the_filter_is_emitted(self) -> None:
+        query = _build_search_query("cocina", 12)
+        assert "!BOUND(?date)" in query
+        assert "!REGEX(STR(?date), '[0-9]{4}')" in query
+        assert "REGEX(STR(?date), '(1[0-8][0-9][0-9]|1900)')" in query
+
+    def test_the_pattern_admits_only_historical_years(self) -> None:
+        """The cutoff lives in the character classes, not in a comparison."""
+        import re
+
+        from api.providers.bne import _HISTORICAL_YEAR_PATTERN
+
+        pattern = re.compile(_HISTORICAL_YEAR_PATTERN)
+        for literal in (
+            "1845",
+            "[1770]",
+            "1886-1945",
+            "[entre 1645 y 1668?]",
+            "Anno 1762",
+            "1899",
+            "1900",
+            "1000",
+        ):
+            assert pattern.search(literal), literal
+        for literal in ("1901", "1913", "2019", "2026"):
+            assert not pattern.search(literal), literal
+
+    def test_undated_and_unparseable_records_fail_open(self) -> None:
+        """Both disjuncts are load-bearing.
+
+        Century notation and Roman numerals carry no four-digit year at all
+        and skew old, so a filter without the second disjunct would drop
+        exactly the oldest material.
+        """
+        import re
+
+        no_year = re.compile(r"[0-9]{4}")
+        for literal in ("S.XVIII", "S.XVII", "A. MDCCLXII", "Anno Domini"):
+            assert not no_year.search(literal), literal
+
+
 # ---------------------------------------------------------------------------
 # Accent folding
 # ---------------------------------------------------------------------------
@@ -277,8 +329,8 @@ class TestAccentFolding:
         assert "x\\')) . ?s ?p ?o #" in query
         assert "'x'))" not in query
         # The FILTER/OPTIONAL skeleton is unchanged: still one CONTAINS,
-        # one STRSTARTS, two OPTIONAL clauses.
-        assert query.count("FILTER(") == 2
+        # one STRSTARTS, one date filter, two OPTIONAL clauses.
+        assert query.count("FILTER(") == 3
         assert query.count("OPTIONAL") == 2
 
     def test_search_sends_the_folded_query(self) -> None:

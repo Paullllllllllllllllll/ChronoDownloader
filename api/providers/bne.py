@@ -73,6 +73,22 @@ _ACCENT_FOLDING: tuple[tuple[str, str], ...] = (
     ("ñ", "n"),
 )
 
+# The date property is free text, not a typed date: mostly a bare year
+# ("1845"), but also "[1770]", "1886-1945", "[entre 1645 y 1668?]",
+# "Anno 1762", century notation ("S.XVIII") and Roman numerals only
+# ("A. MDCCLXII"). Nothing can be parsed into a number, so the constraint is a
+# membership test: keep a record whose date literal mentions a year in
+# 1000-1900. It fails open twice on purpose -- when the record carries no date
+# at all (about 0.9% of digitised manifestations) and when the literal holds no
+# four-digit year (century notation and Roman numerals, i.e. the oldest
+# material) -- so no undated historical record is dropped. Both disjuncts are
+# load-bearing, not defensive padding.
+#
+# The alternative, extracting the first four-digit run with a REPLACE capture
+# group and comparing it, parses on the endpoint but is rejected by the
+# Cloudflare WAF in front of it with an instant 403.
+_HISTORICAL_YEAR_PATTERN = "(1[0-8][0-9][0-9]|1900)"
+
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
@@ -217,6 +233,11 @@ def _build_search_query(title: str, limit: int) -> str:
             FILTER(STRSTARTS(STR(?digital), '{DIGITAL_BASE_URL}/'))
             OPTIONAL {{ ?id <{CREATOR_PROPERTY}> ?creator . }}
             OPTIONAL {{ ?id <{DATE_PROPERTY}> ?date . }}
+            FILTER(
+                !BOUND(?date)
+                || !REGEX(STR(?date), '[0-9]{{4}}')
+                || REGEX(STR(?date), '{_HISTORICAL_YEAR_PATTERN}')
+            )
         }} LIMIT {limit}
     """
 
