@@ -72,14 +72,18 @@ def normalize_text(text: str | None) -> str:
 
     # Collapse multiple spaces
     normalized = re.sub(r"\s+", " ", ascii_only).strip()
-    if normalized:
+
+    # A title written in a non-Latin script (Cyrillic, Greek, ...) is gutted by
+    # the ASCII filter, so both scorers short-circuit to 0 and no such record
+    # can ever clear the selection gate -- even against a byte-identical query.
+    # Testing the ASCII pass for emptiness was not enough: a single surviving
+    # token, typically a year or a volume number, kept the mutilated form
+    # ("Podarok ... 1861" -> "1861"). Fall back whenever the source carries a
+    # letter the ASCII filter cannot represent, using a Unicode-aware pass that
+    # strips punctuation but keeps the script's own letters and digits.
+    if normalized and not any(ch.isalpha() and not ch.isascii() for ch in s):
         return normalized
 
-    # A title written in a non-Latin script (Cyrillic, Greek, ...) is erased
-    # entirely by the ASCII filter, so both scorers short-circuit to 0 and no
-    # such record can ever clear the selection gate -- even against a
-    # byte-identical query. Fall back to a Unicode-aware pass that strips
-    # punctuation but keeps the script's own letters and digits.
     fallback = re.sub(r"[^\w\s]|_", " ", s)
     return re.sub(r"\s+", " ", fallback).strip()
 

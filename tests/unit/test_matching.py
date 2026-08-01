@@ -119,6 +119,36 @@ class TestNonLatinScriptNormalization:
         # The genuinely punctuation-only fallback case is unaffected.
         assert normalize_text("!@#$%^&*()") == ""
 
+    def test_a_surviving_ascii_token_does_not_defeat_the_fallback(self) -> None:
+        """A year or volume number must not strip the script off a title.
+
+        The fallback used to be gated on the ASCII pass coming back empty, so
+        one surviving token was enough to keep the mutilated form: a Cyrillic
+        title carrying its year normalized to just that year and scored 0
+        against its own query.
+        """
+        # The breve on "й" is a combining mark, so strip_accents folds it to
+        # "и" exactly as it folds Latin diacritics.
+        assert normalize_text("Подарокъ молодымъ хозяйкамъ 1861") == (
+            "подарокъ молодымъ хозяикамъ 1861"
+        )
+        assert normalize_text("Μαγειρική τέχνη τόμος 2") == "μαγειρικη τεχνη τομος 2"
+        assert (
+            title_score(
+                "Подарокъ молодымъ хозяйкамъ", "Подарокъ молодымъ хозяйкамъ 1861"
+            )
+            > 80
+        )
+
+    def test_latin_titles_keep_the_ascii_form(self) -> None:
+        """Only scripts the ASCII filter cannot represent take the fallback."""
+        assert normalize_text("Cookery for Bønder, 1861") == "cookery for bonder 1861"
+        assert normalize_text("Œuvres, vol. 2") == "oeuvres vol 2"
+        assert normalize_text("1861") == "1861"
+
+    def test_mixed_script_titles_keep_both_halves(self) -> None:
+        assert normalize_text("Подарокъ / Le Cadeau") == "подарокъ le cadeau"
+
 
 class TestSimpleRatio:
     """Tests for simple_ratio function."""
