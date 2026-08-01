@@ -99,6 +99,17 @@ class CircuitBreaker:
                     self.cooldown_seconds,
                 )
 
+    def reconfigure(self, failure_threshold: int, cooldown_seconds: float) -> None:
+        """Apply refreshed config values under the breaker's own lock.
+
+        Args:
+            failure_threshold: Consecutive failures before the circuit opens
+            cooldown_seconds: How long the circuit stays open
+        """
+        with self._lock:
+            self.failure_threshold = failure_threshold
+            self.cooldown_seconds = cooldown_seconds
+
     def allow_request(self) -> bool:
         """Check if a request should be allowed.
 
@@ -281,9 +292,12 @@ def get_circuit_breaker(provider_key: str | None) -> CircuitBreaker | None:
             cb = CircuitBreaker(failure_threshold=threshold, cooldown_seconds=cooldown)
             _CIRCUIT_BREAKERS[provider_key] = cb
         else:
-            # Update settings if changed
-            cb.failure_threshold = threshold
-            cb.cooldown_seconds = cooldown
+            # Update settings if changed. Through reconfigure(), so the two
+            # fields are not written outside the breaker's own lock while a
+            # worker reads them inside it -- the class docstring promises
+            # every transition is guarded, and this was the one writer that
+            # was not.
+            cb.reconfigure(threshold, cooldown)
 
     return cb
 

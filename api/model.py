@@ -167,6 +167,13 @@ def resolve_item_id(
     ``source_id`` → ``raw[key]`` for each *raw_key* in order.
     For a plain ``dict``: ``dict[key]`` for each *raw_key* in order.
 
+    Note that ``source_id`` wins outright for a ``SearchResult``, and
+    ``convert_to_searchresult`` fills it from the raw record whenever it can,
+    so the *raw_keys* are in practice a fallback for dict inputs and for the
+    rare result that carries no ``source_id``. A caller that needs one
+    specific key regardless should read ``raw`` directly rather than express
+    the preference here.
+
     Args:
         item_data: A ``SearchResult`` or a provider-specific dict.
         *raw_keys: One or more dict keys to try (e.g. ``"id"``, ``"identifier"``).
