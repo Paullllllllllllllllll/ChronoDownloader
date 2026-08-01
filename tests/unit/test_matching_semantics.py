@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from api.matching import title_score
 from api.model import SearchResult
 from main.orchestration.selection import score_candidate
 
@@ -50,3 +51,26 @@ def test_creator_is_ranking_bonus_not_penalty() -> None:
     assert s_with["total"] > s_without["total"]
     # ...but a missing creator never drops the ranking below the title score.
     assert s_without["total"] >= s_without["score"]
+
+
+def test_titleless_record_cannot_clear_the_shipped_gate() -> None:
+    """A record with no title must score 0, not clear min_title_score.
+
+    Connectors used to substitute the literal ``"N/A"`` (and MDZ/Wellcome the
+    caller's own query) for a missing title. ``normalize_text("N/A")`` is
+    ``"n a"``, which scores 35-36 against a short query -- at or above the 35
+    that ``config.example.json`` ships -- so a record whose title could not be
+    read outranked genuinely matching candidates.
+    """
+    for query in ("Almanach", "Analecta", "Manual de arte"):
+        assert title_score(query, "N/A") >= 35  # the sentinel was not inert
+        assert score_candidate(_sr(""), query, None, 0.2)["score"] == pytest.approx(0.0)
+
+
+def test_query_echo_would_score_a_perfect_match() -> None:
+    """Echoing the query back as the title fakes a flawless hit."""
+    query = "Le Cuisinier royal et bourgeois"
+    assert score_candidate(_sr(query), query, None, 0.2)["score"] == pytest.approx(
+        100.0
+    )
+    assert score_candidate(_sr(""), query, None, 0.2)["score"] == pytest.approx(0.0)

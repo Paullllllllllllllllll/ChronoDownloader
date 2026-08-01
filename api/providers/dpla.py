@@ -97,12 +97,12 @@ def search_dpla(
                 )
                 title_text = src.get("title")
                 if isinstance(title_text, list):
-                    title_text = title_text[0] if title_text else "N/A"
+                    title_text = title_text[0] if title_text else ""
                 creators = src.get("creator") or []
                 if isinstance(creators, str):
                     creators = [creators]
                 raw = {
-                    "title": title_text or "N/A",
+                    "title": title_text or "",
                     # Coerce elements to str: DPLA occasionally returns
                     # structured (dict) creator entries. Pass the list under
                     # the plural key -- joining with ", " would be re-split as

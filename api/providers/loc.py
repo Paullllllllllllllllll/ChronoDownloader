@@ -92,7 +92,7 @@ def search_loc(
         else:
             creator = None
         raw = {
-            "title": item.get("title", "N/A"),
+            "title": item.get("title") or "",
             "creator": creator,
             "id": item_id,
             "item_url": item.get("url"),

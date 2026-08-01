@@ -205,7 +205,7 @@ def convert_to_searchresult(provider: str, data: dict[str, Any]) -> SearchResult
         Normalized SearchResult instance
     """
     # Extract title
-    title = data.get("title") or data.get("name") or data.get("label") or "N/A"
+    title = data.get("title") or data.get("name") or data.get("label") or ""
 
     # Extract creators
     creators = []

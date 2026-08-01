@@ -82,9 +82,7 @@ def search_e_rara(
 
             title_el = mods.find(".//mods:titleInfo/mods:title", ns)
             item_title = (
-                title_el.text.strip()
-                if title_el is not None and title_el.text
-                else "N/A"
+                title_el.text.strip() if title_el is not None and title_el.text else ""
             )
 
             creator_el = mods.find(".//mods:name/mods:displayForm", ns)

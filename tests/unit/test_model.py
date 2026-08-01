@@ -137,9 +137,11 @@ class TestConvertToSearchResult:
         data2 = {"label": "By Label"}
         assert convert_to_searchresult("P", data2).title == "By Label"
 
-        # No title fields
+        # No title fields: an empty string, never an "N/A" sentinel --
+        # normalize_text("N/A") is "n a", which scores 35-36 against a
+        # short query and clears the shipped min_title_score.
         data3: dict[str, str] = {}
-        assert convert_to_searchresult("P", data3).title == "N/A"
+        assert convert_to_searchresult("P", data3).title == ""
 
     def test_creator_extraction(self) -> None:
         """Test creator extraction from various fields."""

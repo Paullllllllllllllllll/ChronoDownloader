@@ -82,7 +82,7 @@ def search_gallica(
     for record in root.findall(".//sru:recordData/oai_dc:dc", namespaces):
         try:
             title_elements = record.findall("dc:title", namespaces)
-            item_title = title_elements[0].text if title_elements else "N/A"
+            item_title = title_elements[0].text if title_elements else ""
             creator_elements = record.findall("dc:creator", namespaces)
             item_creator = creator_elements[0].text if creator_elements else None
             ark_id = None

@@ -330,7 +330,9 @@ class TestEuropeanaProvider:
             results = search_europeana("cookbook")
 
             assert len(results) == 2
-            assert results[0].raw["title"] == "N/A"
+            # A titleless record must carry an empty title, not a
+            # sentinel that scores 35+ against short queries.
+            assert results[0].raw["title"] == ""
             assert results[0].raw["creator"] == "Solo Author"
             assert results[1].raw["title"] == "Good Title"
             assert results[1].raw["creator"] is None

@@ -60,11 +60,11 @@ def search_mdz(
                 obj_id = doc.get("id")
                 if not obj_id:
                     continue
-                title_html = doc.get("title") or title
+                title_html = doc.get("title") or ""
                 # A list-valued (highlighted) title would make re.sub raise
                 # TypeError, silently dropping the doc; coerce to str first.
                 if isinstance(title_html, list):
-                    title_html = title_html[0] if title_html else title
+                    title_html = title_html[0] if title_html else ""
                 # Strip simple tags from highlighted title
                 title_text = re.sub(r"<[^>]+>", "", str(title_html))
                 authors = doc.get("authors") or []
@@ -103,7 +103,7 @@ def search_mdz(
             if obj_id in seen:
                 continue
             seen.add(obj_id)
-            title_text = a.get_text(strip=True) or title
+            title_text = a.get_text(strip=True) or ""
             raw = {
                 "title": title_text,
                 "creator": creator or None,

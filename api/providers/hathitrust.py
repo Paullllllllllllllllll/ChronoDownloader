@@ -132,9 +132,9 @@ def search_hathitrust(
             try:
                 titles = rec.get("titles") or rec.get("title") or []
                 if isinstance(titles, list):
-                    title_text = titles[0] if titles else (title or "N/A")
+                    title_text = titles[0] if titles else (title or "")
                 else:
-                    title_text = titles or (title or "N/A")
+                    title_text = titles or (title or "")
                 authors = rec.get("authors") or rec.get("mainAuthor") or []
                 if isinstance(authors, str):
                     authors = [authors]

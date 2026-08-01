@@ -166,7 +166,7 @@ class TestConvertToSearchResult:
 
     def test_empty_dict(self) -> None:
         sr = convert_to_searchresult("Provider", {})
-        assert sr.title == "N/A"
+        assert sr.title == ""
         assert sr.creators == []
         assert sr.date is None
         assert sr.source_id is None

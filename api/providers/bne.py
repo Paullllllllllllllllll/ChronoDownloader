@@ -270,7 +270,7 @@ def search_bne(
         seen.add(digital_id)
 
         raw = {
-            "title": _binding_value(binding, "title") or "N/A",
+            "title": _binding_value(binding, "title") or "",
             "creator": _binding_value(binding, "creator"),
             "date": _binding_value(binding, "date"),
             "id": digital_id,

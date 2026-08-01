@@ -101,7 +101,7 @@ def _search_bnb_sparql(
                         break
             if ark:
                 raw = {
-                    "title": title_v or "N/A",
+                    "title": title_v or "",
                     "creator": creator_v or creator or None,
                     "identifier": ark,
                     "source": "bnb_sparql",
@@ -176,7 +176,7 @@ def search_british_library(
                         continue
 
                     raw = {
-                        "title": title_el.text if title_el is not None else "N/A",
+                        "title": title_el.text if title_el is not None else "",
                         "creator": creator_el.text if creator_el is not None else None,
                         "date": date_el.text if date_el is not None else None,
                         "identifier": identifier,

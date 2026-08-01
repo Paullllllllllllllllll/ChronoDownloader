@@ -213,7 +213,7 @@ def search_google_books(
                 # Skip items that are not obviously free when free_only is requested
                 continue
             raw = {
-                "title": volume_info.get("title", "N/A"),
+                "title": volume_info.get("title") or "",
                 # A present-but-null "authors" (or one holding non-string
                 # entries) would make a bare join raise TypeError. Pass the
                 # list under the plural key: joining with ", " would be

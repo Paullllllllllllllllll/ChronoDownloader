@@ -92,7 +92,7 @@ def search_sbb_digital(
                 item_title = (
                     title_el.text.strip()
                     if title_el is not None and title_el.text
-                    else "N/A"
+                    else ""
                 )
                 if subtitle_el is not None and subtitle_el.text:
                     item_title = f"{item_title} {subtitle_el.text.strip()}"

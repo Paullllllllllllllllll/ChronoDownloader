@@ -107,9 +107,9 @@ def search_europeana(
             # A present-but-empty "title": [] (records lacking dc:title) would
             # make the default unused and [][0] raise IndexError, aborting the
             # whole search; guard for the empty-list case explicitly.
-            titles = item.get("title") or ["N/A"]
+            titles = item.get("title") or [""]
             if isinstance(titles, list):
-                item_title = titles[0] if titles else "N/A"
+                item_title = titles[0] if titles else ""
             else:
                 item_title = titles
             item_creator = None

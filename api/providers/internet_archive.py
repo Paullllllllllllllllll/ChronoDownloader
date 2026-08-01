@@ -76,7 +76,7 @@ def search_internet_archive(
                 else ([str(c) for c in creator_val] if creator_val else [])
             )
             raw = {
-                "title": item.get("title", "N/A"),
+                "title": item.get("title") or "",
                 "creators": creators_list,
                 "identifier": ia_identifier,
                 "item_url": f"https://archive.org/details/{ia_identifier}"

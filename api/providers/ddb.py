@@ -110,9 +110,9 @@ def search_ddb(
             for item in docs:
                 # Clean title by removing <match> tags. DDB may return a
                 # list-valued label/title, on which .replace would raise.
-                item_title = item.get("label") or item.get("title") or "N/A"
+                item_title = item.get("label") or item.get("title") or ""
                 if isinstance(item_title, list):
-                    item_title = item_title[0] if item_title else "N/A"
+                    item_title = item_title[0] if item_title else ""
                 item_title = (
                     str(item_title).replace("<match>", "").replace("</match>", "")
                 )

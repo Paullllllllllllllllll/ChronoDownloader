@@ -40,7 +40,7 @@ def _extract_title(item: dict[str, Any]) -> str:
         )
     elif isinstance(item.get("title"), str):
         title = item.get("title")
-    return title or "N/A"
+    return title or ""
 
 
 def _extract_creator(item: dict[str, Any]) -> str | None:
