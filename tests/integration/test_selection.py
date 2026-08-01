@@ -229,7 +229,7 @@ class TestAttachScores:
 
         attach_scores(sr, "Exact Title", "Same Creator", creator_weight=0.2)
 
-        # combined_match_score returns 100 for perfect title + creator match
+        # score_candidate returns 100 for perfect title + creator match
         assert sr.raw["__matching__"]["score"] == 100
 
 

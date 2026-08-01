@@ -23,16 +23,16 @@ from api.core.config import get_config
 logger = logging.getLogger(__name__)
 
 
-def _detect_mode_and_parse_args(
+def run_with_mode_detection(
     parser_factory: Callable[[], argparse.ArgumentParser],
     script_name: str,
     config_path: str | None = None,
 ) -> tuple[dict[str, Any], bool, argparse.Namespace | None]:
-    """Internal helper that performs mode detection and argument parsing.
+    """Load config, detect interactive vs CLI mode, and parse CLI arguments.
 
-    This function handles:
+    Handles:
     - Configuration loading
-    - Mode detection (interactive vs CLI)
+    - Mode detection (interactive vs CLI, including the ``--cli`` override)
     - Argument parsing for CLI mode
     - Error handling for config loading failures
 
@@ -91,31 +91,6 @@ def _detect_mode_and_parse_args(
                 config = get_config(force_reload=True)
 
     return config, interactive_mode, args
-
-
-def run_with_mode_detection(
-    interactive_handler: Callable[[], None],
-    cli_handler: Callable[[argparse.Namespace, dict[str, Any]], Any],
-    parser_factory: Callable[[], argparse.ArgumentParser],
-    script_name: str,
-    config_path: str | None = None,
-) -> tuple[dict[str, Any], bool, argparse.Namespace | None]:
-    """Route execution based on interactive_mode configuration.
-
-    Args:
-        interactive_handler: Function to call in interactive mode (for type hints)
-        cli_handler: Function to call in CLI mode (for type hints)
-        parser_factory: Function that returns an ArgumentParser
-        script_name: Name of the calling script (for error messages)
-        config_path: Optional path to config file
-
-    Returns:
-        Tuple of (config_dict, interactive_mode, args_or_none)
-
-    Raises:
-        SystemExit: On configuration loading failure
-    """
-    return _detect_mode_and_parse_args(parser_factory, script_name, config_path)
 
 
 def get_general_config() -> dict[str, Any]:

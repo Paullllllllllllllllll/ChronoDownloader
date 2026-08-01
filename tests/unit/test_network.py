@@ -158,6 +158,21 @@ class TestCircuitBreaker:
 
         assert 299 < remaining <= 300
 
+    def test_is_available_does_not_mutate_state(self) -> None:
+        """Passive availability check neither transitions OPEN -> HALF_OPEN
+        nor consumes the single half-open probe slot."""
+        from api.core.network import CircuitBreaker, CircuitState
+
+        cb = CircuitBreaker(cooldown_seconds=60.0)
+        cb.state = CircuitState.OPEN
+        cb.opened_at = time.monotonic() - 61  # cooldown elapsed
+
+        assert cb.is_available() is True
+        assert cb.state == CircuitState.OPEN  # no transition performed
+        # The actual probe is still available to allow_request afterwards.
+        assert cb.allow_request() is True
+        assert cb.state == CircuitState.HALF_OPEN  # type: ignore[comparison-overlap]
+
 
 class TestRateLimiter:
     """Tests for RateLimiter class."""
@@ -249,60 +264,6 @@ class TestCircuitBreakerFunctions:
             cb = get_circuit_breaker("test")
 
             assert cb is None
-
-    def test_is_provider_available_true_when_no_breaker(self) -> None:
-        """is_provider_available returns True when no circuit breaker."""
-        from api.core.network import is_provider_available
-
-        with patch("api.core.network.get_circuit_breaker", return_value=None):
-            assert is_provider_available("test") is True
-
-    def test_is_provider_available_checks_breaker(self) -> None:
-        """is_provider_available checks circuit breaker state."""
-        from api.core.network import CircuitBreaker, CircuitState, is_provider_available
-
-        cb = CircuitBreaker()
-        cb.state = CircuitState.OPEN
-        cb.opened_at = time.monotonic()
-        cb.cooldown_seconds = 300
-
-        with patch("api.core.network.get_circuit_breaker", return_value=cb):
-            assert is_provider_available("test") is False
-
-    def test_is_provider_available_does_not_mutate_state(self) -> None:
-        """Passive availability check neither transitions OPEN -> HALF_OPEN
-        nor consumes the single half-open probe slot."""
-        from api.core.network import CircuitBreaker, CircuitState, is_provider_available
-
-        cb = CircuitBreaker(cooldown_seconds=60.0)
-        cb.state = CircuitState.OPEN
-        cb.opened_at = time.monotonic() - 61  # cooldown elapsed
-
-        with patch("api.core.network.get_circuit_breaker", return_value=cb):
-            assert is_provider_available("test") is True
-            assert cb.state == CircuitState.OPEN  # no transition performed
-        # The actual probe is still available to allow_request afterwards.
-        assert cb.allow_request() is True
-        assert cb.state == CircuitState.HALF_OPEN  # type: ignore[comparison-overlap]
-
-    def test_get_provider_cooldown_returns_zero_when_available(self) -> None:
-        """get_provider_cooldown returns 0 when provider available."""
-        from api.core.network import get_provider_cooldown
-
-        with patch("api.core.network.get_circuit_breaker", return_value=None):
-            assert get_provider_cooldown("test") == 0.0
-
-    def test_get_provider_cooldown_returns_remaining_time(self) -> None:
-        """get_provider_cooldown returns remaining cooldown time."""
-        from api.core.network import CircuitBreaker, CircuitState, get_provider_cooldown
-
-        cb = CircuitBreaker(cooldown_seconds=300)
-        cb.state = CircuitState.OPEN
-        cb.opened_at = time.monotonic()
-
-        with patch("api.core.network.get_circuit_breaker", return_value=cb):
-            remaining = get_provider_cooldown("test")
-            assert 299 < remaining <= 300
 
 
 class TestRateLimiterFunctions:

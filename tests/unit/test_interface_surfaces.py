@@ -184,7 +184,6 @@ def test_main_data_package_surface() -> None:
             "build_index_row",
             "update_index_csv",
             "read_index_csv",
-            "get_processed_work_ids",
             "compute_work_id",
             "compute_work_dir",
             "check_work_status",

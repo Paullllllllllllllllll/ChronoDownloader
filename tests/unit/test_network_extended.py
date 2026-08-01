@@ -10,9 +10,7 @@ from api.core.network import (
     CircuitState,
     build_session,
     get_circuit_breaker,
-    get_provider_cooldown,
     get_provider_for_url,
-    is_provider_available,
     make_json_request,
     make_request,
 )
@@ -142,70 +140,6 @@ class TestGetCircuitBreaker:
     )
     def test_returns_none_when_disabled(self, mock_cfg: MagicMock) -> None:
         assert get_circuit_breaker("ia") is None
-
-
-# ============================================================================
-# is_provider_available
-# ============================================================================
-
-
-class TestIsProviderAvailable:
-    """Tests for provider availability check."""
-
-    def setup_method(self) -> None:
-        _CIRCUIT_BREAKERS.clear()
-
-    def teardown_method(self) -> None:
-        _CIRCUIT_BREAKERS.clear()
-
-    def test_none_provider_always_available(self) -> None:
-        assert is_provider_available(None) is True
-
-    @patch(
-        "api.core.network.get_network_config",
-        return_value={
-            "circuit_breaker_enabled": True,
-            "circuit_breaker_threshold": 1,
-            "circuit_breaker_cooldown_s": 300,
-        },
-    )
-    def test_unavailable_when_circuit_open(self, mock_cfg: MagicMock) -> None:
-        cb = get_circuit_breaker("ia")
-        assert cb is not None
-        cb.record_failure("ia")
-        assert is_provider_available("ia") is False
-
-
-# ============================================================================
-# get_provider_cooldown
-# ============================================================================
-
-
-class TestGetProviderCooldown:
-    """Tests for provider cooldown time."""
-
-    def setup_method(self) -> None:
-        _CIRCUIT_BREAKERS.clear()
-
-    def teardown_method(self) -> None:
-        _CIRCUIT_BREAKERS.clear()
-
-    def test_zero_for_none_provider(self) -> None:
-        assert get_provider_cooldown(None) == 0.0
-
-    @patch(
-        "api.core.network.get_network_config",
-        return_value={
-            "circuit_breaker_enabled": True,
-            "circuit_breaker_threshold": 1,
-            "circuit_breaker_cooldown_s": 300,
-        },
-    )
-    def test_positive_when_open(self, mock_cfg: MagicMock) -> None:
-        cb = get_circuit_breaker("ia")
-        assert cb is not None
-        cb.record_failure("ia")
-        assert get_provider_cooldown("ia") > 0
 
 
 # ============================================================================

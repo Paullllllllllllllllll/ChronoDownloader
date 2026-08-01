@@ -10,12 +10,7 @@ Three cohesive concerns previously peer-level under ``main/``:
 
 from __future__ import annotations
 
-from .index import (
-    build_index_row,
-    get_processed_work_ids,
-    read_index_csv,
-    update_index_csv,
-)
+from .index import build_index_row, read_index_csv, update_index_csv
 from .work import (
     check_work_status,
     compute_work_dir,
@@ -63,7 +58,6 @@ __all__ = [
     "build_index_row",
     "update_index_csv",
     "read_index_csv",
-    "get_processed_work_ids",
     # work
     "compute_work_id",
     "compute_work_dir",

@@ -1,7 +1,8 @@
 """CLI entry point.
 
-Wires :func:`run_with_mode_detection` to the parser, interactive handler,
-and CLI dispatcher, and enforces the CLI agent contract: deterministic exit
+Runs :func:`run_with_mode_detection` over the CLI parser, dispatches to the
+interactive workflow or the CLI handler accordingly, and enforces the CLI
+agent contract: deterministic exit
 codes (0 success, 1 failures/partial, 2 usage/config error, 130 interrupt),
 an optional one-line ``--json`` summary, and a non-TTY guard that refuses to
 block on prompts when stdin is not a terminal.
@@ -111,8 +112,6 @@ def main() -> None:
             sys.argv.insert(1, "--cli")
 
         config, interactive_mode, args = run_with_mode_detection(
-            interactive_handler=run_interactive,
-            cli_handler=run_cli,
             parser_factory=create_cli_parser,
             script_name="downloader",
         )

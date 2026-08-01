@@ -198,38 +198,6 @@ def get_circuit_breaker(provider_key: str | None) -> CircuitBreaker | None:
     return cb
 
 
-def is_provider_available(provider_key: str | None) -> bool:
-    """Check if a provider is currently available (circuit not open).
-
-    Args:
-        provider_key: Provider identifier
-
-    Returns:
-        True if provider can be used, False if circuit is open
-    """
-    cb = get_circuit_breaker(provider_key)
-    if cb is None:
-        return True
-    # Passive read: must not perform the OPEN -> HALF_OPEN transition or
-    # consume the single half-open probe slot.
-    return cb.is_available()
-
-
-def get_provider_cooldown(provider_key: str | None) -> float:
-    """Get remaining cooldown time for a provider.
-
-    Args:
-        provider_key: Provider identifier
-
-    Returns:
-        Seconds until provider is available, or 0 if available now
-    """
-    cb = get_circuit_breaker(provider_key)
-    if cb is None:
-        return 0.0
-    return cb.time_until_retry()
-
-
 # Global session (lazy-initialized)
 _SESSION: requests.Session | None = None
 
@@ -256,7 +224,7 @@ PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
         "iiif.deutsche-digitale-bibliothek.de",
     ),
     "polona": ("polona.pl",),
-    "bne": ("datos.bne.es", "iiif.bne.es"),
+    "bne": ("datos.bne.es", "bnedigital.bne.es", "bdh.bne.es"),
     "dpla": ("api.dp.la",),
     "internet_archive": ("archive.org", "archivelab.org", "iiif.archivelab.org"),
     "google_books": (

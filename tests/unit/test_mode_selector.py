@@ -9,15 +9,11 @@ from unittest.mock import patch
 
 import pytest
 
-from main.ui.mode import (
-    _detect_mode_and_parse_args,
-    get_general_config,
-    run_with_mode_detection,
-)
+from main.ui.mode import get_general_config, run_with_mode_detection
 
 
-class TestDetectModeAndParseArgs:
-    """Tests for _detect_mode_and_parse_args function."""
+class TestRunWithModeDetection:
+    """Tests for run_with_mode_detection function."""
 
     def test_interactive_mode_from_config(self, sample_config: dict[str, Any]) -> None:
         """Test interactive mode detection from config."""
@@ -29,7 +25,7 @@ class TestDetectModeAndParseArgs:
             return parser
 
         with patch("main.ui.mode.get_config", return_value=sample_config):
-            config, interactive, args = _detect_mode_and_parse_args(
+            config, interactive, args = run_with_mode_detection(
                 parser_factory, "test_script"
             )
 
@@ -50,7 +46,7 @@ class TestDetectModeAndParseArgs:
             patch("main.ui.mode.get_config", return_value=sample_config),
             patch("sys.argv", ["script.py", "test.csv"]),
         ):
-            config, interactive, args = _detect_mode_and_parse_args(
+            config, interactive, args = run_with_mode_detection(
                 parser_factory, "test_script"
             )
 
@@ -72,7 +68,7 @@ class TestDetectModeAndParseArgs:
             patch("main.ui.mode.get_config", return_value=sample_config),
             patch("sys.argv", ["script.py", "--cli", "test.csv"]),
         ):
-            config, interactive, args = _detect_mode_and_parse_args(
+            config, interactive, args = run_with_mode_detection(
                 parser_factory, "test_script"
             )
 
@@ -93,7 +89,7 @@ class TestDetectModeAndParseArgs:
             patch("main.ui.mode.get_config", return_value=sample_config),
             patch("sys.argv", ["script.py"]),
         ):
-            _detect_mode_and_parse_args(
+            run_with_mode_detection(
                 parser_factory, "test_script", config_path=config_path
             )
 
@@ -109,7 +105,7 @@ class TestDetectModeAndParseArgs:
             patch("main.ui.mode.get_config", side_effect=Exception("Config error")),
             pytest.raises(SystemExit),
         ):
-            _detect_mode_and_parse_args(parser_factory, "test_script")
+            run_with_mode_detection(parser_factory, "test_script")
 
     def test_default_interactive_when_missing(
         self, sample_config: dict[str, Any]
@@ -121,39 +117,11 @@ class TestDetectModeAndParseArgs:
             return argparse.ArgumentParser()
 
         with patch("main.ui.mode.get_config", return_value=sample_config):
-            config, interactive, args = _detect_mode_and_parse_args(
+            config, interactive, args = run_with_mode_detection(
                 parser_factory, "test_script"
             )
 
             assert interactive is True
-
-
-class TestRunWithModeDetection:
-    """Tests for run_with_mode_detection function."""
-
-    def test_returns_mode_detection_results(
-        self, sample_config: dict[str, Any]
-    ) -> None:
-        """Test that function returns mode detection results."""
-        sample_config["general"]["interactive_mode"] = True
-
-        def parser_factory() -> argparse.ArgumentParser:
-            return argparse.ArgumentParser()
-
-        def interactive_handler() -> None:
-            pass
-
-        def cli_handler(args: Any, config: Any) -> None:
-            pass
-
-        with patch("main.ui.mode.get_config", return_value=sample_config):
-            config, interactive, args = run_with_mode_detection(
-                interactive_handler, cli_handler, parser_factory, "test_script"
-            )
-
-            assert config == sample_config
-            assert interactive is True
-            assert args is None
 
 
 class TestGetGeneralConfig:

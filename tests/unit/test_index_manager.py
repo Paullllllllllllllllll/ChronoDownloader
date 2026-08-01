@@ -8,12 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from main.data.index import (
-    build_index_row,
-    get_processed_work_ids,
-    read_index_csv,
-    update_index_csv,
-)
+from main.data.index import build_index_row, read_index_csv, update_index_csv
 
 
 class TestUpdateIndexCsv:
@@ -367,54 +362,3 @@ class TestUpsertKeyedOnEntryId:
         assert pd.isna(row["selected_provider_key"])
         assert pd.isna(row["item_url"])
         assert row["status"] == "no_match"
-
-
-class TestGetProcessedWorkIds:
-    """Tests for get_processed_work_ids function."""
-
-    def test_returns_work_ids_from_csv(self, temp_output_dir: str) -> None:
-        """Test returns set of work IDs from index.csv."""
-        rows = [
-            {"work_id": "abc123", "title": "Title 1"},
-            {"work_id": "def456", "title": "Title 2"},
-            {"work_id": "ghi789", "title": "Title 3"},
-        ]
-
-        for row in rows:
-            update_index_csv(temp_output_dir, row)
-
-        work_ids = get_processed_work_ids(temp_output_dir)
-
-        assert work_ids == {"abc123", "def456", "ghi789"}
-
-    def test_returns_empty_set_for_missing_csv(self, temp_output_dir: str) -> None:
-        """Test returns empty set when index.csv doesn't exist."""
-        work_ids = get_processed_work_ids(temp_output_dir)
-
-        assert work_ids == set()
-
-    def test_handles_missing_work_id_column(self, temp_output_dir: str) -> None:
-        """Test handles CSV without work_id column."""
-        index_path = os.path.join(temp_output_dir, "index.csv")
-        with open(index_path, "w", encoding="utf-8") as f:
-            f.write("title,creator\n")
-            f.write("Test,Author\n")
-
-        work_ids = get_processed_work_ids(temp_output_dir)
-
-        assert work_ids == set()
-
-    def test_skips_na_values(self, temp_output_dir: str) -> None:
-        """Test skips NA/None values in work_id column."""
-        index_path = os.path.join(temp_output_dir, "index.csv")
-        df = pd.DataFrame(
-            {
-                "work_id": ["abc123", pd.NA, "def456", None],
-                "title": ["T1", "T2", "T3", "T4"],
-            }
-        )
-        df.to_csv(index_path, index=False)
-
-        work_ids = get_processed_work_ids(temp_output_dir)
-
-        assert work_ids == {"abc123", "def456"}

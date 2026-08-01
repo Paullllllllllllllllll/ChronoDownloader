@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from api.matching import (
-    combined_match_score,
     creator_score,
     normalize_text,
-    parse_year,
     simple_ratio,
     strip_accents,
     title_score,
@@ -252,123 +250,6 @@ class TestCreatorScore:
     def test_empty_creators_list(self) -> None:
         """Test with empty creators list."""
         assert creator_score("John Smith", []) == 0
-
-
-class TestParseYear:
-    """Tests for parse_year function."""
-
-    def test_simple_year(self) -> None:
-        """Test parsing simple year."""
-        assert parse_year("1850") == 1850
-
-    def test_year_in_text(self) -> None:
-        """Test parsing year from text."""
-        assert parse_year("Published in 1850") == 1850
-
-    def test_year_with_range(self) -> None:
-        """Test parsing first year from range."""
-        assert parse_year("1850-1860") == 1850
-
-    def test_none_value(self) -> None:
-        """Test with None value."""
-        assert parse_year(None) is None
-
-    def test_empty_string(self) -> None:
-        """Test with empty string."""
-        assert parse_year("") is None
-
-    def test_no_year(self) -> None:
-        """Test with no year in text."""
-        assert parse_year("no year here") is None
-
-    def test_short_number(self) -> None:
-        """Test that short numbers are not parsed as years."""
-        assert parse_year("123") is None
-
-    def test_multiple_years(self) -> None:
-        """Test that first year is returned."""
-        assert parse_year("From 1850 to 1900") == 1850
-
-
-class TestCombinedMatchScore:
-    """Tests for combined_match_score function."""
-
-    def test_title_only(self) -> None:
-        """Test scoring with title only."""
-        score = combined_match_score(
-            query_title="The Art of Cooking", item_title="The Art of Cooking"
-        )
-        # With default creator_weight=0.2 and no creator, title contributes 80%
-        # 100 * 0.8 + 0 * 0.2 = 80
-        assert score == 80.0
-
-    def test_with_creator(self) -> None:
-        """Test scoring with title and creator."""
-        score = combined_match_score(
-            query_title="The Art of Cooking",
-            item_title="The Art of Cooking",
-            query_creator="John Smith",
-            creators=["John Smith"],
-        )
-        assert score == 100
-
-    def test_creator_weight_default(self) -> None:
-        """Test default creator weight."""
-        # Perfect title, no creator match
-        score = combined_match_score(
-            query_title="The Art of Cooking",
-            item_title="The Art of Cooking",
-            query_creator="John Smith",
-            creators=["Jane Doe"],
-            creator_weight=0.2,
-        )
-        # Title contributes 80%, creator contributes 20%
-        # 100 * 0.8 + 0 * 0.2 = 80
-        assert 75 <= score <= 85
-
-    def test_creator_weight_zero(self) -> None:
-        """Test with zero creator weight."""
-        score = combined_match_score(
-            query_title="The Art of Cooking",
-            item_title="The Art of Cooking",
-            query_creator="John Smith",
-            creators=["Jane Doe"],
-            creator_weight=0.0,
-        )
-        # Only title matters
-        assert score == 100
-
-    def test_creator_weight_one(self) -> None:
-        """Test with full creator weight."""
-        score = combined_match_score(
-            query_title="Different Title",
-            item_title="The Art of Cooking",
-            query_creator="John Smith",
-            creators=["John Smith"],
-            creator_weight=1.0,
-        )
-        # Only creator matters
-        assert score == 100
-
-    def test_creator_weight_clamped(self) -> None:
-        """Test that creator weight is clamped to [0, 1]."""
-        score1 = combined_match_score(
-            query_title="Title", item_title="Title", creator_weight=-0.5
-        )
-        score2 = combined_match_score(
-            query_title="Title", item_title="Title", creator_weight=1.5
-        )
-        # Both should still compute valid scores
-        assert 0 <= score1 <= 100
-        assert 0 <= score2 <= 100
-
-    def test_simple_method(self) -> None:
-        """Test with simple matching method."""
-        score = combined_match_score(
-            query_title="hello world", item_title="hello world", method="simple"
-        )
-        # With default creator_weight=0.2 and no creator: 100 * 0.8 = 80
-        assert score == 80.0
 
 
 class TestInvertedCreatorNames:

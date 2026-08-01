@@ -1,7 +1,8 @@
 """Fuzzy matching utilities for ChronoDownloader.
 
-Provides text normalization, similarity scoring, and combined matching
-logic for selecting the best provider candidates based on title and creator.
+Provides text normalization and similarity scoring for titles and creators.
+Candidate ranking itself lives in :mod:`main.orchestration.selection`, which
+combines these primitives with provider- and metadata-specific boosts.
 """
 
 from __future__ import annotations
@@ -169,54 +170,3 @@ def creator_score(query_creator: str | None, creators: Iterable[str] | None) -> 
         best = max(best, token_set_ratio(query_creator, c))
 
     return best
-
-
-def parse_year(text: str | None) -> int | None:
-    """Extract a 4-digit year from text.
-
-    Args:
-        text: Text potentially containing a year
-
-    Returns:
-        Extracted year as integer, or None if not found
-    """
-    if not text:
-        return None
-
-    m = re.search(r"\b(\d{4})\b", str(text))
-    if not m:
-        return None
-
-    try:
-        return int(m.group(1))
-    except Exception:
-        return None
-
-
-def combined_match_score(
-    query_title: str,
-    item_title: str,
-    query_creator: str | None = None,
-    creators: Iterable[str] | None = None,
-    creator_weight: float = 0.2,
-    method: str = "token_set",
-) -> float:
-    """Compute a combined score 0..100 for (title, creator) matching.
-
-    Args:
-        query_title: Title from user query
-        item_title: Title from provider result
-        query_creator: Creator from user query (optional)
-        creators: List of creators from provider result (optional)
-        creator_weight: Weight for creator score (0.0 to 1.0, default 0.2)
-        method: Matching method - "simple" or "token_set"
-
-    Returns:
-        Combined weighted score from 0 to 100
-    """
-    ts = float(title_score(query_title, item_title, method=method))
-    cs = float(creator_score(query_creator, creators)) if query_creator else 0.0
-
-    creator_weight = max(0.0, min(1.0, float(creator_weight or 0.0)))
-
-    return ts * (1.0 - creator_weight) + cs * creator_weight

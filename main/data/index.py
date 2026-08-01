@@ -258,25 +258,9 @@ def read_index_csv(base_output_dir: str) -> pd.DataFrame | None:
         return None
 
 
-def get_processed_work_ids(base_output_dir: str) -> set[str]:
-    """Get set of already-processed work IDs from index.csv.
-
-    Args:
-        base_output_dir: Base output directory containing index.csv
-
-    Returns:
-        Set of work_id strings
-    """
-    df = read_index_csv(base_output_dir)
-    if df is None or "work_id" not in df.columns:
-        return set()
-    return set(df["work_id"].dropna().astype(str))
-
-
 __all__ = [
     "INDEX_COLUMNS",
     "update_index_csv",
     "build_index_row",
     "read_index_csv",
-    "get_processed_work_ids",
 ]
