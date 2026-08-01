@@ -80,11 +80,11 @@ class TestBuildManifestUrl:
         urls = build_manifest_url("polona", "abc123def")
         assert urls == ["https://polona.pl/iiif/item/abc123def/manifest.json"]
 
-    def test_bne_returns_multiple(self) -> None:
-        urls = build_manifest_url("bne", "bne_id_123")
-        assert len(urls) == 2
-        assert "https://iiif.bne.es/bne_id_123/manifest" in urls
-        assert "https://iiif.bne.es/bne_id_123/manifest.json" in urls
+    def test_bne_is_native_download_only(self) -> None:
+        """BNE Digital publishes no IIIF manifests, and the iiif.bne.es host
+        the connector once addressed has no DNS record at all."""
+        with pytest.raises(ValueError):
+            build_manifest_url("bne", "a984ca89-2da2-4d68-b979-a996cf9b5eac")
 
     def test_europeana(self) -> None:
         urls = build_manifest_url(
@@ -199,9 +199,17 @@ class TestResolveIdentifier:
         assert results == []
 
     def test_explicit_provider_with_multiple_templates(self) -> None:
-        results = resolve_identifier("item_xyz", provider_key="bne")
+        results = resolve_identifier("item_xyz", provider_key="internet_archive")
         assert len(results) == 1
         assert len(results[0].manifest_urls) == 2
+
+    def test_explicit_native_download_provider(self) -> None:
+        results = resolve_identifier(
+            "a984ca89-2da2-4d68-b979-a996cf9b5eac", provider_key="bne"
+        )
+        assert len(results) == 1
+        assert results[0].use_native is True
+        assert results[0].manifest_urls == []
 
 
 # ============================================================================

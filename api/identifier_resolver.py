@@ -38,10 +38,6 @@ MANIFEST_TEMPLATES: dict[str, str | list[str]] = {
     "british_library": "https://api.bl.uk/metadata/iiif/ark:/81055/{id}/manifest.json",
     "hathitrust": "https://babel.hathitrust.org/cgi/imgsrv/manifest/{id}",
     "polona": "https://polona.pl/iiif/item/{id}/manifest.json",
-    "bne": [
-        "https://iiif.bne.es/{id}/manifest",
-        "https://iiif.bne.es/{id}/manifest.json",
-    ],
     "europeana": "https://iiif.europeana.eu/presentation/{id}/manifest",
 }
 
@@ -55,6 +51,9 @@ NATIVE_DOWNLOAD_PROVIDERS: frozenset[str] = frozenset(
         "wellcome",  # uses IIIF Image API directly; no presentation manifest from ID
         "dpla",  # aggregator -- IDs don't map to a single manifest template
         "ddb",  # aggregator -- IDs don't map to a single manifest template
+        # BNE Digital publishes no IIIF manifests and the former iiif.bne.es
+        # host no longer resolves; downloads go through PDF page ranges.
+        "bne",
     }
 )
 

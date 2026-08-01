@@ -1,51 +1,203 @@
-"""Connector for the Biblioteca Nacional de España (BNE) APIs."""
+"""Connector for the Biblioteca Nacional de España (BNE).
+
+Two BNE services are involved and they use *different* identifier
+namespaces, which is the whole difficulty of this connector:
+
+* ``datos.bne.es`` -- the linked-data catalogue, queried over SPARQL. Its
+  resource identifiers cover authority records (``XX...``) just as much as
+  bibliographic ones (``a...``, ``bimo...``), so an unconstrained query
+  returns persons and subjects alongside editions.
+* ``bnedigital.bne.es`` -- BNE Digital, the digitisation platform that
+  superseded the Biblioteca Digital Hispánica in 2025. Its objects are
+  addressed by UUID and delivered as PDF page ranges. The platform
+  publishes no IIIF Presentation manifests, and the host ``iiif.bne.es``
+  used by earlier revisions of this module no longer resolves at all.
+
+The bridge between the two namespaces is ``rdfs:seeAlso`` on the catalogue
+record, which points at the BNE Digital card URL carrying the UUID. The
+search query below therefore constrains results to bibliographic
+manifestations (``bne:C1003``) that actually carry such a link, and the
+download path works exclusively in the BNE Digital namespace.
+"""
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from ..core.budget import budget_exhausted
-from ..core.config import get_max_pages, prefer_pdf_over_images
-from ..core.download import save_json
+from ..core.config import get_max_pages
+from ..core.download import download_file, save_json
 from ..core.network import make_request
-from ..iiif import (
-    download_iiif_renderings,
-    download_one_from_service,
-    extract_image_service_bases,
+from ..model import (
+    SearchResult,
+    convert_to_searchresult,
+    resolve_item_field,
+    resolve_item_id,
 )
-from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 from ..query_helpers import escape_sparql_string
 
 logger = logging.getLogger(__name__)
 
 SEARCH_API_URL = "https://datos.bne.es/sparql"
-# BNE IIIF manifests have been seen with both "/manifest" and "/manifest.json"
-# endings across time. Try both patterns for robustness.
-IIIF_MANIFEST_PATTERNS = [
-    "https://iiif.bne.es/{item_id}/manifest",
-    "https://iiif.bne.es/{item_id}/manifest.json",
-]
+DIGITAL_BASE_URL = "https://bnedigital.bne.es"
+DIGITAL_CARD_URL = DIGITAL_BASE_URL + "/bd/card?id={item_id}"
+DIGITAL_PDF_URL = DIGITAL_BASE_URL + "/bd/es/pdf"
+
+# datos.bne.es ontology terms used below.
+MANIFESTATION_CLASS = "https://datos.bne.es/def/C1003"  # Manifestación (edition)
+CREATOR_PROPERTY = "https://datos.bne.es/def/P1011"  # author, as a literal name
+DATE_PROPERTY = "https://datos.bne.es/def/P3006"  # publication date
+LABEL_PROPERTY = "http://www.w3.org/2000/01/rdf-schema#label"
+SEE_ALSO_PROPERTY = "http://www.w3.org/2000/01/rdf-schema#seeAlso"
+
+# BNE Digital rejects PDF requests spanning more than 25 pages (the viewer's
+# own ``downloadPageLimit``) with HTTP 500, so whole works are fetched in
+# chunks. MAX_PDF_CHUNKS is a safety stop, not an expected limit.
+PDF_PAGE_CHUNK = 25
+MAX_PDF_CHUNKS = 400
+
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+# datos.bne.es resource ids: a letter prefix (a, bimo, XX, Mi ...) plus digits.
+_CATALOG_ID_RE = re.compile(r"^[A-Za-z]{0,4}\d[A-Za-z0-9]*$")
+
+
+def _bindings(data: Any) -> list[dict[str, Any]]:
+    """Extract the binding list from a SPARQL JSON result document."""
+
+    if not isinstance(data, dict):
+        return []
+    results = data.get("results")
+    if not isinstance(results, dict):
+        return []
+    bindings = results.get("bindings")
+    if not isinstance(bindings, list):
+        return []
+    return [b for b in bindings if isinstance(b, dict)]
+
+
+def _binding_value(binding: dict[str, Any], name: str) -> str | None:
+    """Return the string value of one SPARQL binding, if present."""
+
+    cell = binding.get(name)
+    if not isinstance(cell, dict):
+        return None
+    value = cell.get("value")
+    return str(value) if value else None
+
+
+def extract_digital_id(value: str | None) -> str | None:
+    """Return the BNE Digital object UUID contained in *value*, if any.
+
+    Accepts a bare UUID as well as any BNE Digital URL that carries one
+    (``.../bd/card?id=<uuid>``, ``.../bd/es/viewer?id=<uuid>&page=1``).
+
+    Args:
+        value: Candidate identifier or URL.
+
+    Returns:
+        The lowercase UUID, or ``None`` when *value* holds none.
+    """
+    if not value:
+        return None
+    match = _UUID_RE.search(str(value))
+    return match.group(0).lower() if match else None
+
+
+def _catalog_resource_id(value: str) -> str | None:
+    """Normalise a datos.bne.es resource URI or bare id to a bare id."""
+
+    candidate = str(value).strip()
+    if candidate.startswith("http"):
+        if "datos.bne.es" not in candidate:
+            return None
+        candidate = candidate.rstrip("/").rsplit("/", 1)[-1]
+    return candidate if _CATALOG_ID_RE.match(candidate) else None
+
+
+def _lookup_digital_url(resource_id: str) -> str | None:
+    """Follow ``rdfs:seeAlso`` from a catalogue record to its digital copy."""
+
+    query = f"""
+        SELECT ?digital WHERE {{
+            <https://datos.bne.es/resource/{resource_id}>
+                <{SEE_ALSO_PROPERTY}> ?digital .
+            FILTER(STRSTARTS(STR(?digital), '{DIGITAL_BASE_URL}/'))
+        }} LIMIT 1
+    """
+    data = make_request(SEARCH_API_URL, params={"query": query, "format": "json"})
+    for binding in _bindings(data):
+        url = _binding_value(binding, "digital")
+        if url:
+            return url
+    return None
+
+
+def _resolve_digital_id(value: str) -> str | None:
+    """Map any accepted BNE identifier onto a BNE Digital object UUID.
+
+    A UUID (or a BNE Digital URL containing one) is used directly. A
+    datos.bne.es identifier belongs to the catalogue namespace and is
+    translated by querying its ``rdfs:seeAlso`` link; authority records and
+    editions without a digital copy legitimately resolve to ``None``.
+    """
+    digital_id = extract_digital_id(value)
+    if digital_id:
+        return digital_id
+
+    resource_id = _catalog_resource_id(value)
+    if not resource_id:
+        return None
+
+    logger.info("BNE: resolving catalogue record %s to its digital copy", resource_id)
+    return extract_digital_id(_lookup_digital_url(resource_id))
+
+
+def _build_search_query(title: str, limit: int) -> str:
+    """Build the SPARQL query for digitised BNE editions matching *title*."""
+
+    t = escape_sparql_string(title)
+    return f"""
+        SELECT DISTINCT ?id ?title ?digital ?creator ?date WHERE {{
+            ?id a <{MANIFESTATION_CLASS}> .
+            ?id <{LABEL_PROPERTY}> ?title .
+            ?id <{SEE_ALSO_PROPERTY}> ?digital .
+            FILTER(CONTAINS(LCASE(?title), LCASE('{t}')))
+            FILTER(STRSTARTS(STR(?digital), '{DIGITAL_BASE_URL}/'))
+            OPTIONAL {{ ?id <{CREATOR_PROPERTY}> ?creator . }}
+            OPTIONAL {{ ?id <{DATE_PROPERTY}> ?date . }}
+        }} LIMIT {limit}
+    """
 
 
 def search_bne(
     title: str, creator: str | None = None, max_results: int = 3
 ) -> list[SearchResult]:
-    """Search the BNE SPARQL endpoint for works by title and creator."""
+    """Search the BNE linked-data catalogue for digitised editions.
 
-    t = escape_sparql_string(title)
-    # Note: creator filter omitted due to heterogeneous properties in BNE; could
-    # be extended.
-    query = f"""
-        SELECT ?id ?title ?creator WHERE {{
-            ?id <http://www.w3.org/2000/01/rdf-schema#label> ?title .
-            FILTER(CONTAINS(LCASE(?title), LCASE('{t}')))
-            OPTIONAL {{ ?id <http://dbpedia.org/ontology/author> ?creator . }}
-        }} LIMIT {max_results}
+    Results are restricted to bibliographic manifestations that link to a
+    BNE Digital copy; the identifier carried in each result is the BNE
+    Digital UUID, not the catalogue identifier, because only the former is
+    downloadable. The *creator* argument is not pushed into the query --
+    BNE records name authors both as literals and as authority links -- and
+    is left to the pipeline's fuzzy matching stage.
+
+    Args:
+        title: Title substring to search for.
+        creator: Accepted for interface parity; not used in the query.
+        max_results: Maximum number of distinct editions to return.
+
+    Returns:
+        List of SearchResult objects, possibly empty.
     """
-
+    # Optional clauses can repeat a record across bindings, so over-fetch and
+    # de-duplicate rather than losing results to the LIMIT.
+    limit = max(max_results, 1) * 4
     params = {
-        "query": query,
+        "query": _build_search_query(title, limit),
         "format": "json",
     }
 
@@ -54,115 +206,129 @@ def search_bne(
 
     results: list[SearchResult] = []
     if not isinstance(data, dict):
+        logger.warning(
+            "BNE: no usable SPARQL response for %r. datos.bne.es sits behind a "
+            "bot filter that rejects some non-browser HTTP clients.",
+            title,
+        )
         return results
-    if (
-        data.get("results")
-        and isinstance(data["results"], dict)
-        and data["results"].get("bindings")
-    ):
-        for b in data["results"]["bindings"]:
-            item_id = b.get("id", {}).get("value")
-            item_title = b.get("title", {}).get("value")
-            item_creator = b.get("creator", {}).get("value")
-            if item_id:
-                raw = {
-                    "title": item_title or "N/A",
-                    "creator": item_creator or None,
-                    "id": item_id,
-                    "item_url": item_id
-                    if item_id.startswith("http")
-                    else f"https://datos.bne.es/resource/{item_id}",
-                }
-                results.append(convert_to_searchresult("BNE", raw))
+
+    seen: set[str] = set()
+    for binding in _bindings(data):
+        digital_url = _binding_value(binding, "digital")
+        digital_id = extract_digital_id(digital_url)
+        if not digital_id or digital_id in seen:
+            continue
+        seen.add(digital_id)
+
+        raw = {
+            "title": _binding_value(binding, "title") or "N/A",
+            "creator": _binding_value(binding, "creator"),
+            "date": _binding_value(binding, "date"),
+            "id": digital_id,
+            "catalog_id": _binding_value(binding, "id"),
+            "item_url": digital_url,
+        }
+        results.append(convert_to_searchresult("BNE", raw))
+        if len(results) >= max_results:
+            break
 
     return results
+
+
+def _download_pdf_pages(digital_id: str, output_folder: str, max_pages: int) -> int:
+    """Download a BNE Digital object as consecutive PDF page ranges.
+
+    Args:
+        digital_id: BNE Digital object UUID.
+        output_folder: Target directory.
+        max_pages: Page ceiling from config; 0 means "the whole work".
+
+    Returns:
+        Number of PDF chunks successfully downloaded.
+    """
+    downloaded = 0
+    start = 1
+
+    for _ in range(MAX_PDF_CHUNKS):
+        if max_pages > 0 and start > max_pages:
+            break
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping BNE downloads after "
+                "%d PDF chunk(s) for %s",
+                downloaded,
+                digital_id,
+            )
+            break
+
+        end = start + PDF_PAGE_CHUNK - 1
+        if max_pages > 0:
+            end = min(end, max_pages)
+        page_range = str(start) if start == end else f"{start}-{end}"
+
+        url = f"{DIGITAL_PDF_URL}?id={digital_id}&page={page_range}"
+        filename = f"bne_{digital_id}_p{start:05d}_{end:05d}.pdf"
+        logger.info("BNE: downloading pages %s of %s", page_range, digital_id)
+        if not download_file(url, output_folder, filename):
+            # BNE Digital answers with HTTP 500 once a range runs past the
+            # last page, so a failed chunk marks the end of the work.
+            logger.info(
+                "BNE: no PDF for pages %s of %s; treating as end of work",
+                page_range,
+                digital_id,
+            )
+            break
+
+        downloaded += 1
+        start = end + 1
+
+    return downloaded
 
 
 def download_bne_work(
     item_data: SearchResult | dict[str, Any], output_folder: str
 ) -> bool:
-    """Download IIIF manifest and page images for a BNE item."""
+    """Download a BNE Digital object as PDF page ranges.
 
-    item_id = resolve_item_id(item_data)
+    Args:
+        item_data: SearchResult or raw dict identifying the item.
+        output_folder: Target directory.
+
+    Returns:
+        ``True`` when at least one PDF chunk was written.
+    """
+    item_id = resolve_item_id(item_data, "digital_id", "id", "identifier")
     if not item_id:
         logger.warning("No BNE item id provided.")
         return False
 
-    if item_id.startswith("http"):
-        item_identifier = item_id.rstrip("/").split("/")[-1]
-    else:
-        item_identifier = item_id
-
-    manifest = None
-    for pattern in IIIF_MANIFEST_PATTERNS:
-        candidate = pattern.format(item_id=item_identifier)
-        logger.info("Fetching BNE IIIF manifest: %s", candidate)
-        manifest = make_request(candidate)
-        if isinstance(manifest, dict):
-            break
-
-    if not isinstance(manifest, dict):
+    digital_id = _resolve_digital_id(item_id)
+    if not digital_id:
+        logger.warning(
+            "BNE: cannot map identifier %r onto a BNE Digital object. Downloads "
+            "need the bnedigital.bne.es UUID, or a datos.bne.es edition record "
+            "that links to one via rdfs:seeAlso.",
+            item_id,
+        )
         return False
 
-    # Save manifest
-    save_json(manifest, output_folder, f"bne_{item_identifier}_manifest")
-
-    # Prefer manifest-level PDF/EPUB renderings when available
-    renders = 0
-    try:
-        renders = download_iiif_renderings(manifest, output_folder)
-        if renders > 0 and prefer_pdf_over_images():
-            logger.info(
-                "BNE: downloaded %d rendering(s); skipping image downloads per config.",
-                renders,
-            )
-            return True
-    except Exception:
-        logger.exception(
-            "BNE: error while downloading manifest renderings for %s", item_identifier
-        )
-
-    # Extract IIIF Image API service bases from v2 or v3
-    service_bases = extract_image_service_bases(manifest)
-
-    if not service_bases:
-        logger.info(
-            "No IIIF image services found in BNE manifest for %s", item_identifier
-        )
-        return renders > 0
-
-    # Use shared helper for per-canvas downloads
-
-    max_pages = get_max_pages("bne")
-    total = len(service_bases)
-    to_download = (
-        service_bases[:max_pages] if max_pages and max_pages > 0 else service_bases
+    save_json(
+        {
+            "digital_id": digital_id,
+            "item_url": DIGITAL_CARD_URL.format(item_id=digital_id),
+            "title": resolve_item_field(item_data, "title"),
+            "catalog_id": resolve_item_field(item_data, "catalog_id"),
+        },
+        output_folder,
+        f"bne_{digital_id}_metadata",
     )
-    logger.info(
-        "BNE: downloading %d/%d page images for %s",
-        len(to_download),
-        total,
-        item_identifier,
-    )
-    ok_any = False
-    for idx, svc in enumerate(to_download, start=1):
-        if budget_exhausted():
-            logger.warning(
-                "Download budget exhausted; stopping BNE downloads at "
-                "%d/%d pages for %s",
-                idx - 1,
-                len(to_download),
-                item_identifier,
-            )
-            break
-        try:
-            fname = f"bne_{item_identifier}_p{idx:05d}.jpg"
-            if download_one_from_service(svc, output_folder, fname):
-                ok_any = True
-            else:
-                logger.warning("Failed to download BNE image from %s", svc)
-        except Exception:
-            logger.exception(
-                "Error downloading BNE image for %s from %s", item_identifier, svc
-            )
-    return ok_any or renders > 0
+
+    max_pages = get_max_pages("bne") or 0
+    chunks = _download_pdf_pages(digital_id, output_folder, max_pages)
+    if not chunks:
+        logger.warning("BNE: no PDF pages downloaded for %s", digital_id)
+        return False
+
+    logger.info("BNE: downloaded %d PDF chunk(s) for %s", chunks, digital_id)
+    return True

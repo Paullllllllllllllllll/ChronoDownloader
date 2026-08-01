@@ -657,26 +657,20 @@ class TestDplaProvider:
 class TestBudgetGuards:
     """Regression tests for missing download-budget guards on IIIF page loops."""
 
-    def test_bne_image_loop_stops_on_exhausted_budget(
-        self, temp_output_dir: str
-    ) -> None:
-        """The BNE page-image loop must respect the global download budget."""
-        manifest = {"@id": "m"}
+    def test_bne_pdf_loop_stops_on_exhausted_budget(self, temp_output_dir: str) -> None:
+        """The BNE PDF page-range loop must respect the global download
+        budget."""
         with (
-            patch("api.providers.bne.make_request", return_value=manifest),
             patch("api.providers.bne.save_json", return_value=None),
-            patch("api.providers.bne.download_iiif_renderings", return_value=0),
-            patch(
-                "api.providers.bne.extract_image_service_bases",
-                return_value=["https://svc/1", "https://svc/2"],
-            ),
             patch("api.providers.bne.get_max_pages", return_value=0),
             patch("api.providers.bne.budget_exhausted", return_value=True),
-            patch("api.providers.bne.download_one_from_service") as mock_dl,
+            patch("api.providers.bne.download_file") as mock_dl,
         ):
             from api.providers.bne import download_bne_work
 
-            result = download_bne_work({"id": "item1"}, temp_output_dir)
+            result = download_bne_work(
+                {"id": "a984ca89-2da2-4d68-b979-a996cf9b5eac"}, temp_output_dir
+            )
 
             assert result is False
             mock_dl.assert_not_called()
