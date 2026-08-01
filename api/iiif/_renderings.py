@@ -19,6 +19,34 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["download_iiif_renderings"]
 
+# Upper bound on rendering downloads attempted for one manifest, so a manifest
+# advertising hundreds of dead renderings cannot turn a limit of one file into
+# hundreds of requests.
+_MAX_RENDERING_ATTEMPTS = 10
+
+
+def _is_whitelisted(url: str, fmt: str, whitelist: list[str]) -> bool:
+    """Decide whether a rendering passes the configured MIME whitelist.
+
+    The URL suffix is only a fallback for a rendering that declares no MIME
+    type: applying it unconditionally let a manifest bypass the whitelist
+    entirely, so narrowing the list to EPUB still downloaded every ``.pdf``
+    rendering. ``fmt`` may also hold a IIIF v3 resource ``type`` ("Text",
+    "Dataset"), which carries no slash and settles nothing, so it keeps the
+    suffix fallback.
+
+    Args:
+        url: Rendering URL
+        fmt: Declared format/type, lowercased (may be empty)
+        whitelist: Lowercased allowed MIME fragments
+
+    Returns:
+        True if the rendering may be downloaded
+    """
+    if "/" in fmt:
+        return any(w in fmt for w in whitelist)
+    return any(url.lower().endswith(ext) for ext in (".pdf", ".epub"))
+
 
 def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     """Download files referenced in IIIF manifest-level 'rendering' entries.
@@ -74,22 +102,22 @@ def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
         fmt = (it.get("format") or it.get("type") or "").lower()
         if not url or not isinstance(url, str):
             continue
-        if (
-            whitelist
-            and all(w not in fmt for w in whitelist)
-            and not any(url.lower().endswith(ext) for ext in (".pdf", ".epub"))
-        ):
+        if whitelist and not _is_whitelisted(url, fmt, whitelist):
             continue
         if url in seen:
             continue
         seen.add(url)
         selected.append({"url": url, "format": fmt, "label": it.get("label")})
-        if len(selected) >= limit:
-            break
 
+    # The limit counts files obtained, not attempts made. Truncating the
+    # candidate list first meant that when the chosen renderings were dead the
+    # working ones behind them were never tried, and the caller fell back to
+    # downloading every page image instead of the one available PDF. The list
+    # is manifest-supplied, so cap the attempts as well.
     count = 0
-    for idx, r in enumerate(selected, start=1):
-        url = r["url"]
-        if download_file(url, folder_path, f"rendering_{idx:02d}"):
+    for r in selected[:_MAX_RENDERING_ATTEMPTS]:
+        if count >= limit:
+            break
+        if download_file(r["url"], folder_path, f"rendering_{count + 1:02d}"):
             count += 1
     return count

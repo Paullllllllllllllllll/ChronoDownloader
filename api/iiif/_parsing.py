@@ -265,9 +265,13 @@ def image_url_candidates(
                         continue
 
             try:
+                # maxWidth is a ceiling, not a capability: the Image API says
+                # clients must not expect a request wider than it to be
+                # supported. Raising max_w to it built a URL the server is
+                # entitled to reject; it can only clamp.
                 mw = int(info.get("maxWidth") or 0)
-                if mw and mw > max_w:
-                    max_w = mw
+                if mw:
+                    max_w = min(max_w, mw) if max_w else mw
             except Exception:
                 pass
 

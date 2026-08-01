@@ -12,6 +12,7 @@ from api.iiif import (
     image_url_candidates,
 )
 from api.iiif._parsing import _INFO_JSON_CACHE, _fetch_info_json
+from api.iiif._renderings import _MAX_RENDERING_ATTEMPTS, download_iiif_renderings
 
 # ============================================================================
 # extract_image_service_bases – IIIF v2
@@ -503,6 +504,20 @@ class TestImageUrlCandidates:
         candidates = image_url_candidates("https://example.org/iiif/img1", info=info)
         assert "https://example.org/iiif/img1/full/3000,/0/default.jpg" in candidates
 
+    def test_max_width_caps_the_advertised_sizes(self) -> None:
+        """maxWidth is a ceiling, not a capability.
+
+        The Image API says clients must not expect a request wider than
+        maxWidth to be supported, so a server advertising sizes up to 4000
+        with maxWidth 1000 must be asked for 1000, not 4000.
+        """
+        info = {"sizes": [{"width": 4000}], "maxWidth": 1000}
+        candidates = image_url_candidates("https://example.org/iiif/img1", info=info)
+        assert "https://example.org/iiif/img1/full/1000,/0/default.jpg" in candidates
+        assert (
+            "https://example.org/iiif/img1/full/4000,/0/default.jpg" not in candidates
+        )
+
     def test_with_info_no_sizes_adds_fallback_widths(self) -> None:
         info = {"profile": "level1"}
         candidates = image_url_candidates("https://example.org/iiif/img1", info=info)
@@ -655,3 +670,118 @@ class TestDownloadOneFromService:
             "https://example.org/iiif/img1", "/out", "page_001.jpg"
         )
         assert result is False
+
+
+# ============================================================================
+# download_iiif_renderings
+# ============================================================================
+
+
+class TestRenderingSelection:
+    """The whitelist must bind, and the limit must count files obtained.
+
+    The URL-suffix check was applied unconditionally, so a rendering whose
+    URL ended in .pdf or .epub bypassed the whitelist however it was
+    narrowed. The limit truncated the candidate list before any download was
+    attempted, so a dead first rendering hid the working ones behind it and
+    the caller fell back to fetching every page image.
+    """
+
+    @staticmethod
+    def _manifest(*renderings: dict[str, Any]) -> dict[str, Any]:
+        return {"rendering": list(renderings)}
+
+    def test_declared_format_outranks_the_url_suffix(self) -> None:
+        manifest = self._manifest(
+            {"@id": "https://example.org/book.pdf", "format": "application/pdf"},
+            {"@id": "https://example.org/book.epub", "format": "application/epub+zip"},
+        )
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={
+                    "rendering_mime_whitelist": ["application/epub+zip"],
+                    "max_renderings_per_manifest": 2,
+                },
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+        urls = [call.args[0] for call in mock_dl.call_args_list]
+        assert urls == ["https://example.org/book.epub"]
+
+    def test_url_suffix_still_rescues_an_undeclared_format(self) -> None:
+        # A bare IIIF v3 resource type settles nothing, so the suffix decides.
+        manifest = self._manifest(
+            {"@id": "https://example.org/book.pdf"},
+            {"id": "https://example.org/other.pdf", "type": "Text"},
+        )
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch("api.iiif._renderings.download_file", return_value="/out/f"),
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+    def test_a_dead_rendering_does_not_consume_the_limit(self) -> None:
+        manifest = self._manifest(
+            {"@id": "https://example.org/dead.pdf", "format": "application/pdf"},
+            {"@id": "https://example.org/live.pdf", "format": "application/pdf"},
+        )
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch(
+                "api.iiif._renderings.download_file",
+                side_effect=[None, "/out/live.pdf"],
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+        assert [call.args[0] for call in mock_dl.call_args_list] == [
+            "https://example.org/dead.pdf",
+            "https://example.org/live.pdf",
+        ]
+
+    def test_attempts_stay_bounded_when_every_rendering_is_dead(self) -> None:
+        manifest = self._manifest(
+            *(
+                {"@id": f"https://example.org/{i}.pdf", "format": "application/pdf"}
+                for i in range(40)
+            )
+        )
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch("api.iiif._renderings.download_file", return_value=None) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 0
+
+        assert mock_dl.call_count == _MAX_RENDERING_ATTEMPTS
+
+    def test_limit_still_caps_successful_downloads(self) -> None:
+        manifest = self._manifest(
+            *(
+                {"@id": f"https://example.org/{i}.pdf", "format": "application/pdf"}
+                for i in range(5)
+            )
+        )
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 2},
+            ),
+            patch("api.iiif._renderings.download_file", return_value="/out/f") as m,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 2
+
+        assert m.call_count == 2
