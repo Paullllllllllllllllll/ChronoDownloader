@@ -92,10 +92,17 @@ def search_gallica(
                     if match:
                         ark_id = match.group(1)
                         break
+            date_elements = record.findall("dc:date", namespaces)
+            item_date = (
+                date_elements[0].text.strip()
+                if date_elements and date_elements[0].text
+                else None
+            )
             if ark_id:
                 raw = {
                     "title": item_title,
                     "creator": item_creator,
+                    "date": item_date,
                     "ark_id": ark_id,
                 }
                 results.append(convert_to_searchresult("BnF Gallica", raw))

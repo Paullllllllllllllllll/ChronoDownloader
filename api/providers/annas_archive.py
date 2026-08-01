@@ -390,7 +390,13 @@ def search_annas_archive(
                         best_title = title_candidates[0]
 
                     if not best_title or len(best_title) < 3:
-                        best_title = f"Book {md5[:8]}"
+                        # Leave it empty rather than inventing "Book <md5>":
+                        # a fabricated title is persisted to work.json and
+                        # index.csv as the work's own, and it scores against
+                        # the query like any other string. Empty is scored 0
+                        # by the matcher, so the min_title_score gate drops
+                        # the record instead of ranking it.
+                        best_title = ""
 
                     sr = _build_annas_result(
                         best_title,
@@ -462,7 +468,10 @@ def search_annas_archive(
                                     or best_title == md5
                                     or len(best_title) < 3
                                 ):
-                                    best_title = f"Book {md5[:8]}"
+                                    # See the primary parse path: an invented
+                                    # title is persisted as the work's own and
+                                    # scores like a real one.
+                                    best_title = ""
 
                                 sr = _build_annas_result(
                                     best_title,

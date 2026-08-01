@@ -31,6 +31,27 @@ def _api_key() -> str | None:
     return os.getenv(get_api_key_envvar("dpla", "DPLA_API_KEY"))
 
 
+def _display_date(value: Any) -> str | None:
+    """Unwrap a DPLA sourceResource date into a printable string.
+
+    DPLA wraps dates as ``{"displayDate": "between 1958-1961", ...}``, and
+    the field may be a list of such objects, a bare string, or absent.
+
+    Args:
+        value: Raw ``sourceResource.date`` value
+
+    Returns:
+        Display date string, or None
+    """
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, dict):
+        value = value.get("displayDate") or value.get("begin")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def search_dpla(
     title: str, creator: str | None = None, max_results: int = 3
 ) -> list[SearchResult]:
@@ -101,6 +122,7 @@ def search_dpla(
                 creators = src.get("creator") or []
                 if isinstance(creators, str):
                     creators = [creators]
+                item_date = _display_date(src.get("date"))
                 raw = {
                     "title": title_text or "",
                     # Coerce elements to str: DPLA occasionally returns
@@ -108,6 +130,7 @@ def search_dpla(
                     # the plural key -- joining with ", " would be re-split as
                     # an inverted personal name (see api.model._as_list).
                     "creators": [str(c) for c in creators],
+                    "date": item_date,
                     "id": doc.get("id"),
                     "item_url": doc.get("isShownAt"),
                     "iiif_manifest": iiif_manifest,

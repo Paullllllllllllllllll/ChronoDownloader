@@ -221,6 +221,7 @@ def search_google_books(
                 # became creators == [""], a phantom author persisted to
                 # work.json and index.csv.
                 "creators": [str(a) for a in (volume_info.get("authors") or [])],
+                "date": volume_info.get("publishedDate"),
                 "id": vol_id,
                 "item_url": f"https://books.google.com/books?id={vol_id}"
                 if vol_id

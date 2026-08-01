@@ -160,10 +160,14 @@ def search_europeana(
             elif isinstance(data_provider, str) and data_provider:
                 provider = data_provider
             else:
-                provider = "N/A"
+                provider = None
+            year = item.get("year")
+            if isinstance(year, list):
+                year = year[0] if year else None
             raw = {
                 "title": item_title,
                 "creator": item_creator,
+                "date": str(year) if year else None,
                 "id": item.get("id"),
                 "item_url": item.get("guid"),
                 "europeana_url": item.get("guid"),

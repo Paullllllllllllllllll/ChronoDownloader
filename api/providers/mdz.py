@@ -78,6 +78,7 @@ def search_mdz(
                 raw = {
                     "title": title_text,
                     "creators": creators_list,
+                    "date": doc.get("publicationDate"),
                     "id": obj_id,
                     "item_url": f"https://www.digitale-sammlungen.de/view/{obj_id}",
                 }
