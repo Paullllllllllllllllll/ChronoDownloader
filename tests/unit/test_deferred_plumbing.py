@@ -253,12 +253,59 @@ class TestQuotaWaitDatetime:
 
             result = scheduler._retry_item(item)
 
-            # Still quota-limited (postponed, not failed), and no crash.
+            # Still quota-limited (postponed, not failed), and no crash. The
+            # new reset time goes through the queue's public mutator, which
+            # owns both the field update and the save.
             assert result == RETRY_POSTPONED
-            assert item.reset_time is not None
-            reset_dt = datetime.fromisoformat(item.reset_time)
-            now = datetime.now(UTC)
-            delta = (reset_dt - now).total_seconds()
+            queue.update_reset_time.assert_called_once()
+            called_id, new_reset = queue.update_reset_time.call_args[0]
+            assert called_id == "item-2"
+            assert isinstance(new_reset, datetime)
+            delta = (new_reset - datetime.now(UTC)).total_seconds()
             assert 7000 < delta < 7400
+        finally:
+            BackgroundRetryScheduler._instance = None
+
+    def test_reset_time_update_does_not_poke_private_save(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """The retry helper must not mutate items or save behind the queue.
+
+        Mutating ``item.reset_time`` and calling the queue's private
+        ``_save_queue`` held neither of the queue's locks, so a concurrent
+        mutator's newer snapshot could be overwritten on disk by this stale
+        one.
+        """
+        from main.state.background import BackgroundRetryScheduler
+
+        BackgroundRetryScheduler._instance = None
+        try:
+            scheduler = BackgroundRetryScheduler()
+            item = DeferredItem(
+                id="item-3",
+                title="Quota Book",
+                creator=None,
+                entry_id="E003",
+                provider_key="testprov",
+                provider_name="Test Provider",
+                source_id=None,
+                work_dir=str(tmp_path / "w"),
+                base_output_dir=str(tmp_path),
+                status="pending",
+            )
+
+            queue = MagicMock()
+            scheduler._queue = queue
+            qm = MagicMock()
+            qm.can_download.return_value = (False, 3600.0)
+            scheduler._quota_manager = qm
+            scheduler.set_provider_download_fn("testprov", lambda sr, wd: True)
+
+            scheduler._retry_item(item)
+
+            queue._save_queue.assert_not_called()
+            queue.update_reset_time.assert_called_once()
+            # The item itself is left to the queue to mutate.
+            assert item.reset_time is None
         finally:
             BackgroundRetryScheduler._instance = None

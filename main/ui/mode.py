@@ -47,6 +47,11 @@ def run_with_mode_detection(
     Raises:
         SystemExit: On configuration loading failure
     """
+    # Imported here, not at module scope: main.cli.entry imports this module
+    # through main.ui, so a top-level import of the sibling package closes an
+    # import cycle.
+    from main.cli.exit_codes import EXIT_USAGE
+
     # Set config path if provided
     if config_path:
         os.environ["CHRONO_CONFIG_PATH"] = config_path
@@ -55,11 +60,16 @@ def run_with_mode_detection(
         config = get_config(force_reload=True)
     except Exception as e:
         logger.critical("%s: Failed to load configurations: %s", script_name, e)
-        print(f"Error: Failed to load configurations: {e}")
-        sys.exit(1)
+        print(f"Error: Failed to load configurations: {e}", file=sys.stderr)
+        # A configuration error is exit 2 under the CLI contract; exit 1 means
+        # "some works failed", which automation retries.
+        sys.exit(EXIT_USAGE)
 
-    # Check for interactive mode in config
-    general = config.get("general", {})
+    # Check for interactive mode in config. The section is read defensively:
+    # a "general": null entry crashed here on .get, outside the try block.
+    general = config.get("general") or {}
+    if not isinstance(general, dict):
+        general = {}
     interactive_mode = general.get("interactive_mode", True)
 
     args = None

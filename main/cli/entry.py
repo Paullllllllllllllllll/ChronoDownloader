@@ -46,13 +46,22 @@ def _run_verify_command(args: object) -> int:
     )
 
     output_dir = getattr(args, "output_dir", "downloaded_works")
+    # A typo'd path used to verify an empty universe: zero works checked, zero
+    # partial, exit 0 -- a green light for a corpus that was never inspected.
+    if not os.path.isdir(output_dir):
+        print(
+            f"Error: --output_dir is not an existing directory: {output_dir}",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+
     stats = run_verify(output_dir)
     if getattr(args, "json_summary", False):
         _emit_json_summary({"command": "verify", **stats})
     return EXIT_OK if stats.get("partial", 0) == 0 else 1
 
 
-def _apply_pre_config() -> argparse.Namespace:
+def _apply_pre_config() -> tuple[argparse.Namespace, list[str]]:
     """Honor ``--config`` (and grab csv_file) for maintenance commands.
 
     The maintenance flags are handled before full mode detection; this
@@ -62,15 +71,24 @@ def _apply_pre_config() -> argparse.Namespace:
     that knows only ``csv_file`` and ``--config`` reads the *value* of any
     other flag as the positional, so ``--status --log-level DEBUG`` reported
     "CSV file not found: DEBUG".
+
+    Returns the parsed namespace together with the tokens argparse did not
+    recognize, so ``main`` can reject a typo'd flag instead of routing it
+    into the interactive wizard.
     """
-    pre_args, _ = create_cli_parser().parse_known_args()
+    pre_args, unknown = create_cli_parser().parse_known_args()
     if pre_args.config:
         os.environ["CHRONO_CONFIG_PATH"] = pre_args.config
-    return pre_args
+    return pre_args, unknown
 
 
-def _show_status(csv_file: str | None) -> None:
-    """Display works-CSV progress plus quota/deferred status."""
+def _show_status(csv_file: str | None) -> int:
+    """Display works-CSV progress plus quota/deferred status.
+
+    Returns an exit code: a named CSV that is not on disk is a usage error,
+    exactly as it is in ``run_batch_cli``.
+    """
+    code = EXIT_OK
     if csv_file and os.path.exists(csv_file):
         from main.data.works_csv import get_stats
 
@@ -82,8 +100,10 @@ def _show_status(csv_file: str | None) -> None:
         print(f"  * Deferred: {stats.get('deferred', 0)}")
         print(f"  * Pending: {stats['pending']}")
     elif csv_file:
-        print(f"CSV file not found: {csv_file}")
+        print(f"CSV file not found: {csv_file}", file=sys.stderr)
+        code = EXIT_USAGE
     show_quota_status()
+    return code
 
 
 def main() -> None:
@@ -93,14 +113,26 @@ def main() -> None:
         # scan also matched value positions, so an invocation that merely
         # mentions "--status" as another flag's argument ran the maintenance
         # command instead of the requested one (or instead of erroring).
-        pre_args = _apply_pre_config()
+        pre_args, unknown = _apply_pre_config()
+
+        # An argv of nothing but unknown flags does not look like a CLI
+        # invocation, so a misspelled --dry-run used to open the interactive
+        # wizard, where accepting the defaults starts a real download. Report
+        # the typo the way argparse would, before any mode detection.
+        if unknown:
+            print(
+                f"Error: unrecognized arguments: {' '.join(unknown)}",
+                file=sys.stderr,
+            )
+            sys.exit(EXIT_USAGE)
 
         if pre_args.quota_status:
             show_quota_status()
             return
 
         if pre_args.status:
-            _show_status(pre_args.csv_file)
+            if _show_status(pre_args.csv_file) == EXIT_USAGE:
+                sys.exit(EXIT_USAGE)
             return
 
         if pre_args.cleanup_deferred:

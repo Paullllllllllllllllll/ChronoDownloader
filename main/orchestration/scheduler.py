@@ -16,7 +16,12 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    CancelledError,
+    Future,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -493,6 +498,12 @@ class DownloadScheduler:
                 try:
                     # Short timeout, already completed
                     success = future.result(timeout=1.0)
+                except CancelledError:
+                    # CancelledError derives from BaseException (3.8+), so a
+                    # bare `except Exception` would let a cancelled future
+                    # escape this accounting loop and abort the whole wait.
+                    error = RuntimeError(f"Task cancelled: {task.title}")
+                    success = False
                 except Exception as e:
                     error = e
                     success = False

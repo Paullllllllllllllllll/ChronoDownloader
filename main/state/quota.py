@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
-from api.core.config import get_config, get_provider_setting
+from api.core.config import get_provider_setting
 
 if TYPE_CHECKING:
     from main.state.store import StateManager
@@ -587,18 +587,22 @@ class QuotaManager:
     def get_quota_limited_providers(self) -> list[str]:
         """Get list of all providers with quota limits enabled.
 
+        Iterates the provider *registry*, not the ``provider_settings`` keys:
+        counters are recorded under registry keys, while a config section may
+        carry an alias (config ``gallica`` is registry ``bnf_gallica``). The
+        config keys went straight to :meth:`get_quota_status`, which would
+        mint and persist a phantom zero-count record beside the real one.
+        ``has_quota`` reads through the alias-aware config accessor, so the
+        registry key finds the aliased block.
+
         Returns:
-            List of provider keys that have quotas
+            List of registry provider keys that have quotas
         """
-        cfg = get_config()
-        provider_settings = cfg.get("provider_settings", {})
-        quota_providers = []
+        # Imported inside the function: the registry pulls in every provider
+        # module, and the state layer must stay importable on its own.
+        from api.providers import PROVIDERS
 
-        for provider_key in provider_settings:
-            if self.has_quota(provider_key):
-                quota_providers.append(provider_key)
-
-        return quota_providers
+        return [key for key in PROVIDERS if self.has_quota(key)]
 
 
 def get_quota_manager() -> QuotaManager:

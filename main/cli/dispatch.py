@@ -82,19 +82,20 @@ def run_cli(args: argparse.Namespace, config: dict[str, Any]) -> int:
         except (AttributeError, OSError):
             pass
 
-    # A JSON search run emits NDJSON on stdout, so the log handler must start
-    # on stderr: messages logged before run_search_cli redirects logging would
-    # otherwise corrupt the stream.
+    # Any --json run reserves stdout for the machine-readable document, so the
+    # log handler must start on stderr. Keying this on "json AND search" left
+    # a plain --json batch run writing INFO lines ahead of its summary, which
+    # broke json.loads on the captured stdout.
     search_requested = bool(
         getattr(args, "search", None) or getattr(args, "search_only", False)
     )
-    json_search = bool(getattr(args, "json_summary", False)) and search_requested
+    json_output = bool(getattr(args, "json_summary", False))
 
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
         handlers=[
-            logging.StreamHandler(stream=sys.stderr if json_search else sys.stdout)
+            logging.StreamHandler(stream=sys.stderr if json_output else sys.stdout)
         ],
     )
 

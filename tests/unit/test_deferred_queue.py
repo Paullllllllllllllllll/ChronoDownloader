@@ -1262,3 +1262,121 @@ class TestDeferredQueueAddPersistenceFailure:
         assert result is None
         assert len(queue) == 0
         assert queue.get_pending() == []
+
+
+class TestDeferredQueueUpdateResetTime:
+    """update_reset_time is the public, lock-held way to push a reset time."""
+
+    @pytest.fixture(autouse=True)
+    def reset_singletons(
+        self, mock_config: dict[str, Any], temp_dir: str
+    ) -> Generator[None, None, None]:
+        """Reset singletons before and after each test."""
+        from main.state.deferred import DeferredQueue
+        from main.state.store import StateManager
+
+        DeferredQueue._instance = None
+        StateManager._instance = None
+        yield
+        DeferredQueue._instance = None
+        StateManager._instance = None
+
+    @pytest.fixture
+    def queue(self, temp_dir: str) -> Any:
+        """Create fresh DeferredQueue with isolated state."""
+        from main.state.deferred import DeferredQueue
+        from main.state.store import StateManager
+
+        state_file = os.path.join(temp_dir, "reset_time_state.json")
+        StateManager._instance = None
+        StateManager(state_file=state_file)
+
+        DeferredQueue._instance = None
+        q = DeferredQueue()
+        q._items.clear()
+        return q
+
+    def _add(self, queue: Any) -> Any:
+        return queue.add(
+            title="Quota Book",
+            creator=None,
+            entry_id="E001",
+            provider_key="annas_archive",
+            provider_name="Anna's Archive",
+            source_id="md5aaa",
+            work_dir="/w",
+            base_output_dir="/o",
+        )
+
+    def test_update_reset_time_mutates_and_persists(self, queue: Any) -> None:
+        """The new reset time reaches both the item and the state file."""
+        from main.state.deferred import DeferredQueue
+        from main.state.store import StateManager
+
+        item = self._add(queue)
+        new_reset = datetime.now(UTC) + timedelta(hours=2)
+
+        assert queue.update_reset_time(item.id, new_reset) is True
+        updated = queue.get(item.id)
+        assert updated is not None
+        assert updated.reset_time == new_reset.isoformat()
+
+        # Reload from the state file: the change must have been saved.
+        DeferredQueue._instance = None
+        reloaded = DeferredQueue()
+        try:
+            reloaded_item = reloaded.get(item.id)
+            assert reloaded_item is not None
+            assert reloaded_item.reset_time == new_reset.isoformat()
+        finally:
+            DeferredQueue._instance = None
+            StateManager._instance = None
+
+    def test_update_reset_time_saves_under_data_lock(self, queue: Any) -> None:
+        """Mutation and save happen inside the queue's data lock."""
+        held: list[bool] = []
+        original_save = queue._save_queue
+
+        def recording_save() -> bool:
+            held.append(queue._data_lock._is_owned())
+            return bool(original_save())
+
+        item = self._add(queue)
+        queue._save_queue = recording_save
+
+        assert queue.update_reset_time(item.id, datetime.now(UTC)) is True
+        assert held == [True]
+
+    def test_update_reset_time_unknown_id_returns_false(self, queue: Any) -> None:
+        """An unknown item id is reported, not silently persisted."""
+        assert queue.update_reset_time("no-such-id", datetime.now(UTC)) is False
+
+    def test_concurrent_updates_all_survive_on_disk(self, queue: Any) -> None:
+        """Parallel mutators serialize; the last snapshot keeps every item."""
+        items = [
+            queue.add(
+                title=f"Work {n}",
+                creator=None,
+                entry_id=f"E{n:03d}",
+                provider_key="annas_archive",
+                provider_name="Anna's Archive",
+                source_id=f"md5{n}",
+                work_dir=f"/w{n}",
+                base_output_dir="/o",
+            )
+            for n in range(8)
+        ]
+        target = datetime.now(UTC) + timedelta(hours=3)
+
+        def worker(item_id: str) -> None:
+            queue.update_reset_time(item_id, target)
+
+        threads = [threading.Thread(target=worker, args=(i.id,)) for i in items]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        stored = queue._get_state_manager().get_deferred_items()
+        assert len(stored) == len(items)
+        assert all(entry["reset_time"] == target.isoformat() for entry in stored)

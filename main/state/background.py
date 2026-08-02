@@ -316,11 +316,14 @@ class BackgroundRetryScheduler:
                 # Quota waits are typically hours; timedelta handles overflow
                 # correctly, whereas datetime.replace(second=...) raises when
                 # the sum exceeds 59.
-                if wait_seconds:
+                if wait_seconds and self._queue:
+                    # Go through the queue's public mutator: it performs the
+                    # field update and the save under the queue's data lock,
+                    # whereas mutating the item and poking the private save
+                    # from here held neither and could overwrite a concurrent
+                    # mutator's newer snapshot on disk.
                     new_reset = datetime.now(UTC) + timedelta(seconds=wait_seconds)
-                    item.reset_time = new_reset.isoformat()
-                    if self._queue:
-                        self._queue._save_queue()
+                    self._queue.update_reset_time(item.id, new_reset)
                 logger.debug(
                     "Quota still exhausted for %s, skipping %s",
                     provider_key,

@@ -242,6 +242,46 @@ class TestDownloadScheduler:
         assert on_submit_called.is_set()
         assert on_complete_called.is_set()
 
+    def test_wait_all_records_cancelled_future_as_failure(self) -> None:
+        """A cancelled future must not escape the accounting loop.
+
+        ``CancelledError`` derives from ``BaseException`` (3.8+), so the
+        former bare ``except Exception`` would have propagated out of
+        ``wait_all`` and dropped every result collected so far.
+        """
+        from concurrent.futures import Future
+
+        from main.orchestration.scheduler import DownloadScheduler, DownloadTask
+
+        scheduler = DownloadScheduler(max_workers=1)
+
+        cancelled: Future[bool] = Future()
+        assert cancelled.cancel() is True
+        # What the executor does for a work item it drops: only after this
+        # notification does as_completed report the future as done.
+        cancelled.set_running_or_notify_cancel()
+        done: Future[bool] = Future()
+        done.set_result(True)
+
+        task_c = MagicMock(spec=DownloadTask)
+        task_c.title = "Cancelled"
+        task_d = MagicMock(spec=DownloadTask)
+        task_d.title = "Done"
+        scheduler._futures[cancelled] = task_c
+        scheduler._futures[done] = task_d
+
+        results = scheduler.wait_all(timeout=5.0)
+
+        by_task = {task: (success, error) for task, success, error in results}
+        assert len(results) == 2
+        assert by_task[task_d] == (True, None)
+        cancelled_success, cancelled_error = by_task[task_c]
+        assert cancelled_success is False
+        assert isinstance(cancelled_error, Exception)
+        assert "cancelled" in str(cancelled_error).lower()
+        # Both futures were reaped from tracking.
+        assert scheduler._futures == {}
+
     def test_shutdown_rejects_new_tasks(self) -> None:
         """Test that shutdown rejects new tasks."""
         from main.orchestration.scheduler import DownloadScheduler, DownloadTask

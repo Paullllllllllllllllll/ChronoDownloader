@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -902,6 +903,82 @@ class TestProcessDirectIIIFCreator:
         assert mock_dir.call_args.kwargs["creator"] == "Taillevent"
 
 
+class TestProcessDirectIIIFWorkContext:
+    """The direct-IIIF download must run inside the per-work context.
+
+    Without it the bytes are booked against the no-work bucket of the
+    per-work budget (``api.core.budget`` keys on ``get_current_work()``) and
+    the thread-local file-sequence counters are not scoped to the work.
+    """
+
+    @patch("main.orchestration.execution.download_from_iiif_manifest")
+    @patch("main.data.work.compute_work_dir", return_value=("/out/work", "work"))
+    def test_work_context_is_set_during_download(
+        self, mock_dir: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        from api.core.context import (
+            get_current_entry,
+            get_current_name_stem,
+            get_current_work,
+            increment_counter,
+        )
+        from main.data.work import compute_work_id
+
+        seen: dict[str, Any] = {}
+
+        def capture(**kwargs: Any) -> dict[str, Any]:
+            seen["work"] = get_current_work()
+            seen["entry"] = get_current_entry()
+            seen["stem"] = get_current_name_stem()
+            seen["counter"] = increment_counter(("stem", "prov", "image"))
+            return {"success": True, "provider": "Gallica"}
+
+        mock_dl.side_effect = capture
+        # A stale counter from earlier work on this thread must not leak in.
+        increment_counter(("stem", "prov", "image"))
+
+        process_direct_iiif(
+            manifest_url="https://example.org/manifest.json",
+            output_dir="/out",
+            entry_id="E001",
+            title="Le Viandier",
+            creator="Taillevent",
+        )
+
+        assert seen["work"] == compute_work_id("Le Viandier", "Taillevent")
+        assert seen["entry"] == "E001"
+        # Counters are reset for the work rather than continuing a previous run.
+        assert seen["counter"] == 1
+        # The naming stem stays unset: direct-IIIF filenames come from the
+        # configured naming template, and a thread-local stem would override it.
+        assert seen["stem"] is None
+        # Context does not leak past the download.
+        assert get_current_work() is None
+        assert get_current_entry() is None
+
+    @patch("main.orchestration.execution.download_from_iiif_manifest")
+    @patch("main.data.work.compute_work_dir", return_value=("/out/work", "work"))
+    def test_untitled_manifest_still_gets_a_work_id(
+        self, mock_dir: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        from api.core.context import get_current_work
+
+        seen: dict[str, Any] = {}
+
+        def capture(**kwargs: Any) -> dict[str, Any]:
+            seen["work"] = get_current_work()
+            return {"success": True, "provider": "Gallica"}
+
+        mock_dl.side_effect = capture
+
+        process_direct_iiif(
+            manifest_url="https://example.org/manifest.json",
+            output_dir="/out",
+        )
+
+        assert seen["work"]
+
+
 # ============================================================================
 # create_interactive_callbacks
 # ============================================================================
@@ -947,3 +1024,41 @@ class TestCreateInteractiveCallbacks:
         task.title = "Short Title"
         on_complete(task, False, Exception("error"))
         # Should not raise
+
+    @patch("main.ui.console.ConsoleUI")
+    def test_counters_survive_concurrent_callbacks(self, mock_ui: MagicMock) -> None:
+        """The callbacks run on worker threads; unguarded ``+= 1`` loses
+        updates and prints duplicate positions."""
+        import logging
+        import re
+        import threading
+
+        on_submit, on_complete = create_interactive_callbacks(logging.getLogger("test"))
+        task = MagicMock()
+        task.title = "Work"
+
+        total = 40
+        barrier = threading.Barrier(total)
+
+        def worker() -> None:
+            barrier.wait()
+            on_submit(task)
+            on_complete(task, True, None)
+
+        threads = [threading.Thread(target=worker) for _ in range(total)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        queued = [
+            int(re.search(r"\[(\d+)\]", call.args[0]).group(1))  # type: ignore[union-attr]
+            for call in mock_ui.print_info.call_args_list
+        ]
+        completed = [
+            int(re.search(r"\[(\d+)/", call.args[0]).group(1))  # type: ignore[union-attr]
+            for call in mock_ui.print_success.call_args_list
+        ]
+
+        assert sorted(queued) == list(range(1, total + 1))
+        assert sorted(completed) == list(range(1, total + 1))

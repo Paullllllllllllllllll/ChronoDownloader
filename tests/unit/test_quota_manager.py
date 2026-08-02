@@ -530,22 +530,35 @@ class TestQuotaManagerHasQuota:
 
         manager = QuotaManager()
 
-        mock_config = {
-            "provider_settings": {
-                "provider_with_quota": {"quota": {"enabled": True}},
-                "provider_without": {},
-            }
-        }
-
-        with (
-            patch("main.state.quota.get_config", return_value=mock_config),
-            patch.object(
-                manager, "has_quota", side_effect=lambda k: k == "provider_with_quota"
-            ),
+        with patch.object(
+            manager, "has_quota", side_effect=lambda k: k == "annas_archive"
         ):
             providers = manager.get_quota_limited_providers()
 
-            assert "provider_with_quota" in providers
+        assert providers == ["annas_archive"]
+
+    def test_quota_config_alias_reports_the_registry_key(self) -> None:
+        """A quota block under a config alias surfaces as its registry key.
+
+        Quota counters are recorded under the registry key ("bnf_gallica"),
+        while the config section is named "gallica". Iterating the config
+        keys sent --quota-status to get_quota_status("gallica"), which minted
+        and persisted a phantom zero-count record beside the real counter.
+        """
+        from main.state.quota import QuotaManager
+
+        manager = QuotaManager()
+        config = {
+            "provider_settings": {
+                "gallica": {"quota": {"enabled": True, "daily_limit": 5}},
+                "internet_archive": {"max_pages": 10},
+            }
+        }
+
+        with patch("api.core.config.get_config", return_value=config):
+            providers = manager.get_quota_limited_providers()
+
+        assert providers == ["bnf_gallica"]
 
 
 class TestGetQuotaManager:

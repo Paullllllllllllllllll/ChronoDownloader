@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import os
+import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -440,6 +441,34 @@ class TestVerifyCommand:
 
         assert run_verify(out_dir) == {"total": 1, "ok": 1, "partial": 0}
 
+    def test_verify_rejects_a_missing_output_dir(
+        self, tmp_path: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A typo'd path reported total=0, partial=0, exit 0: a false green
+        for a corpus that was never inspected."""
+        from main.cli.entry import _run_verify_command
+
+        missing = str(tmp_path / "typo_dir")
+        code = _run_verify_command(_batch_args(output_dir=missing, verify=True))
+
+        assert code == 2
+        assert missing in capsys.readouterr().err
+
+    def test_verify_rejects_an_output_dir_that_is_a_file(
+        self, tmp_path: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from main.cli.entry import _run_verify_command
+
+        not_a_dir = tmp_path / "works.csv"
+        not_a_dir.write_text("entry_id\n", encoding="utf-8")
+
+        code = _run_verify_command(
+            _batch_args(output_dir=str(not_a_dir), verify=True, json_summary=True)
+        )
+
+        assert code == 2
+        assert "not an existing directory" in capsys.readouterr().err
+
 
 class TestLimitArgument:
     """A negative --limit is a usage error, not a silent no-op."""
@@ -514,7 +543,7 @@ class TestMaintenancePreParse:
         from main.cli.entry import _apply_pre_config
 
         with patch("sys.argv", ["prog", *argv]):
-            return _apply_pre_config().csv_file  # type: ignore[no-any-return]
+            return _apply_pre_config()[0].csv_file  # type: ignore[no-any-return]
 
     def test_flag_values_are_not_read_as_the_csv_path(self) -> None:
         assert self._csv_file_for(["--status", "--output_dir", "some_dir"]) is None
@@ -531,3 +560,136 @@ class TestMaintenancePreParse:
             self._csv_file_for(["--status", "--config", "custom.json"])
             assert os.environ.get("CHRONO_CONFIG_PATH") == "custom.json"
             os.environ.pop("CHRONO_CONFIG_PATH", None)
+
+
+class TestUnknownArguments:
+    """A misspelled flag is a usage error, never an invitation to the wizard.
+
+    An argv of nothing but unknown flags does not look like a CLI invocation,
+    so ``--dryrun`` used to open the interactive workflow, where accepting the
+    defaults starts a real download the user never asked for.
+    """
+
+    def test_unknown_flag_exits_two_before_mode_detection(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from main.cli.entry import main
+
+        with (
+            patch("sys.argv", ["downloader.py", "--dryrun"]),
+            patch("main.cli.entry.run_interactive") as mock_interactive,
+            patch("main.cli.entry.run_with_mode_detection") as mock_mode,
+            patch("main.cli.entry.run_cli") as mock_run_cli,
+            pytest.raises(SystemExit) as excinfo,
+        ):
+            main()
+
+        assert excinfo.value.code == 2
+        assert "unrecognized arguments: --dryrun" in capsys.readouterr().err
+        mock_interactive.assert_not_called()
+        mock_mode.assert_not_called()
+        mock_run_cli.assert_not_called()
+
+    def test_unknown_flag_beside_a_maintenance_flag_still_errors(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from main.cli.entry import main
+
+        with (
+            patch("sys.argv", ["downloader.py", "--quota-status", "--bogus"]),
+            patch("main.cli.entry.show_quota_status") as mock_quota,
+            pytest.raises(SystemExit) as excinfo,
+        ):
+            main()
+
+        assert excinfo.value.code == 2
+        assert "--bogus" in capsys.readouterr().err
+        mock_quota.assert_not_called()
+
+    def test_valid_invocations_report_no_unknown_arguments(self) -> None:
+        from main.cli.entry import _apply_pre_config
+
+        for argv in (
+            ["works.csv", "--dry-run", "--json"],
+            ["--search", "Le Viandier", "--creator", "Taillevent"],
+            ["--", "--status"],
+            ["--cli", "works.csv", "--limit", "3"],
+        ):
+            with patch("sys.argv", ["prog", *argv]):
+                assert _apply_pre_config()[1] == []
+
+
+class TestStatusExitCode:
+    """--status on a missing CSV is the same usage error as a batch run."""
+
+    def test_missing_csv_exits_two(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from main.cli.entry import main
+
+        with (
+            patch("sys.argv", ["downloader.py", "no_such_works.csv", "--status"]),
+            patch("main.cli.entry.show_quota_status") as mock_quota,
+            pytest.raises(SystemExit) as excinfo,
+        ):
+            main()
+
+        assert excinfo.value.code == 2
+        assert "CSV file not found" in capsys.readouterr().err
+        # The quota/deferred block is still printed; only the code changes.
+        mock_quota.assert_called_once()
+
+    def test_present_csv_exits_zero(self, tmp_path: Any) -> None:
+        from main.cli.entry import main
+
+        csv_path = str(tmp_path / "works.csv")
+        pd.DataFrame({"entry_id": ["E1"], "short_title": ["T"]}).to_csv(
+            csv_path, index=False
+        )
+
+        with (
+            patch("sys.argv", ["downloader.py", csv_path, "--status"]),
+            patch("main.cli.entry.show_quota_status"),
+        ):
+            main()
+
+    def test_status_without_a_csv_exits_zero(self) -> None:
+        from main.cli.entry import main
+
+        with (
+            patch("sys.argv", ["downloader.py", "--status"]),
+            patch("main.cli.entry.show_quota_status") as mock_quota,
+        ):
+            main()
+
+        mock_quota.assert_called_once()
+
+
+class TestJsonLogStream:
+    """--json reserves stdout for the JSON document, search run or not.
+
+    The redirect keyed on "json AND search", so a plain --json batch run wrote
+    INFO lines to stdout ahead of the summary and json.loads on the captured
+    stdout failed.
+    """
+
+    @staticmethod
+    def _root_handler_stream(json_summary: bool) -> Any:
+        from main.cli import dispatch
+
+        root = logging.getLogger()
+        saved = root.handlers[:]
+        root.handlers = []
+        try:
+            with patch.object(dispatch, "list_providers"):
+                dispatch.run_cli(
+                    _batch_args(json_summary=json_summary, list_providers=True),
+                    {},
+                )
+            return getattr(root.handlers[0], "stream", None)
+        finally:
+            root.handlers = saved
+
+    def test_json_batch_run_logs_to_stderr(self) -> None:
+        assert self._root_handler_stream(True) is sys.stderr
+
+    def test_plain_run_keeps_logging_on_stdout(self) -> None:
+        assert self._root_handler_stream(False) is sys.stdout

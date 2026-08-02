@@ -31,6 +31,7 @@ import pandas as pd
 
 from api.core.budget import budget_exhausted
 from api.core.config import resolve_max_parallel_downloads
+from api.core.context import work_context
 from api.iiif import (
     download_from_iiif_manifest,
     is_direct_download_enabled,
@@ -299,7 +300,7 @@ def process_direct_iiif(
         }
 
     # Compute work directory
-    from main.data.work import compute_work_dir
+    from main.data.work import compute_work_dir, compute_work_id
 
     dir_title = title or "iiif_download"
     # creator must be forwarded: with naming.include_creator_in_work_dir
@@ -310,13 +311,24 @@ def process_direct_iiif(
         output_dir, str(entry_id) if entry_id else None, dir_title, creator=creator
     )
 
-    dl_result = download_from_iiif_manifest(
-        manifest_url=manifest_url,
-        output_folder=work_dir,
-        title=title,
+    # Mirror the search path's per-work context. Without it the downloaded
+    # bytes are booked against the no-work bucket of the per-work budget
+    # (api.core.budget keys on get_current_work()) and the file-sequence
+    # counters carry over from whatever ran before on this thread. The naming
+    # stem is deliberately NOT set: direct-IIIF filenames come from the
+    # configured naming template via ``file_stem``/``prefix``, and a
+    # thread-local stem would override it.
+    with work_context(
+        work_id=compute_work_id(dir_title, creator),
         entry_id=str(entry_id) if entry_id else None,
-        file_stem=file_stem,
-    )
+    ):
+        dl_result = download_from_iiif_manifest(
+            manifest_url=manifest_url,
+            output_folder=work_dir,
+            title=title,
+            entry_id=str(entry_id) if entry_id else None,
+            file_stem=file_stem,
+        )
 
     pages_expected = dl_result.get("pages_expected")
     pages_downloaded = dl_result.get("pages_downloaded")
@@ -1008,19 +1020,26 @@ def create_interactive_callbacks(
 
     submitted = [0]
     completed = [0]
+    # The completion callback runs on worker threads, so the display counters
+    # are incremented under a lock and read as a snapshot; unguarded
+    # read-modify-write would lose updates and print duplicate positions.
+    counter_lock = threading.Lock()
 
     def on_submit(task: DownloadTask) -> None:
-        submitted[0] += 1
+        with counter_lock:
+            queued = submitted[0] = submitted[0] + 1
         title_short = task.title[:50] + "..." if len(task.title) > 50 else task.title
-        ConsoleUI.print_info(f"Queued [{submitted[0]}]", title_short)
+        ConsoleUI.print_info(f"Queued [{queued}]", title_short)
 
     def on_complete(task: DownloadTask, success: bool, error: Exception | None) -> None:
-        completed[0] += 1
+        with counter_lock:
+            done = completed[0] = completed[0] + 1
+            queued = submitted[0]
         title_short = task.title[:50] + "..." if len(task.title) > 50 else task.title
         if success:
-            ConsoleUI.print_success(f"[{completed[0]}/{submitted[0]}] {title_short}")
+            ConsoleUI.print_success(f"[{done}/{queued}] {title_short}")
         else:
-            msg = f"[{completed[0]}/{submitted[0]}] {title_short}"
+            msg = f"[{done}/{queued}] {title_short}"
             if error:
                 msg += f" - {error}"
             ConsoleUI.print_error(msg)

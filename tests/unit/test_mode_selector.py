@@ -96,16 +96,58 @@ class TestRunWithModeDetection:
             assert os.environ.get("CHRONO_CONFIG_PATH") == config_path
 
     def test_config_load_failure(self) -> None:
-        """Test handling of config load failure."""
+        """A config load failure exits 2 (usage/config), not 1.
+
+        Exit 1 means "some works failed", which automation treats as
+        retryable; a broken config is not.
+        """
 
         def parser_factory() -> argparse.ArgumentParser:
             return argparse.ArgumentParser()
 
         with (
             patch("main.ui.mode.get_config", side_effect=Exception("Config error")),
-            pytest.raises(SystemExit),
+            pytest.raises(SystemExit) as excinfo,
         ):
             run_with_mode_detection(parser_factory, "test_script")
+
+        assert excinfo.value.code == 2
+
+    def test_none_general_section_does_not_crash(self) -> None:
+        """A "general": null entry raised AttributeError outside the try
+        block, so the process died on a stack trace instead of defaulting."""
+        config: dict[str, Any] = {"general": None}
+
+        def parser_factory() -> argparse.ArgumentParser:
+            return argparse.ArgumentParser()
+
+        with (
+            patch("main.ui.mode.get_config", return_value=config),
+            patch("sys.argv", ["script.py"]),
+        ):
+            _, interactive, args = run_with_mode_detection(
+                parser_factory, "test_script"
+            )
+
+        assert interactive is True
+        assert args is None
+
+    def test_non_dict_general_section_does_not_crash(self) -> None:
+        """A scalar in place of the section is treated as absent."""
+        config: dict[str, Any] = {"general": "interactive"}
+
+        def parser_factory() -> argparse.ArgumentParser:
+            return argparse.ArgumentParser()
+
+        with (
+            patch("main.ui.mode.get_config", return_value=config),
+            patch("sys.argv", ["script.py"]),
+        ):
+            _, interactive, _args = run_with_mode_detection(
+                parser_factory, "test_script"
+            )
+
+        assert interactive is True
 
     def test_default_interactive_when_missing(
         self, sample_config: dict[str, Any]

@@ -497,6 +497,30 @@ class DeferredQueue:
             )
             return True
 
+    def update_reset_time(self, item_id: str, new_reset_time: datetime) -> bool:
+        """Set an item's quota reset time and persist the change.
+
+        Every mutation of queue state must happen under ``_data_lock``
+        together with its save, otherwise a concurrent mutator's newer
+        snapshot can be overwritten on disk by this one's stale copy. This
+        method exists so callers that only need to push a reset time forward
+        (the eager retry helper) do not have to touch item fields and the
+        private save directly.
+
+        Args:
+            item_id: Item ID
+            new_reset_time: New expected quota reset time
+
+        Returns:
+            True if the item exists and the change was saved, False otherwise.
+        """
+        with self._data_lock:
+            item = self._items.get(item_id)
+            if item is None:
+                return False
+            item.reset_time = new_reset_time.isoformat()
+            return self._save_queue()
+
     def get(self, item_id: str) -> DeferredItem | None:
         """Get an item by ID.
 
