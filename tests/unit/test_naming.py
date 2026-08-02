@@ -68,6 +68,39 @@ class TestToSnakeCase:
         assert to_snake_case("_foo_bar_") == "foo_bar"
 
 
+class TestSnakeCaseUnicodeFolding:
+    """Accented titles must fold to letters, not to underscores.
+
+    Without normalization the ASCII-only replacement turned every accented
+    character into an underscore, so the SAME title produced two different
+    slugs depending on the Unicode form a provider delivered (NFC ``"Küche"``
+    -> ``k_che``; NFD ``"Küche"`` -> ``ku_che``), which silently broke
+    resume and deduplication, and two DIFFERENT titles collided on one slug.
+    """
+
+    def test_nfc_and_nfd_agree(self) -> None:
+        nfc = "Küche"  # precomposed u-umlaut
+        nfd = "Küche"  # u + combining diaeresis
+        assert nfc != nfd
+        assert to_snake_case(nfc) == to_snake_case(nfd) == "kuche"
+
+    def test_distinct_titles_no_longer_collide(self) -> None:
+        assert to_snake_case("Gebäck") == "geback"
+        assert to_snake_case("Gebück") == "gebuck"
+        assert to_snake_case("Gebäck") != to_snake_case("Gebück")
+
+    def test_non_decomposable_letters_are_transliterated(self) -> None:
+        """The same table api.matching uses, so slug and score agree."""
+        assert to_snake_case("Straße") == "strasse"
+        assert to_snake_case("Kogebog for Bønder") == "kogebog_for_bonder"
+        assert to_snake_case("Encyclopædia") == "encyclopaedia"
+        assert to_snake_case("Kucharz doskonały") == "kucharz_doskonaly"
+
+    def test_ascii_titles_are_unaffected(self) -> None:
+        assert to_snake_case("The Art of Cooking") == "the_art_of_cooking"
+        assert to_snake_case("E0001") == "e_0001"
+
+
 class TestSanitizeFilename:
     """Tests for sanitize_filename function."""
 
@@ -133,6 +166,43 @@ class TestSanitizeFilename:
         """Test proper handling of whitespace."""
         result = sanitize_filename("foo  bar   baz.txt")
         assert "  " not in result
+
+
+class TestExtensionSplitting:
+    """Only a plausible trailing extension may bypass base cleaning.
+
+    ``Path.suffixes`` treated everything after the FIRST dot as extension, so
+    a title carrying an abbreviation ("Mr.", "vol.") rode through unsanitized:
+    it was never collapsed, never truncated, and could keep a trailing dot or
+    space, which Windows silently drops from the stored name.
+    """
+
+    def test_dots_inside_the_title_stay_in_the_base(self) -> None:
+        result = sanitize_filename("Mr. Smith's Voyage, vol. 2.pdf")
+        assert result.endswith(".pdf")
+        # The base was actually cleaned: separators collapsed to underscores.
+        assert result == "Mr_Smith's_Voyage,_vol_2.pdf"
+
+    def test_trailing_dot_and_space_do_not_survive(self) -> None:
+        assert sanitize_filename("report. ") == "report"
+        assert sanitize_filename("report.") == "report"
+        assert not sanitize_filename("Mr. Smith. ").endswith((".", " "))
+
+    def test_long_tail_after_a_dot_is_truncated(self) -> None:
+        """A 300-character run behind a dot used to escape max_base_len."""
+        result = sanitize_filename("x." + "y" * 300, max_base_len=50)
+        assert len(result) == 50
+
+    def test_real_multi_suffix_is_preserved(self) -> None:
+        assert sanitize_filename("archive.tar.gz").endswith(".tar.gz")
+
+    def test_ordinary_extension_is_preserved(self) -> None:
+        assert sanitize_filename("document.pdf") == "document.pdf"
+        assert sanitize_filename("con.pdf") == "_con_.pdf"
+
+    def test_extension_like_segment_only(self) -> None:
+        """A name that is nothing but a suffix keeps a usable base."""
+        assert sanitize_filename(".pdf") == "pdf"
 
 
 class TestGetProviderSlug:

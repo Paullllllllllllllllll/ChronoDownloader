@@ -35,7 +35,9 @@ def strip_accents(text: str | None) -> str:
 # the ASCII-only filter in normalize_text would otherwise replace with a
 # space, splitting a word in two ("Bønder" -> "b nder") and sinking match
 # scores below the selection gate for Danish/Norwegian/German/Polish titles.
-_NON_DECOMPOSABLE_TRANSLIT = str.maketrans(
+# Public because api.core.naming reuses it for directory slugs: a title must
+# fold to the same slug there as it does to the same token here.
+NON_DECOMPOSABLE_TRANSLIT = str.maketrans(
     {
         "ß": "ss",
         "ø": "o",
@@ -65,7 +67,7 @@ def normalize_text(text: str | None) -> str:
     if text is None:
         return ""
 
-    s = strip_accents(str(text)).lower().translate(_NON_DECOMPOSABLE_TRANSLIT)
+    s = strip_accents(str(text)).lower().translate(NON_DECOMPOSABLE_TRANSLIT)
 
     # Replace punctuation and separators with spaces
     s = re.sub(r"[\t\r\n]+", " ", s)
@@ -89,6 +91,11 @@ def normalize_text(text: str | None) -> str:
     return re.sub(r"\s+", " ", fallback).strip()
 
 
+def _ratio_pct(a: str, b: str) -> int:
+    """Return ``difflib``'s ratio for two already-normalized strings, in 0..100."""
+    return int(round(difflib.SequenceMatcher(None, a, b).ratio() * 100))
+
+
 def simple_ratio(a: str, b: str) -> int:
     """Return a similarity score in 0..100 using difflib ratio.
 
@@ -105,14 +112,21 @@ def simple_ratio(a: str, b: str) -> int:
     if not a_norm or not b_norm:
         return 0
 
-    return int(round(difflib.SequenceMatcher(None, a_norm, b_norm).ratio() * 100))
+    return _ratio_pct(a_norm, b_norm)
 
 
 def token_set_ratio(a: str, b: str) -> int:
-    """Approximate token set ratio using stdlib.
+    """Return rapidfuzz-style token SET ratio in 0..100, built on stdlib difflib.
 
-    This is a simplified version of fuzzywuzzy/rapidfuzz token_set_ratio.
-    Compares sorted unique tokens from both strings.
+    Follows rapidfuzz's set semantics: the shared tokens (``t0``) are compared
+    against each side's full sorted token string (``t1``, ``t2``), and the best
+    of the three pairings wins. The consequence that matters here is that a
+    query which is a pure token subset of the candidate scores 100 -- the
+    normal case for this tool, whose CSV query column is ``short_title`` while
+    catalog records carry the full imprint title.
+
+    With no shared tokens at all, ``t0`` is empty and the comparison degrades
+    to the plain token-SORT ratio of the two sides.
 
     Args:
         a: First string to compare
@@ -127,13 +141,20 @@ def token_set_ratio(a: str, b: str) -> int:
     if not a_tokens or not b_tokens:
         return 0
 
-    sa = " ".join(sorted(a_tokens))
-    sb = " ".join(sorted(b_tokens))
+    intersection = sorted(a_tokens & b_tokens)
+    # t1/t2 are the fully sorted token strings of each side, with the shared
+    # tokens hoisted to the front; both are non-empty because their side is.
+    t0 = " ".join(intersection)
+    t1 = " ".join(intersection + sorted(a_tokens - b_tokens))
+    t2 = " ".join(intersection + sorted(b_tokens - a_tokens))
 
-    # sa/sb are already fully normalized (normalize_text is idempotent on its
-    # own output) and non-empty here, so skip simple_ratio's redundant
-    # re-normalization and compute the difflib ratio directly.
-    return int(round(difflib.SequenceMatcher(None, sa, sb).ratio() * 100))
+    # The tokens are already fully normalized (normalize_text is idempotent on
+    # its own output), so compute the difflib ratios directly. An empty t0
+    # carries no information and is skipped rather than scored as a mismatch.
+    if not t0:
+        return _ratio_pct(t1, t2)
+
+    return max(_ratio_pct(t0, t1), _ratio_pct(t0, t2), _ratio_pct(t1, t2))
 
 
 def title_score(query_title: str, item_title: str, method: str = "token_set") -> int:

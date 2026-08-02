@@ -61,27 +61,29 @@ NATIVE_DOWNLOAD_PROVIDERS: frozenset[str] = frozenset(
 # Identifier auto-detection
 # ---------------------------------------------------------------------------
 # Ordered list of (compiled regex, provider_key).  More specific patterns
-# should come before less specific ones.
+# should come before less specific ones.  The patterns end in ``\Z`` rather
+# than ``$``: ``$`` also matches just before a trailing newline, so a copied
+# identifier kept its line break through detection and into the manifest URL.
 
 IDENTIFIER_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # MDZ / Bavarian State Library -- identifiers like bsb11280551
-    (re.compile(r"^bsb\d+$", re.IGNORECASE), "mdz"),
+    (re.compile(r"^bsb\d+\Z", re.IGNORECASE), "mdz"),
     # BnF Gallica -- ark sub-identifiers
-    (re.compile(r"^bpt6k\w+$", re.IGNORECASE), "bnf_gallica"),
-    (re.compile(r"^btv1b\w+$", re.IGNORECASE), "bnf_gallica"),
-    (re.compile(r"^cb\d+[a-z]?$", re.IGNORECASE), "bnf_gallica"),
-    (re.compile(r"^ark:/12148/\w+$"), "bnf_gallica"),
+    (re.compile(r"^bpt6k\w+\Z", re.IGNORECASE), "bnf_gallica"),
+    (re.compile(r"^btv1b\w+\Z", re.IGNORECASE), "bnf_gallica"),
+    (re.compile(r"^cb\d+[a-z]?\Z", re.IGNORECASE), "bnf_gallica"),
+    (re.compile(r"^ark:/12148/\w+\Z"), "bnf_gallica"),
     # HathiTrust -- institution-prefixed volume IDs
-    (re.compile(r"^mdp\.\w+$"), "hathitrust"),
-    (re.compile(r"^inu\.\w+$"), "hathitrust"),
-    (re.compile(r"^uc[12]\.\w+$"), "hathitrust"),
-    (re.compile(r"^hvd\.\w+$"), "hathitrust"),
-    (re.compile(r"^nyp\.\w+$"), "hathitrust"),
-    (re.compile(r"^njp\.\w+$"), "hathitrust"),
-    (re.compile(r"^chi\.\w+$"), "hathitrust"),
-    (re.compile(r"^wu\.\w+$"), "hathitrust"),
+    (re.compile(r"^mdp\.\w+\Z"), "hathitrust"),
+    (re.compile(r"^inu\.\w+\Z"), "hathitrust"),
+    (re.compile(r"^uc[12]\.\w+\Z"), "hathitrust"),
+    (re.compile(r"^hvd\.\w+\Z"), "hathitrust"),
+    (re.compile(r"^nyp\.\w+\Z"), "hathitrust"),
+    (re.compile(r"^njp\.\w+\Z"), "hathitrust"),
+    (re.compile(r"^chi\.\w+\Z"), "hathitrust"),
+    (re.compile(r"^wu\.\w+\Z"), "hathitrust"),
     # British Library -- VDC identifiers
-    (re.compile(r"^vdc_\w+$", re.IGNORECASE), "british_library"),
+    (re.compile(r"^vdc_\w+\Z", re.IGNORECASE), "british_library"),
 ]
 
 
@@ -142,12 +144,16 @@ def build_manifest_url(provider_key: str, identifier: str) -> list[str]:
 def detect_provider(identifier: str) -> list[str]:
     """Infer provider key(s) from an identifier's format.
 
+    Surrounding whitespace is stripped first: identifiers routinely arrive
+    pasted from a catalog page or read off a line of a file.
+
     Args:
         identifier: Raw identifier string.
 
     Returns:
         List of matching provider keys (may be empty).
     """
+    identifier = identifier.strip()
     matches: list[str] = []
     seen: set[str] = set()
     for pattern, pkey in IDENTIFIER_PATTERNS:
@@ -165,7 +171,9 @@ def resolve_identifier(
 
     When *provider_key* is given, returns a single ``ResolvedIdentifier``
     for that provider.  When omitted, attempts auto-detection via
-    :func:`detect_provider`.
+    :func:`detect_provider`.  Surrounding whitespace on the identifier is
+    stripped before anything else, so a pasted line break never reaches a
+    manifest URL.
 
     Args:
         identifier: Provider-specific item identifier.
@@ -179,6 +187,7 @@ def resolve_identifier(
         KeyError: If an explicit *provider_key* is not found in the
             provider registry.
     """
+    identifier = identifier.strip()
     if provider_key is not None:
         if provider_key not in PROVIDERS:
             raise KeyError(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
+
 from api.matching import (
     creator_score,
     normalize_text,
@@ -195,9 +197,8 @@ class TestTokenSetRatio:
         assert score == 100
 
     def test_subset_match(self) -> None:
-        """Test matching with subset of words."""
-        score = token_set_ratio("hello world test", "hello world")
-        assert score >= 80
+        """A pure token subset scores 100 under set semantics."""
+        assert token_set_ratio("hello world test", "hello world") == 100
 
     def test_completely_different(self) -> None:
         """Test completely different strings."""
@@ -207,6 +208,60 @@ class TestTokenSetRatio:
         """Test with empty strings."""
         assert token_set_ratio("", "hello world") == 0
         assert token_set_ratio("hello world", "") == 0
+
+
+class TestTokenSetSemantics:
+    """The scorer must implement token SET, not token SORT, semantics.
+
+    The CSV query column is ``short_title``, so the query is normally an exact
+    token subset of the full imprint title a catalog returns. Under the former
+    sort-only implementation those pairs scored in the low thirties -- beneath
+    every ``min_title_score`` ``config.example.json`` ships (30-50) -- and the
+    correct edition was discarded as a non-match.
+    """
+
+    SHORT_AND_FULL_TITLES = [
+        (
+            "Ein new Kochbuch",
+            "Ein new Kochbuch, Das ist Ein grundtliche beschreibung wie man "
+            "recht vnd wol kochen soll",
+        ),
+        (
+            "Le cuisinier françois",
+            "Le cuisinier françois, enseignant la maniere de bien apprester et "
+            "assaisonner toutes sortes de viandes",
+        ),
+        (
+            "The Art of Cookery",
+            "The Art of Cookery, Made Plain and Easy; Which Far Exceeds Any "
+            "Thing of the Kind Ever Yet Published",
+        ),
+    ]
+
+    def test_short_title_is_a_perfect_match_for_its_full_imprint(self) -> None:
+        for short, full in self.SHORT_AND_FULL_TITLES:
+            assert token_set_ratio(short, full) == 100, short
+            assert title_score(short, full) == 100, short
+
+    def test_set_semantics_are_symmetric(self) -> None:
+        for short, full in self.SHORT_AND_FULL_TITLES:
+            assert token_set_ratio(full, short) == 100, short
+
+    def test_disjoint_titles_stay_far_below_the_gate(self) -> None:
+        """Set semantics must not inflate unrelated titles."""
+        assert token_set_ratio("abc def", "xyz uvw") < 50
+        assert title_score("The Art of Cooking", "History of France") < 50
+        assert title_score("Le Cuisinier francois", "A Treatise on Naval Gunnery") < 35
+
+    def test_no_shared_tokens_reduces_to_the_sort_ratio(self) -> None:
+        """An empty intersection scores exactly as the sort-only version did."""
+        for a, b in (("Almanach", "N/A"), ("abc def", "xyz uvw")):
+            sorted_a = " ".join(sorted(normalize_text(a).split()))
+            sorted_b = " ".join(sorted(normalize_text(b).split()))
+            expected = int(
+                round(difflib.SequenceMatcher(None, sorted_a, sorted_b).ratio() * 100)
+            )
+            assert token_set_ratio(a, b) == expected
 
 
 class TestTitleScore:

@@ -145,6 +145,19 @@ class TestDetectProvider:
     def test_unknown_identifier_returns_empty(self) -> None:
         assert detect_provider("some_random_string_12345") == []
 
+    @pytest.mark.parametrize(
+        "identifier",
+        ["bsb11280551\n", "  bsb11280551", "bsb11280551\r\n", "\tbsb11280551 "],
+    )
+    def test_surrounding_whitespace_is_stripped(self, identifier: str) -> None:
+        """A pasted identifier carries a line break; ``$`` matched anyway.
+
+        ``re`` matches ``$`` immediately before a trailing newline, so the
+        pattern accepted the identifier and the newline then travelled verbatim
+        into the manifest URL.
+        """
+        assert detect_provider(identifier) == ["mdz"]
+
     def test_no_duplicates(self) -> None:
         """Even if multiple patterns match the same provider, no dupes."""
         # bpt6k matches "^bpt6k\w+$"
@@ -205,6 +218,15 @@ class TestResolveIdentifier:
         results = resolve_identifier("item_xyz", provider_key="internet_archive")
         assert len(results) == 1
         assert len(results[0].manifest_urls) == 2
+
+    def test_whitespace_never_reaches_a_manifest_url(self) -> None:
+        """Both the auto-detected and the explicit path strip first."""
+        auto = resolve_identifier("bsb11280551\n")
+        assert auto[0].manifest_urls == [
+            "https://api.digitale-sammlungen.de/iiif/presentation/v2/bsb11280551/manifest"
+        ]
+        explicit = resolve_identifier("  bsb11280551 ", provider_key="mdz")
+        assert explicit[0].manifest_urls == auto[0].manifest_urls
 
     def test_explicit_native_download_provider(self) -> None:
         results = resolve_identifier(

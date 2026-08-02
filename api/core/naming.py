@@ -12,6 +12,8 @@ import re
 import sys
 from pathlib import Path
 
+from ..matching import NON_DECOMPOSABLE_TRANSLIT, strip_accents
+
 logger = logging.getLogger(__name__)
 
 # Windows applications default to a 260-character MAX_PATH limit. What is
@@ -70,6 +72,14 @@ PROVIDER_ABBREV = {
 def to_snake_case(value: str | None) -> str:
     """Convert arbitrary string to snake_case: lowercase, alnum + underscores only.
 
+    Accents are folded and non-decomposable Latin letters transliterated first,
+    using the same machinery as :mod:`api.matching`. Without that step the
+    ASCII-only replacement below turned every accented letter into an
+    underscore, so the same title reached different slugs depending on the
+    Unicode form a provider happened to deliver ("Küche" as NFC -> ``k_che``,
+    as NFD -> ``ku_che``), breaking resume and deduplication, and distinct
+    titles collided ("Gebäck" and "Gebück" both -> ``geb_ck``).
+
     Args:
         value: Input string to convert
 
@@ -79,7 +89,7 @@ def to_snake_case(value: str | None) -> str:
     if value is None:
         return ""
 
-    s = str(value)
+    s = strip_accents(str(value)).lower().translate(NON_DECOMPOSABLE_TRANSLIT)
     # Replace non-alnum with underscores
     s = re.sub(r"[^0-9A-Za-z]+", "_", s)
     # Insert underscore between letter-number boundaries (e.g., e0001 -> e_0001)
@@ -144,13 +154,30 @@ def sanitize_filename(name: str, max_base_len: int = 100) -> str:
     # filesystem-illegal characters like "?" past the base-only cleaning above,
     # which then breaks os.replace() on Windows.
     ext = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", ext)
-    return f"{base}{ext}"
+    # Windows silently drops a trailing dot or space from a file name, so a
+    # name that ends in one cannot be reopened under the name it was written
+    # with. Strip them last, after the extension has been scrubbed.
+    return f"{base}{ext}".rstrip(". ") or "_untitled_"
+
+
+# A trailing segment counts as an extension only if it is a short run of
+# letters and digits: ".pdf" and ".tar" qualify, "vol. 2" and ". " do not.
+_EXTENSION_SEGMENT_RE = re.compile(r"\.[A-Za-z0-9]{1,8}$")
+
+# Enough for the longest compound extension in play (.tar.gz); anything
+# further left belongs to the base name.
+_MAX_EXTENSION_SEGMENTS = 2
 
 
 def _split_name_and_suffixes(name: str) -> tuple[str, str]:
     """Split a filename into base name and extension(s).
 
-    Preserves multi-suffix like .tar.gz.
+    Only trailing segments that look like real extensions are treated as such,
+    and at most two of them, so multi-suffix names (.tar.gz) survive while
+    ordinary dots inside a title ("Mr. Smith's Voyage, vol. 2.pdf") stay in the
+    base and are cleaned and truncated with it. ``Path.suffixes`` used to hand
+    back everything from the first dot onward, which let arbitrary text bypass
+    sanitization entirely.
 
     Args:
         name: Filename to split
@@ -159,12 +186,22 @@ def _split_name_and_suffixes(name: str) -> tuple[str, str]:
         Tuple of (base_name, extensions)
     """
     base = Path(name).name
-    suffixes = Path(base).suffixes
-    ext = "".join(suffixes)
 
-    base_no_ext = base[: -len(ext)] if ext else base
+    stem = base
+    segments: list[str] = []
+    while len(segments) < _MAX_EXTENSION_SEGMENTS:
+        match = _EXTENSION_SEGMENT_RE.search(stem)
+        if match is None:
+            break
+        segments.append(match.group(0))
+        stem = stem[: match.start()]
 
-    return base_no_ext, ext
+    if not stem:
+        # Nothing but extension-looking segments (".pdf"): there is no base to
+        # keep separate, so treat the whole name as the base.
+        return base, ""
+
+    return stem, "".join(reversed(segments))
 
 
 def get_provider_slug(pref_key: str | None, url_provider: str | None) -> str:

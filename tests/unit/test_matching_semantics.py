@@ -60,10 +60,13 @@ def test_titleless_record_cannot_clear_the_shipped_gate() -> None:
     caller's own query) for a missing title. ``normalize_text("N/A")`` is
     ``"n a"``, which scores 35-36 against a short query -- at or above the 35
     that ``config.example.json`` ships -- so a record whose title could not be
-    read outranked genuinely matching candidates.
+    read outranked genuinely matching candidates. The token-set scorer leaves
+    those numbers exactly where they were: none of these queries shares a
+    token with ``"n a"``, so the empty intersection sends the comparison back
+    to the plain sorted-token ratio.
     """
     for query in ("Almanach", "Analecta", "Manual de arte"):
-        assert title_score(query, "N/A") >= 35  # the sentinel was not inert
+        assert 35 <= title_score(query, "N/A") <= 36  # the sentinel is not inert
         assert score_candidate(_sr(""), query, None, 0.2)["score"] == pytest.approx(0.0)
 
 
