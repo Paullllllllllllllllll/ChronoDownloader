@@ -17,7 +17,7 @@ from ..core.download import download_file
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["download_iiif_renderings"]
+__all__ = ["download_iiif_renderings", "select_renderings"]
 
 # Upper bound on rendering downloads attempted for one manifest, so a manifest
 # advertising hundreds of dead renderings cannot turn a limit of one file into
@@ -129,22 +129,9 @@ def _rendering_format(value: Any) -> str:
     return value.lower()
 
 
-def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
-    """Download files referenced in IIIF manifest-level 'rendering' entries.
-
-    Args:
-        manifest: IIIF manifest dictionary
-        folder_path: Target directory for downloads
-
-    Returns:
-        Number of files successfully downloaded
-    """
-    dl_cfg = get_download_config()
-
-    if not dl_cfg.get("download_manifest_renderings", True):
-        return 0
-
-    whitelist: list[str] = [
+def _configured_whitelist(dl_cfg: dict[str, Any]) -> list[str]:
+    """Return the lowercased, order-preserving rendering MIME whitelist."""
+    return [
         str(m).lower()
         for m in (
             dl_cfg.get("rendering_mime_whitelist")
@@ -153,21 +140,33 @@ def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
         if m
     ]
 
-    try:
-        limit = int(
-            dl_cfg.get(
-                "max_renderings_per_manifest", DEFAULT_MAX_RENDERINGS_PER_MANIFEST
-            )
-            or DEFAULT_MAX_RENDERINGS_PER_MANIFEST
-        )
-    except Exception:
-        limit = DEFAULT_MAX_RENDERINGS_PER_MANIFEST
 
-    candidates: list[dict[str, Any]] = collect_all_renderings(manifest)
+def select_renderings(
+    manifest: dict[str, Any], whitelist: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Return the renderings a download would attempt, in preference order.
+
+    Shared by :func:`download_iiif_renderings` and the manifest preview so the
+    two cannot disagree: a preview that merely reported every entry declaring
+    a format announced renderings for a ``text/html``-only manifest that
+    downloads nothing, and hid the format-less bare ``.pdf`` rendering that
+    the download path does fetch via its URL-suffix fallback.
+
+    Args:
+        manifest: IIIF manifest dictionary
+        whitelist: Lowercased allowed MIME fragments, most preferred first;
+            read from the download config when omitted
+
+    Returns:
+        Deduplicated ``{"url", "format", "label"}`` dicts, whitelist order
+        first and manifest order within a rank.
+    """
+    if whitelist is None:
+        whitelist = _configured_whitelist(get_download_config())
 
     seen: set[str] = set()
     selected: list[dict[str, Any]] = []
-    for it in candidates:
+    for it in collect_all_renderings(manifest):
         # One malformed entry must not cost the manifest its other renderings.
         try:
             url = it.get("@id") or it.get("id")
@@ -189,6 +188,35 @@ def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     # otherwise handed back the EPUB under the default limit of one file. The
     # sort is stable, so equally ranked renderings keep manifest order.
     selected.sort(key=lambda r: _whitelist_rank(r["url"], r["format"], whitelist))
+    return selected
+
+
+def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
+    """Download files referenced in IIIF manifest-level 'rendering' entries.
+
+    Args:
+        manifest: IIIF manifest dictionary
+        folder_path: Target directory for downloads
+
+    Returns:
+        Number of files successfully downloaded
+    """
+    dl_cfg = get_download_config()
+
+    if not dl_cfg.get("download_manifest_renderings", True):
+        return 0
+
+    try:
+        limit = int(
+            dl_cfg.get(
+                "max_renderings_per_manifest", DEFAULT_MAX_RENDERINGS_PER_MANIFEST
+            )
+            or DEFAULT_MAX_RENDERINGS_PER_MANIFEST
+        )
+    except Exception:
+        limit = DEFAULT_MAX_RENDERINGS_PER_MANIFEST
+
+    selected = select_renderings(manifest, _configured_whitelist(dl_cfg))
 
     # The limit counts files obtained, not attempts made. Truncating the
     # candidate list first meant that when the chosen renderings were dead the

@@ -390,7 +390,13 @@ class TestPreviewManifest:
                     ]
                 }
             ],
-            "rendering": {"format": "application/pdf"},
+            # A rendering carries its URL in "@id"; without one there is
+            # nothing to download, and the preview now reports only what the
+            # download path would actually fetch.
+            "rendering": {
+                "@id": "https://example.org/volume.pdf",
+                "format": "application/pdf",
+            },
         }
         result = preview_manifest("https://example.org/iiif/123/manifest.json")
         assert result is not None
@@ -481,6 +487,91 @@ class TestPreviewManifest:
         result = preview_manifest("https://example.org/iiif/123/manifest.json")
         assert result is not None
         assert result["page_count"] == 2
+
+
+class TestPreviewMatchesDownloadSelection:
+    """The preview must promise exactly what the download path would fetch.
+
+    ``preview_manifest`` used to report every rendering that declared any
+    format and applied no whitelist at all, while ``download_iiif_renderings``
+    applies the configured MIME whitelist plus a ``.pdf``/``.epub`` URL-suffix
+    fallback for format-less entries. The two therefore disagreed in both
+    directions.
+    """
+
+    @patch("api.iiif._direct.make_request")
+    def test_non_whitelisted_rendering_is_not_advertised(
+        self, mock_request: MagicMock
+    ) -> None:
+        """A text/html-only rendering downloads nothing, so it promises nothing."""
+        mock_request.return_value = {
+            "label": "HTML viewer only",
+            "rendering": [{"@id": "https://example.org/viewer", "format": "text/html"}],
+        }
+
+        with patch(
+            "api.iiif._renderings.get_download_config",
+            return_value={
+                "rendering_mime_whitelist": ["application/pdf"],
+            },
+        ):
+            result = preview_manifest("https://example.org/iiif/123/manifest.json")
+
+        assert result is not None
+        assert result["has_renderings"] is False
+        assert result["rendering_formats"] == []
+
+    @patch("api.iiif._direct.make_request")
+    def test_format_less_pdf_rendering_is_advertised(
+        self, mock_request: MagicMock
+    ) -> None:
+        """A bare ``.pdf`` URL without a format is fetched via the suffix
+        fallback, so the preview must not report it as absent."""
+        mock_request.return_value = {
+            "label": "Format-less PDF",
+            "rendering": [{"@id": "https://example.org/volume.pdf"}],
+        }
+
+        with patch(
+            "api.iiif._renderings.get_download_config",
+            return_value={
+                "rendering_mime_whitelist": ["application/pdf"],
+            },
+        ):
+            result = preview_manifest("https://example.org/iiif/123/manifest.json")
+
+        assert result is not None
+        assert result["has_renderings"] is True
+        assert result["rendering_formats"] == []
+
+    @patch("api.iiif._direct.make_request")
+    def test_preview_lists_formats_in_download_preference_order(
+        self, mock_request: MagicMock
+    ) -> None:
+        """The whitelist is an ordered preference, and the preview inherits it."""
+        mock_request.return_value = {
+            "rendering": [
+                {"@id": "https://example.org/v.epub", "format": "application/epub+zip"},
+                {"@id": "https://example.org/v.pdf", "format": "application/pdf"},
+            ]
+        }
+
+        with patch(
+            "api.iiif._renderings.get_download_config",
+            return_value={
+                "rendering_mime_whitelist": [
+                    "application/pdf",
+                    "application/epub+zip",
+                ],
+            },
+        ):
+            result = preview_manifest("https://example.org/iiif/123/manifest.json")
+
+        assert result is not None
+        assert result["rendering_formats"] == [
+            "application/pdf",
+            "application/epub+zip",
+        ]
 
 
 class TestDownloadFromIIIFManifestFileStem:

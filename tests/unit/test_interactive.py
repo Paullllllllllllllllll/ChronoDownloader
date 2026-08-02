@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -624,3 +625,200 @@ class TestInteractiveSessionDeferredAccounting:
         assert shown.get("deferred") == 1
         assert shown.get("failed") == 0
         assert shown.get("processed") == 1
+
+
+class TestInteractiveSkipAccounting:
+    """A resume-skip is neither a success nor a failure.
+
+    ``pipeline.process_work`` returns None exactly when the work is
+    resume-skipped, and single mode mapped that to "failed", so re-running an
+    already-downloaded work reported a failure. Batch skips reached the stats
+    dict but had no slot in the session summary and vanished.
+    """
+
+    @staticmethod
+    def _providers() -> Any:
+        return [("p", object(), object(), "P")]
+
+    def test_process_single_work_reports_a_resume_skip_as_skipped(self) -> None:
+        from main.orchestration import pipeline
+        from main.ui import interactive as mod
+
+        log = logging.getLogger("test-skip")
+        with patch.object(pipeline, "process_work", return_value=None):
+            status = mod.process_single_work(
+                "Already Downloaded", None, "W0001", "out", False, log
+            )
+
+        assert status == "skipped"
+
+    def test_single_mode_books_a_skip_as_neither_success_nor_failure(
+        self, temp_dir: str, capsys: Any
+    ) -> None:
+        from main.ui import interactive as mod
+
+        config = DownloadConfiguration()
+        config.mode = "single"
+        config.single_title = "Already Downloaded"
+        config.output_dir = temp_dir
+        config.dry_run = False
+
+        shown: dict[str, Any] = {}
+
+        def _capture(**kwargs: Any) -> None:
+            shown.update(kwargs)
+
+        with (
+            patch.object(ConsoleUI, "enable_ansi"),
+            patch.object(mod, "process_single_work", return_value="skipped"),
+            patch.object(mod, "get_deferred_queue") as queue,
+            patch(
+                "main.orchestration.pipeline.load_enabled_apis",
+                return_value=self._providers(),
+            ),
+            patch(
+                "main.orchestration.pipeline.filter_enabled_providers_for_keys",
+                side_effect=lambda providers: providers,
+            ),
+            patch.object(ConsoleUI, "print_session_summary", side_effect=_capture),
+        ):
+            queue.return_value.get_pending.return_value = []
+            mod.run_interactive_session(config)
+
+        assert shown.get("processed") == 1
+        assert shown.get("failed") == 0
+        assert shown.get("succeeded") == 0
+        assert "Skipped: 1" in capsys.readouterr().out
+
+    def test_batch_skips_are_reported_alongside_the_summary(
+        self, temp_dir: str, sample_csv_file: str, capsys: Any
+    ) -> None:
+        from main.ui import interactive as mod
+
+        config = DownloadConfiguration()
+        config.mode = "csv"
+        config.csv_path = sample_csv_file
+        config.output_dir = temp_dir
+        config.dry_run = False
+
+        with (
+            patch.object(ConsoleUI, "enable_ansi"),
+            patch.object(
+                mod,
+                "process_csv_batch_with_stats",
+                return_value={
+                    "processed": 2,
+                    "succeeded": 2,
+                    "failed": 0,
+                    "skipped": 3,
+                    "deferred": 0,
+                },
+            ),
+            patch.object(mod, "get_deferred_queue") as queue,
+            patch(
+                "main.orchestration.pipeline.load_enabled_apis",
+                return_value=self._providers(),
+            ),
+            patch(
+                "main.orchestration.pipeline.filter_enabled_providers_for_keys",
+                side_effect=lambda providers: providers,
+            ),
+        ):
+            queue.return_value.get_pending.return_value = []
+            mod.run_interactive_session(config)
+
+        assert "Skipped: 3" in capsys.readouterr().out
+
+
+class TestInteractiveDirectIIIFAccounting:
+    """A partial IIIF download is retriable, not a failure.
+
+    ``process_direct_iiif`` returns "partial" for an incomplete page set. The
+    --iiif CLI handler counts it separately and the batch runners leave it
+    uncounted so the row stays pending; the interactive loop booked it as a
+    failure via a catch-all ``elif status != "dry_run"``.
+    """
+
+    def _config(self, output_dir: str, urls: list[str]) -> DownloadConfiguration:
+        config = DownloadConfiguration()
+        config.mode = "direct_iiif"
+        config.iiif_urls = urls
+        config.output_dir = output_dir
+        config.dry_run = False
+        return config
+
+    def test_partial_is_not_counted_as_failed(self, temp_dir: str, capsys: Any) -> None:
+        from main.ui import interactive as mod
+
+        shown: dict[str, Any] = {}
+
+        def _capture(**kwargs: Any) -> None:
+            shown.update(kwargs)
+
+        config = self._config(
+            temp_dir,
+            [
+                "https://example.org/iiif/a/manifest.json",
+                "https://example.org/iiif/b/manifest.json",
+            ],
+        )
+
+        with (
+            patch.object(ConsoleUI, "enable_ansi"),
+            patch.object(
+                mod,
+                "process_direct_iiif",
+                side_effect=[{"status": "partial"}, {"status": "completed"}],
+            ),
+            patch.object(mod, "get_deferred_queue") as queue,
+            patch(
+                "main.orchestration.pipeline.load_enabled_apis",
+                return_value=[],
+            ),
+            patch(
+                "main.orchestration.pipeline.filter_enabled_providers_for_keys",
+                side_effect=lambda providers: providers,
+            ),
+            patch.object(ConsoleUI, "print_session_summary", side_effect=_capture),
+        ):
+            queue.return_value.get_pending.return_value = []
+            mod.run_interactive_session(config)
+
+        assert shown.get("processed") == 2
+        assert shown.get("succeeded") == 1
+        assert shown.get("failed") == 0
+        assert "partially" in capsys.readouterr().out
+
+    def test_failed_manifest_still_counts_as_failed(self, temp_dir: str) -> None:
+        from main.ui import interactive as mod
+
+        shown: dict[str, Any] = {}
+
+        def _capture(**kwargs: Any) -> None:
+            shown.update(kwargs)
+
+        config = self._config(temp_dir, ["https://example.org/iiif/a/manifest.json"])
+
+        with (
+            patch.object(ConsoleUI, "enable_ansi"),
+            patch.object(
+                mod,
+                "process_direct_iiif",
+                return_value={"status": "failed", "error": "404"},
+            ),
+            patch.object(mod, "get_deferred_queue") as queue,
+            patch(
+                "main.orchestration.pipeline.load_enabled_apis",
+                return_value=[],
+            ),
+            patch(
+                "main.orchestration.pipeline.filter_enabled_providers_for_keys",
+                side_effect=lambda providers: providers,
+            ),
+            patch.object(ConsoleUI, "print_session_summary", side_effect=_capture),
+        ):
+            queue.return_value.get_pending.return_value = []
+            mod.run_interactive_session(config)
+
+        assert shown.get("failed") == 1
+        assert shown.get("succeeded") == 0

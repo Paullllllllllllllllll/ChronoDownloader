@@ -30,7 +30,7 @@ from ..core.config import get_config, get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
 from ._parsing import download_one_from_service, extract_page_sources
-from ._renderings import collect_all_renderings, download_iiif_renderings
+from ._renderings import download_iiif_renderings, select_renderings
 
 logger = logging.getLogger(__name__)
 
@@ -206,16 +206,14 @@ def preview_manifest(manifest_url: str) -> dict[str, Any] | None:
     # whole-image URL, so the preview counts the same pages the download does.
     page_count = len(extract_page_sources(manifest))
 
-    # Sequence-level renderings count too: Wellcome and the DFG viewer hang the
-    # whole-work PDF off the sequence, and scanning only the manifest level
-    # reported "has_renderings: False" for a work the download path does fetch.
-    rendering_formats: list[str] = []
-    for r in collect_all_renderings(manifest):
-        fmt: Any = r.get("format") or r.get("type") or ""
-        if isinstance(fmt, list):
-            fmt = next((v for v in fmt if isinstance(v, str)), "")
-        if isinstance(fmt, str) and fmt:
-            rendering_formats.append(fmt)
+    # Report exactly what the download path would attempt (manifest- and
+    # sequence-level entries, config MIME whitelist, URL-suffix fallback for
+    # format-less entries). Listing every entry that merely declared a format
+    # made the preview disagree with the download in both directions: a
+    # text/html-only rendering promised a file that never arrived, and a
+    # format-less bare-.pdf rendering was reported absent yet was fetched.
+    selected = select_renderings(manifest)
+    rendering_formats: list[str] = [r["format"] for r in selected if r["format"]]
 
     return {
         "url": manifest_url,
@@ -224,7 +222,7 @@ def preview_manifest(manifest_url: str) -> dict[str, Any] | None:
         "item_id": item_id,
         "label": meta.get("label"),
         "page_count": page_count,
-        "has_renderings": len(rendering_formats) > 0,
+        "has_renderings": len(selected) > 0,
         "rendering_formats": rendering_formats,
         "metadata": meta.get("metadata", {}),
     }

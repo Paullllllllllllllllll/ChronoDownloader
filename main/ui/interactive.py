@@ -796,8 +796,9 @@ def process_single_work(
 
     Returns:
         The outcome status: ``"completed"``, ``"deferred"``, ``"dry_run"``,
-        or ``"failed"``. A quota deferral is deliberately distinguished from
-        a failure, matching the CLI's accounting.
+        ``"skipped"``, or ``"failed"``. A quota deferral and a resume-skip are
+        deliberately distinguished from a failure, matching the CLI's
+        accounting.
     """
     log.info(
         "Processing single work: '%s'%s", title, f" by '{creator}'" if creator else ""
@@ -814,6 +815,12 @@ def process_single_work(
     # A dry run performs no download, so it is neither success nor failure.
     if dry_run:
         return "dry_run"
+    # process_work returns None exactly when the work was resume-skipped (it
+    # is already downloaded). Reporting that as a failure told the user a
+    # completed work had failed, and the batch runners count it as processed
+    # only, never as failed.
+    if result is None:
+        return "skipped"
     if not isinstance(result, dict):
         return "failed"
     # process_work returns {"status": "deferred"} for a quota deferral; the
@@ -891,6 +898,7 @@ def run_interactive_session(
         "succeeded": 0,
         "failed": 0,
         "deferred": 0,
+        "skipped": 0,
     }
 
     # Baseline for the modes that do not compute their own deferred delta.
@@ -926,6 +934,11 @@ def run_interactive_session(
             # queue-length delta below cannot see it, because re-deferring an
             # item already queued leaves the length unchanged.
             stats["deferred"] = 1
+        elif single_status == "skipped":
+            # A resume-skip counts as processed and nothing else, exactly as
+            # both batch runners treat it; booking it as a failure made the
+            # summary claim a failure for an already-downloaded work.
+            stats["skipped"] = 1
         elif single_status == "failed":
             stats["failed"] = 1
     elif config.mode == "search":
@@ -940,6 +953,7 @@ def run_interactive_session(
         else:
             stats["failed"] = 1
     elif config.mode == "direct_iiif":
+        partial_count = 0
         for i, url in enumerate(config.iiif_urls, start=1):
             title: str | None
             file_stem: str | None
@@ -967,8 +981,27 @@ def run_interactive_session(
             status = result.get("status", "")
             if status == "completed":
                 stats["succeeded"] += 1
-            elif status != "dry_run":
+            elif status == "partial":
+                # An incomplete page set is retriable, not a failure: the
+                # --iiif CLI handler counts and logs it separately, and the
+                # batch runners leave it uncounted so the row stays pending.
+                partial_count += 1
+            elif status == "failed":
                 stats["failed"] += 1
+
+        if partial_count:
+            log.warning(
+                "Direct IIIF batch complete: %d processed, %d succeeded, "
+                "%d partial, %d failed",
+                stats["processed"],
+                stats["succeeded"],
+                partial_count,
+                stats["failed"],
+            )
+            ConsoleUI.print_warning(
+                f"{partial_count} manifest(s) downloaded only partially "
+                "(incomplete page set); run again to retry them."
+            )
 
     # Handle deferred downloads. The batch modes already carry the honest
     # per-run delta from run_batch_downloads, and single mode books its own
@@ -998,6 +1031,17 @@ def run_interactive_session(
         if duration is not None:
             print(f"  {ConsoleUI.DIM}Search took {duration:.1f}s{ConsoleUI.RESET}")
         return
+
+    # print_session_summary has no slot for skipped works, so both batch
+    # runners' skipped rows and a single-mode resume-skip fell out of the
+    # session output entirely. One line keeps the parts visible without
+    # changing the summary's signature.
+    skipped = stats.get("skipped", 0)
+    if skipped:
+        ConsoleUI.print_info(
+            f"Skipped: {skipped} work(s) (already downloaded, or a row that "
+            "could not be used); counted as neither succeeded nor failed."
+        )
 
     # Display detailed completion summary
     ConsoleUI.print_session_summary(

@@ -16,7 +16,11 @@ from api.iiif._parsing import (
     _fetch_info_json,
     extract_page_sources,
 )
-from api.iiif._renderings import _MAX_RENDERING_ATTEMPTS, download_iiif_renderings
+from api.iiif._renderings import (
+    _MAX_RENDERING_ATTEMPTS,
+    download_iiif_renderings,
+    select_renderings,
+)
 
 # ============================================================================
 # extract_image_service_bases – IIIF v2
@@ -789,6 +793,61 @@ class TestRenderingSelection:
             assert download_iiif_renderings(manifest, "/out") == 2
 
         assert m.call_count == 2
+
+
+class TestSelectRenderingsIsTheSharedSelection:
+    """``select_renderings`` is the single source of truth for candidates.
+
+    The download path and the manifest preview both consume it, so the
+    preview cannot promise a file the download would skip, nor stay silent
+    about one it does fetch.
+    """
+
+    def test_selection_matches_what_the_download_attempts(self) -> None:
+        manifest = {
+            "rendering": [
+                {"@id": "https://example.org/viewer", "format": "text/html"},
+                {
+                    "@id": "https://example.org/book.epub",
+                    "format": "application/epub+zip",
+                },
+                {"@id": "https://example.org/plain.pdf"},
+            ]
+        }
+        cfg = {
+            "rendering_mime_whitelist": ["application/pdf", "application/epub+zip"],
+            "max_renderings_per_manifest": 5,
+        }
+        with (
+            patch("api.iiif._renderings.get_download_config", return_value=cfg),
+            patch("api.iiif._renderings.download_file", return_value="/out/f") as m,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 2
+            selected = select_renderings(manifest)
+
+        attempted = [call.args[0] for call in m.call_args_list]
+        assert attempted == [r["url"] for r in selected]
+        # The format-less .pdf ranks with the PDF whitelist entry, so it comes
+        # before the EPUB even though the manifest lists it last.
+        assert attempted == [
+            "https://example.org/plain.pdf",
+            "https://example.org/book.epub",
+        ]
+
+    def test_selection_reads_the_whitelist_from_config_by_default(self) -> None:
+        manifest = {
+            "rendering": [
+                {
+                    "@id": "https://example.org/book.epub",
+                    "format": "application/epub+zip",
+                }
+            ]
+        }
+        with patch(
+            "api.iiif._renderings.get_download_config",
+            return_value={"rendering_mime_whitelist": ["application/pdf"]},
+        ):
+            assert select_renderings(manifest) == []
 
 
 class TestSequenceLevelRenderings:
