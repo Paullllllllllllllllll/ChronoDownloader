@@ -12,8 +12,17 @@ from typing import Any, cast
 
 from ..core.budget import budget_exhausted, get_budget
 from ..core.config import get_api_key_envvar, get_provider_setting
-from ..core.context import get_current_work
-from ..core.download import download_file, save_json
+from ..core.context import (
+    get_current_name_stem,
+    get_current_provider,
+    get_current_work,
+    release_counter,
+)
+
+# _counter_key is the only way to rebuild the naming key download_file
+# reserved; duplicating its stem truncation and type mapping here would drift.
+from ..core.download import _counter_key, download_file, save_json
+from ..core.naming import get_provider_slug, to_snake_case
 from ..core.network import make_request
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 
@@ -165,73 +174,82 @@ def search_google_books(
     results: list[SearchResult] = []
     if isinstance(data, dict) and data.get("items"):
         for item in data["items"]:
-            volume_info = item.get("volumeInfo", {})
-            vol_id = item.get("id")
-            access_info = (
-                item.get("accessInfo", {})
-                if isinstance(item.get("accessInfo", {}), dict)
-                else {}
-            )
-
-            # Determine if there is a direct downloadable link (pdf/epub)
-            def _dl(ai: dict[str, Any]) -> str | None:
-                """Get direct downloadable link from access info."""
-                if not isinstance(ai, dict):
-                    return None
-                # Prefer configured format, but accept either
-                if isinstance(ai.get(prefer_fmt, {}), dict) and ai.get(
-                    prefer_fmt, {}
-                ).get("downloadLink"):
-                    return cast(str, ai[prefer_fmt]["downloadLink"])
-                for alt in ("pdf", "epub"):
-                    if isinstance(ai.get(alt, {}), dict) and ai.get(alt, {}).get(
-                        "downloadLink"
-                    ):
-                        return cast(str, ai[alt]["downloadLink"])
-                return None
-
-            download_link = _dl(access_info)
-            # If configured to free_only, accept items that are clearly free/public
-            # domain even when the API does not expose a direct downloadLink.
-            public_domain = bool(access_info.get("publicDomain"))
-            viewability = str(
-                access_info.get("viewability") or volume_info.get("viewability") or ""
-            ).lower()
-            is_full_view = any(
-                k in viewability
-                for k in (
-                    "all_pages",
-                    "all_pages_public_domain",
-                    "full_public_domain",
-                    "full",
+            # One malformed volume must not discard the whole result set.
+            try:
+                volume_info = item.get("volumeInfo", {})
+                vol_id = item.get("id")
+                access_info = (
+                    item.get("accessInfo", {})
+                    if isinstance(item.get("accessInfo", {}), dict)
+                    else {}
                 )
-            )
-            # Only accept clearly downloadable or fully viewable items when free_only
-            # is requested. Some items report generic ebook availability without a
-            # direct download; exclude those.
-            if free_only and not (download_link or public_domain or is_full_view):
-                # Skip items that are not obviously free when free_only is requested
+
+                # Determine if there is a direct downloadable link (pdf/epub)
+                def _dl(ai: dict[str, Any]) -> str | None:
+                    """Get direct downloadable link from access info."""
+                    if not isinstance(ai, dict):
+                        return None
+                    # Prefer configured format, but accept either
+                    if isinstance(ai.get(prefer_fmt, {}), dict) and ai.get(
+                        prefer_fmt, {}
+                    ).get("downloadLink"):
+                        return cast(str, ai[prefer_fmt]["downloadLink"])
+                    for alt in ("pdf", "epub"):
+                        if isinstance(ai.get(alt, {}), dict) and ai.get(alt, {}).get(
+                            "downloadLink"
+                        ):
+                            return cast(str, ai[alt]["downloadLink"])
+                    return None
+
+                download_link = _dl(access_info)
+                # If configured to free_only, accept items that are clearly
+                # free/public domain even when the API does not expose a direct
+                # downloadLink.
+                public_domain = bool(access_info.get("publicDomain"))
+                viewability = str(
+                    access_info.get("viewability")
+                    or volume_info.get("viewability")
+                    or ""
+                ).lower()
+                is_full_view = any(
+                    k in viewability
+                    for k in (
+                        "all_pages",
+                        "all_pages_public_domain",
+                        "full_public_domain",
+                        "full",
+                    )
+                )
+                # Only accept clearly downloadable or fully viewable items when
+                # free_only is requested. Some items report generic ebook
+                # availability without a direct download; exclude those.
+                if free_only and not (download_link or public_domain or is_full_view):
+                    # Skip items that are not obviously free when free_only is
+                    # requested
+                    continue
+                raw = {
+                    "title": volume_info.get("title") or "",
+                    # A present-but-null "authors" (or one holding non-string
+                    # entries) would make a bare join raise TypeError. Pass the
+                    # list under the plural key: joining with ", " would be
+                    # re-split as an inverted personal name, and an empty join
+                    # became creators == [""], a phantom author persisted to
+                    # work.json and index.csv.
+                    "creators": [str(a) for a in (volume_info.get("authors") or [])],
+                    "date": volume_info.get("publishedDate"),
+                    "id": vol_id,
+                    "item_url": f"https://books.google.com/books?id={vol_id}"
+                    if vol_id
+                    else None,
+                    "accessInfo": access_info,
+                    "viewability": viewability,
+                    "publicDomain": public_domain,
+                    "has_download": bool(download_link),
+                }
+                results.append(convert_to_searchresult("Google Books", raw))
+            except Exception:
+                logger.warning("Google Books: skipping malformed record", exc_info=True)
                 continue
-            raw = {
-                "title": volume_info.get("title") or "",
-                # A present-but-null "authors" (or one holding non-string
-                # entries) would make a bare join raise TypeError. Pass the
-                # list under the plural key: joining with ", " would be
-                # re-split as an inverted personal name, and an empty join
-                # became creators == [""], a phantom author persisted to
-                # work.json and index.csv.
-                "creators": [str(a) for a in (volume_info.get("authors") or [])],
-                "date": volume_info.get("publishedDate"),
-                "id": vol_id,
-                "item_url": f"https://books.google.com/books?id={vol_id}"
-                if vol_id
-                else None,
-                "accessInfo": access_info,
-                "viewability": viewability,
-                "publicDomain": public_domain,
-                "has_download": bool(download_link),
-            }
-            results.append(convert_to_searchresult("Google Books", raw))
     return results
 
 
@@ -413,6 +431,39 @@ def _is_placeholder_image(filepath: str) -> bool:
         return False
 
 
+def _discard_placeholder(filepath: str, requested_name: str) -> None:
+    """Drop a placeholder page image with the same refunds as a partial file.
+
+    Mirrors ``api.core.download._discard_partial``: the file goes, its bytes
+    are returned to the budget, and the sequence number it reserved is handed
+    back. Spending that number would leave a permanent hole in the page
+    numbering, so the next real page lands at ``image_002`` with nothing at
+    ``image_001``.
+    """
+    try:
+        discarded_bytes = os.path.getsize(filepath)
+    except OSError:
+        discarded_bytes = 0
+
+    with contextlib.suppress(Exception):
+        os.remove(filepath)
+
+    if discarded_bytes:
+        get_budget().refund("images", get_current_work(), discarded_bytes)
+
+    try:
+        ext = os.path.splitext(filepath)[1].lower()
+        stem = get_current_name_stem() or to_snake_case(requested_name) or "object"
+        prov_slug = get_provider_slug(get_current_provider(), "google_books")
+        release_counter(_counter_key(ext, stem, prov_slug))
+    except Exception:
+        logger.debug(
+            "Google Books: could not release the naming counter for %s",
+            filepath,
+            exc_info=True,
+        )
+
+
 def _download_page_images(
     volume_id: str, output_folder: str, max_pages: int = 50
 ) -> bool:
@@ -486,16 +537,7 @@ def _download_page_images(
                         page_num,
                         downloaded_path,
                     )
-                    try:
-                        discarded_bytes = os.path.getsize(downloaded_path)
-                    except OSError:
-                        discarded_bytes = 0
-                    with contextlib.suppress(Exception):
-                        os.remove(downloaded_path)
-                    if discarded_bytes:
-                        get_budget().refund(
-                            "images", get_current_work(), discarded_bytes
-                        )
+                    _discard_placeholder(downloaded_path, filename)
                     placeholder_count += 1
                     consecutive_placeholders += 1
                     # Don't count as downloaded, but don't count as failure either

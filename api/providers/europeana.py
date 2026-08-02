@@ -275,14 +275,21 @@ def download_europeana_work(
                     if u and isinstance(u, str):
                         candidates.append(u)
 
+                # Record API v2 nests the media links one level down: the
+                # aggregations live under "object", not at the top level, and
+                # edmPreview sits on object.europeanaAggregation. Reading them
+                # off the envelope found nothing.
                 obj = rec.get("object") or {}
-                _add(obj.get("edmIsShownBy"))
-                _add(obj.get("edmPreview"))
-                # Also look inside aggregations
-                for agg in rec.get("aggregations", []) or []:
+                if not isinstance(obj, dict):
+                    obj = {}
+                for agg in obj.get("aggregations", []) or []:
                     if isinstance(agg, dict):
                         _add(agg.get("edmIsShownBy"))
                         _add(agg.get("edmPreview"))
+                # Thumbnail last: edmIsShownBy is the full media file.
+                euro_agg = obj.get("europeanaAggregation") or {}
+                if isinstance(euro_agg, dict):
+                    _add(euro_agg.get("edmPreview"))
                 # Download first working candidate
                 for idx, u in enumerate(candidates, start=1):
                     try:

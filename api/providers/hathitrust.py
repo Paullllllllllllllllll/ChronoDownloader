@@ -1,4 +1,4 @@
-"""Connector for the HathiTrust Bibliographic and Data APIs."""
+"""Connector for the HathiTrust Bibliographic API (metadata only)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from ..core.config import get_api_key_envvar
-from ..core.download import download_file, save_json
+from ..core.download import save_json
 from ..core.network import make_request
 from ..model import (
     SearchResult,
@@ -20,7 +20,6 @@ from ..model import (
 logger = logging.getLogger(__name__)
 
 BIB_BASE_URL = "https://catalog.hathitrust.org/api/volumes/brief/"
-DATA_API_URL = "https://babel.hathitrust.org/cgi/htd/volume/pages"
 
 
 def _api_key() -> str | None:
@@ -212,17 +211,19 @@ def search_hathitrust(
 def download_hathitrust_work(
     item_data: SearchResult | dict[str, Any], output_folder: str
 ) -> bool:
-    """Download metadata and a representative page for a HathiTrust item.
+    """Save the Bibliographic API record for a HathiTrust item.
 
-    - Save Bibliographic API record (if present in raw.bib).
-    - If HATHI_API_KEY is set, fetch the first page image via the Data API using HTID.
+    HathiTrust is a metadata-only provider here: page images are served solely
+    by the OAuth 1.0a-signed Data API, which this tool does not implement.
+    Saving bibliographic metadata alone is not retrievable content, so the
+    return value is always False and the work is never marked "completed".
 
     Args:
         item_data: SearchResult or dict containing item data
         output_folder: Folder to download files to
 
     Returns:
-        True if download was successful, False otherwise
+        False -- no page content is ever retrieved
     """
     htid = resolve_item_id(item_data, "htid", "identifier", "id")
     bib = resolve_item_field(item_data, "bib")
@@ -232,25 +233,12 @@ def download_hathitrust_work(
     if isinstance(bib, dict):
         save_json(bib, output_folder, f"hathi_{(rec_id or htid or 'item')}_metadata")
 
-    # Fetch first page image if possible. Only a downloaded page counts as
-    # success; saving the bibliographic metadata alone is not retrievable
-    # content, so the work must not be marked "completed" on metadata alone.
-    downloaded = False
-    key = _api_key()
-    if key and htid:
-        params = {
-            "id": htid,
-            "seq": 1,
-            "v": "1",
-            "format": "json",
-            "apikey": key,
-        }
-        page_data = make_request(DATA_API_URL, params=params)
-        if (
-            isinstance(page_data, dict)
-            and page_data.get("url")
-            and download_file(page_data["url"], output_folder, f"hathi_{htid}_p1")
-        ):
-            downloaded = True
+    if _api_key():
+        logger.warning(
+            "HathiTrust: a page download needs OAuth 1.0a-signed Data API "
+            "requests, which this tool does not implement; HATHI_API_KEY only "
+            "affects metadata. Saved bibliographic data for %s, no pages.",
+            htid or rec_id or "item",
+        )
 
-    return downloaded
+    return False

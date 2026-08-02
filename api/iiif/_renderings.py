@@ -95,6 +95,16 @@ def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
 
     candidates: list[dict[str, Any]] = _collect_renderings(manifest)
 
+    # IIIF Presentation v2 also hangs the whole-work PDF off the sequence
+    # (Wellcome and the DFG viewer both do), so a manifest-only scan missed it
+    # and fell back to page images. Appended after the manifest-level entries;
+    # the dedup below absorbs the overlap when both carry the same URL.
+    sequences = manifest.get("sequences")
+    if isinstance(sequences, list):
+        for seq in sequences:
+            if isinstance(seq, dict):
+                candidates.extend(_collect_renderings(seq))
+
     seen: set[str] = set()
     selected: list[dict[str, Any]] = []
     for it in candidates:

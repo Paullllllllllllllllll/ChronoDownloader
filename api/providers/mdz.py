@@ -97,7 +97,10 @@ def search_mdz(
         soup = BeautifulSoup(html, "html.parser")
         for a in soup.find_all("a", href=True):
             href = str(a["href"])
-            m = re.search(r"/(?:en|de)?/view/([^/?#]+)", href)
+            # The language segment is optional as a whole: the old
+            # "/(?:en|de)?/view/" needed a doubled slash to match an
+            # unprefixed "/view/bsb..." href, so those were all skipped.
+            m = re.search(r"/(?:(?:en|de)/)?view/([^/?#]+)", href)
             if not m:
                 continue
             obj_id = m.group(1)

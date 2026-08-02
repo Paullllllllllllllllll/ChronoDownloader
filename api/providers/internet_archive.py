@@ -63,29 +63,37 @@ def search_internet_archive(
         return results
     if data.get("response") and data["response"].get("docs"):
         for item in data["response"]["docs"]:
-            # Build a normalized SearchResult, keep raw for downloads
-            ia_identifier = item.get("identifier")
-            # The IA API returns creator as either a single string or a list.
-            # Pass a list through under the plural key rather than joining it
-            # with ", ": _as_list no longer splits on the comma, because that
-            # comma is far more often the inverted-name separator.
-            creator_val = item.get("creator")
-            creators_list = (
-                [creator_val]
-                if isinstance(creator_val, str)
-                else ([str(c) for c in creator_val] if creator_val else [])
-            )
-            raw = {
-                "title": item.get("title") or "",
-                "creators": creators_list,
-                "identifier": ia_identifier,
-                "item_url": f"https://archive.org/details/{ia_identifier}"
-                if ia_identifier
-                else None,
-                "year": item.get("year"),
-            }
-            sr = convert_to_searchresult("Internet Archive", raw)
-            results.append(sr)
+            # One malformed doc must not discard the whole result set.
+            try:
+                # Build a normalized SearchResult, keep raw for downloads
+                ia_identifier = item.get("identifier")
+                # The IA API returns creator as either a single string or a
+                # list. Pass a list through under the plural key rather than
+                # joining it with ", ": _as_list no longer splits on the comma,
+                # because that comma is far more often the inverted-name
+                # separator.
+                creator_val = item.get("creator")
+                creators_list = (
+                    [creator_val]
+                    if isinstance(creator_val, str)
+                    else ([str(c) for c in creator_val] if creator_val else [])
+                )
+                raw = {
+                    "title": item.get("title") or "",
+                    "creators": creators_list,
+                    "identifier": ia_identifier,
+                    "item_url": f"https://archive.org/details/{ia_identifier}"
+                    if ia_identifier
+                    else None,
+                    "year": item.get("year"),
+                }
+                sr = convert_to_searchresult("Internet Archive", raw)
+                results.append(sr)
+            except Exception:
+                logger.warning(
+                    "Internet Archive: skipping malformed record", exc_info=True
+                )
+                continue
     return results
 
 

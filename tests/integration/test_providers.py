@@ -406,6 +406,113 @@ class TestEuropeanaProvider:
 
             assert mock_req.call_args[0][0] == "https://example.org/iiif/1/manifest"
 
+    def test_record_api_fallback_reads_the_nested_media_links(
+        self, temp_output_dir: str
+    ) -> None:
+        """Record API v2 nests the media links under "object".
+
+        edmIsShownBy lives on object.aggregations[n] and edmPreview on
+        object.europeanaAggregation; the fallback read both off the envelope
+        and therefore found nothing.
+        """
+        manifest: dict[str, Any] = {"sequences": []}
+        record = {
+            "success": True,
+            "object": {
+                "about": "/1/x",
+                "aggregations": [
+                    {
+                        "edmIsShownBy": "https://media.example.org/full.tif",
+                        "edmIsShownAt": "https://example.org/page",
+                    }
+                ],
+                "europeanaAggregation": {
+                    "edmPreview": "https://api.europeana.eu/thumbnail/x"
+                },
+            },
+        }
+        with (
+            patch("api.providers.europeana._api_key", return_value="KEY"),
+            patch(
+                "api.providers.europeana.make_request",
+                side_effect=[manifest, record],
+            ),
+            patch("api.providers.europeana.save_json", return_value=None),
+            patch("api.providers.europeana.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.europeana.extract_image_service_bases", return_value=[]
+            ),
+            patch("api.providers.europeana.extract_direct_image_urls", return_value=[]),
+            patch(
+                "api.providers.europeana.download_direct_image_urls",
+                return_value=False,
+            ),
+            patch(
+                "api.providers.europeana.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            from api.providers.europeana import download_europeana_work
+
+            item = {
+                "id": "/1/x",
+                "iiif_manifest": "https://iiif.europeana.eu/1/manifest",
+            }
+            assert download_europeana_work(item, temp_output_dir) is True
+
+        # Full media before the thumbnail.
+        assert mock_dl.call_args_list[0].args[0] == (
+            "https://media.example.org/full.tif"
+        )
+
+    def test_record_api_fallback_falls_through_to_the_preview(
+        self, temp_output_dir: str
+    ) -> None:
+        """A dead edmIsShownBy must still leave the thumbnail as a candidate."""
+        manifest: dict[str, Any] = {"sequences": []}
+        record = {
+            "object": {
+                "aggregations": [
+                    {"edmIsShownBy": "https://media.example.org/dead.tif"}
+                ],
+                "europeanaAggregation": {
+                    "edmPreview": "https://api.europeana.eu/thumbnail/x"
+                },
+            }
+        }
+        with (
+            patch("api.providers.europeana._api_key", return_value="KEY"),
+            patch(
+                "api.providers.europeana.make_request",
+                side_effect=[manifest, record],
+            ),
+            patch("api.providers.europeana.save_json", return_value=None),
+            patch("api.providers.europeana.download_iiif_renderings", return_value=0),
+            patch(
+                "api.providers.europeana.extract_image_service_bases", return_value=[]
+            ),
+            patch("api.providers.europeana.extract_direct_image_urls", return_value=[]),
+            patch(
+                "api.providers.europeana.download_direct_image_urls",
+                return_value=False,
+            ),
+            patch(
+                "api.providers.europeana.download_file",
+                side_effect=[None, "/out/thumb"],
+            ) as mock_dl,
+        ):
+            from api.providers.europeana import download_europeana_work
+
+            item = {
+                "id": "/1/x",
+                "iiif_manifest": "https://iiif.europeana.eu/1/manifest",
+            }
+            assert download_europeana_work(item, temp_output_dir) is True
+
+        assert [c.args[0] for c in mock_dl.call_args_list] == [
+            "https://media.example.org/dead.tif",
+            "https://api.europeana.eu/thumbnail/x",
+        ]
+
 
 class TestSbbDigitalProvider:
     """Integration tests for the SBB (Staatsbibliothek zu Berlin) provider."""
@@ -655,6 +762,71 @@ class TestDplaProvider:
             assert results[0].raw["creators"] == []
             assert results[0].creators == []
 
+    def test_download_reads_fields_from_the_docs_envelope(
+        self, temp_output_dir: str
+    ) -> None:
+        """The v2 item endpoint answers {"count": 1, "docs": [{...}]}.
+
+        Reading object/isShownBy/hasView off the envelope found nothing, so
+        details-based discovery always missed.
+        """
+        item_details = {
+            "count": 1,
+            "docs": [
+                {
+                    "id": "DPLA1",
+                    "object": "https://iiif.example.org/manifest.json",
+                    "isShownBy": "https://media.example.org/full.jpg",
+                }
+            ],
+        }
+        manifest: dict[str, Any] = {"sequences": []}
+        with (
+            patch("api.providers.dpla._api_key", return_value=None),
+            patch(
+                "api.providers.dpla.make_request",
+                side_effect=[item_details, manifest],
+            ),
+            patch("api.providers.dpla.save_json", return_value=None) as mock_save,
+            patch("api.providers.dpla.download_iiif_renderings", return_value=0),
+            patch("api.providers.dpla.extract_image_service_bases", return_value=[]),
+            patch("api.providers.dpla.download_page_images", return_value=False),
+            patch(
+                "api.providers.dpla.download_file", return_value="/out/f.jpg"
+            ) as mock_dl,
+        ):
+            from api.providers.dpla import download_dpla_work
+
+            assert download_dpla_work({"id": "DPLA1"}, temp_output_dir) is True
+
+        # The full envelope is still what gets persisted as metadata.
+        assert mock_save.call_args_list[0].args[0] == item_details
+        # isShownBy came from docs[0], not the envelope.
+        assert mock_dl.call_args_list[0].args[0] == (
+            "https://media.example.org/full.jpg"
+        )
+
+    def test_download_still_accepts_an_unwrapped_dict(
+        self, temp_output_dir: str
+    ) -> None:
+        """A hand-fed record without "docs" must keep working."""
+        item_details = {"isShownBy": "https://media.example.org/full.jpg"}
+        with (
+            patch("api.providers.dpla._api_key", return_value=None),
+            patch("api.providers.dpla.make_request", return_value=item_details),
+            patch("api.providers.dpla.save_json", return_value=None),
+            patch(
+                "api.providers.dpla.download_file", return_value="/out/f.jpg"
+            ) as mock_dl,
+        ):
+            from api.providers.dpla import download_dpla_work
+
+            assert download_dpla_work({"id": "DPLA1"}, temp_output_dir) is True
+
+        assert mock_dl.call_args_list[0].args[0] == (
+            "https://media.example.org/full.jpg"
+        )
+
 
 class TestBudgetGuards:
     """Regression tests for missing download-budget guards on IIIF page loops."""
@@ -723,6 +895,57 @@ class TestGoogleBooksProvider:
             assert results[0].raw["creators"] == []
             assert results[0].creators == []
             assert results[1].creators == ["123", "X"]
+
+    def test_placeholder_discard_refunds_bytes_and_the_naming_counter(
+        self, temp_output_dir: str
+    ) -> None:
+        """A discarded placeholder must refund exactly like _discard_partial.
+
+        Only the file and its bytes were given back; the sequence number the
+        naming counter had reserved was spent, so the next real page landed at
+        image_002 with a permanent hole at image_001.
+        """
+        import os
+
+        from api.core.budget import get_budget
+        from api.core.context import increment_counter, peek_counter, reset_counters
+        from api.core.download import _counter_key
+        from api.core.naming import get_provider_slug, to_snake_case
+        from api.providers import google_books
+
+        reset_counters()
+
+        placeholder = os.path.join(temp_output_dir, "placeholder.jpg")
+        with open(placeholder, "wb") as fh:
+            fh.write(b"x" * 9103)
+
+        requested = "google_VOL1_page_0001.jpg"
+        key = _counter_key(
+            ".jpg",
+            to_snake_case(requested),
+            get_provider_slug(None, "google_books"),
+        )
+        # Stand in for the reservation download_file made for this file.
+        increment_counter(key)
+        get_budget().record_download("images", None, 9103)
+        before = get_budget().total_images_bytes
+
+        with (
+            patch("api.providers.google_books.download_file", return_value=placeholder),
+            patch(
+                "api.providers.google_books._is_placeholder_image", return_value=True
+            ),
+        ):
+            assert (
+                google_books._download_page_images("VOL1", temp_output_dir, 1) is False
+            )
+
+        assert not os.path.exists(placeholder)
+        assert get_budget().total_images_bytes == before - 9103
+        # Rolled back to zero: the next page may still take image_001.
+        assert peek_counter(key) == 1
+
+        reset_counters()
 
 
 class TestBritishLibraryProvider:
@@ -1204,6 +1427,36 @@ class TestDownloadFunctions:
 
             assert result is False
 
+    def test_hathitrust_download_with_api_key_fires_no_request(
+        self, temp_output_dir: str
+    ) -> None:
+        """The old Data-API branch matched no real htd endpoint.
+
+        Page bytes are served only by the OAuth 1.0a-signed Data API, so with a
+        key set the connector must warn and stay metadata-only rather than
+        issuing a request that can never succeed.
+        """
+        with (
+            patch("api.providers.hathitrust._api_key", return_value="KEY"),
+            patch("api.providers.hathitrust.save_json", return_value=None) as mock_save,
+            patch("api.providers.hathitrust.make_request") as mock_req,
+        ):
+            from api.providers.hathitrust import download_hathitrust_work
+
+            result = download_hathitrust_work(
+                {"htid": "abc", "bib": {"x": 1}}, temp_output_dir
+            )
+
+            assert result is False
+            mock_req.assert_not_called()
+            mock_save.assert_called_once()
+
+    def test_hathitrust_module_has_no_data_api_constant(self) -> None:
+        """The doomed endpoint constant is gone, not merely unused."""
+        from api.providers import hathitrust
+
+        assert not hasattr(hathitrust, "DATA_API_URL")
+
 
 class TestQuotedQueryEscaping:
     """Embedded double quotes must not break quoted query phrases."""
@@ -1366,7 +1619,11 @@ class TestPageImageLoopConsolidation:
             )
 
     def test_dpla_uses_shared_loop_with_dpla_key(self, temp_output_dir: str) -> None:
-        item_details = {"object": "https://iiif.example.org/manifest.json"}
+        # The v2 single-item endpoint answers with the search envelope.
+        item_details = {
+            "count": 1,
+            "docs": [{"object": "https://iiif.example.org/manifest.json"}],
+        }
         with (
             patch("api.providers.dpla._api_key", return_value=None),
             patch(

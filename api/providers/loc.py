@@ -52,8 +52,15 @@ def search_loc(
     # search if needed
     books_url = urllib.parse.urljoin(LOC_API_BASE_URL, "books/")
     data = make_request(books_url, params=params, headers=headers)
+
+    def _content_results(payload: dict[str, Any]) -> Any:
+        # "content" is not always an object: on some LoC responses it is a
+        # string or a list, and .get() on it raised AttributeError.
+        content = payload.get("content")
+        return content.get("results") if isinstance(content, dict) else None
+
     if not isinstance(data, dict) or not (
-        data.get("results") or (data.get("content") and data["content"].get("results"))
+        data.get("results") or _content_results(data)
     ):
         search_url = urllib.parse.urljoin(LOC_API_BASE_URL, "search/")
         data = make_request(search_url, params=params, headers=headers)
@@ -91,20 +98,26 @@ def search_loc(
             creator = contributors
         else:
             creator = None
+        # LoC carries the printed date on "date" (a year) and "dates" (a list
+        # of ISO stamps); either fills the modeled date field.
+        item_date = item.get("date")
+        if not item_date:
+            dates = item.get("dates")
+            if isinstance(dates, list) and dates:
+                item_date = dates[0]
+            elif isinstance(dates, str):
+                item_date = dates
         raw = {
             "title": item.get("title") or "",
             "creator": creator,
+            "date": str(item_date) if item_date else None,
             "id": item_id,
             "item_url": item.get("url"),
             "iiif_manifest": _extract_iiif_manifest(item),
         }
         return convert_to_searchresult("Library of Congress", raw)
 
-    items = None
-    if data.get("results"):
-        items = data.get("results")
-    elif data.get("content") and data["content"].get("results"):
-        items = data["content"].get("results")
+    items = data.get("results") or _content_results(data)
 
     if items:
         for item in items:

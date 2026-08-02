@@ -243,6 +243,7 @@ def _build_annas_result(
     creators: list[str],
     title_candidates: list[str],
     title_scores: dict[str, int],
+    date: str | None = None,
 ) -> SearchResult:
     """Build a SearchResult from parsed Anna's Archive fields.
 
@@ -254,6 +255,7 @@ def _build_annas_result(
         "title": best_title,
         "creator": creator or None,
         "creators": creators,
+        "date": date,
         "md5": md5,
         "id": md5,
         "item_url": MD5_PAGE_URL.format(md5=md5),
@@ -382,6 +384,13 @@ def search_annas_archive(
                     if len(cells) > 2:
                         extracted_creators = _extract_creators_from_cell(cells[2])
 
+                    # Cell 4 is the year column the layout comment above names;
+                    # it was parsed out and then thrown away, leaving the
+                    # modeled date empty for every Anna's Archive record.
+                    item_date: str | None = None
+                    if len(cells) > 4:
+                        item_date = cells[4].get_text(strip=True) or None
+
                     best_title, title_scores = _select_best_title(
                         title, title_candidates
                     )
@@ -405,6 +414,7 @@ def search_annas_archive(
                         extracted_creators,
                         title_candidates,
                         title_scores,
+                        item_date,
                     )
                     results.append(sr)
 
@@ -706,9 +716,12 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
         if "fast_download" in href or "member" in text:
             continue
 
-        # Skip non-download links
-        if any(
-            skip in href.lower()
+        # Skip non-download links. The fragment is matched on the prefix only:
+        # as a substring, "#" rejected every URL that merely carried a
+        # fragment, including the download links themselves.
+        href_lower = href.lower()
+        if href_lower.startswith("#") or any(
+            skip in href_lower
             for skip in [
                 "account",
                 "login",
@@ -719,7 +732,6 @@ def _download_via_scraping(md5: str, output_folder: str) -> bool:
                 "blog",
                 "about",
                 "faq",
-                "#",
             ]
         ):
             continue

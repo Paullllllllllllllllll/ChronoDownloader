@@ -785,3 +785,99 @@ class TestRenderingSelection:
             assert download_iiif_renderings(manifest, "/out") == 2
 
         assert m.call_count == 2
+
+
+class TestSequenceLevelRenderings:
+    """IIIF v2 also carries whole-work renderings on the sequence.
+
+    Wellcome and the DFG viewer hang the volume PDF off sequences[n].rendering
+    rather than the manifest, and a manifest-only scan skipped it and fell back
+    to downloading every page image.
+    """
+
+    def test_sequence_level_pdf_is_collected(self) -> None:
+        manifest = {
+            "@context": "http://iiif.io/api/presentation/2/context.json",
+            "sequences": [
+                {
+                    "@type": "sc:Sequence",
+                    "rendering": {
+                        "@id": "https://example.org/volume.pdf",
+                        "format": "application/pdf",
+                        "label": "Download as PDF",
+                    },
+                    "canvases": [],
+                }
+            ],
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+        assert mock_dl.call_args_list[0].args[0] == "https://example.org/volume.pdf"
+
+    def test_manifest_level_renderings_come_first(self) -> None:
+        manifest = {
+            "rendering": [
+                {"@id": "https://example.org/top.pdf", "format": "application/pdf"}
+            ],
+            "sequences": [
+                {
+                    "rendering": [
+                        {
+                            "@id": "https://example.org/seq.pdf",
+                            "format": "application/pdf",
+                        }
+                    ]
+                }
+            ],
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 2},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 2
+
+        assert [c.args[0] for c in mock_dl.call_args_list] == [
+            "https://example.org/top.pdf",
+            "https://example.org/seq.pdf",
+        ]
+
+    def test_duplicate_rendering_across_levels_is_downloaded_once(self) -> None:
+        shared = {"@id": "https://example.org/vol.pdf", "format": "application/pdf"}
+        manifest = {"rendering": [shared], "sequences": [{"rendering": [shared]}]}
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 5},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+        assert mock_dl.call_count == 1
+
+    def test_non_list_sequences_are_ignored(self) -> None:
+        manifest = {"sequences": "not-a-list"}
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch("api.iiif._renderings.download_file", return_value="/out/f"),
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 0

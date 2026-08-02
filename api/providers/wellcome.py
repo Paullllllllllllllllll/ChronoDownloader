@@ -184,24 +184,29 @@ def search_wellcome(
     if not isinstance(data, dict):
         return results
     for work in data.get("results", []) or []:
-        services = _extract_image_services(work)
-        manifests = _extract_manifest_urls(work)
-        if not services and not manifests:
+        # One malformed work must not discard the whole result set.
+        try:
+            services = _extract_image_services(work)
+            manifests = _extract_manifest_urls(work)
+            if not services and not manifests:
+                continue
+            work_id = work.get("id")
+            raw = {
+                "title": work.get("title") or "",
+                "creator": _first_contributor(work),
+                "date": _production_date(work),
+                "id": work_id,
+                "item_url": f"https://wellcomecollection.org/works/{work_id}"
+                if work_id
+                else None,
+                "image_services": services,
+                "iiif_manifest": manifests[0] if manifests else None,
+                "thumbnail": (work.get("thumbnail") or {}).get("url"),
+            }
+            results.append(convert_to_searchresult("Wellcome Collection", raw))
+        except Exception:
+            logger.warning("Wellcome: skipping malformed record", exc_info=True)
             continue
-        work_id = work.get("id")
-        raw = {
-            "title": work.get("title") or "",
-            "creator": _first_contributor(work),
-            "date": _production_date(work),
-            "id": work_id,
-            "item_url": f"https://wellcomecollection.org/works/{work_id}"
-            if work_id
-            else None,
-            "image_services": services,
-            "iiif_manifest": manifests[0] if manifests else None,
-            "thumbnail": (work.get("thumbnail") or {}).get("url"),
-        }
-        results.append(convert_to_searchresult("Wellcome Collection", raw))
         if len(results) >= max_results:
             break
     return results

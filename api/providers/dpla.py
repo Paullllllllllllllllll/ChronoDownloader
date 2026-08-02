@@ -169,16 +169,27 @@ def download_dpla_work(
 
     save_json(item_details, output_folder, f"dpla_{item_id}_metadata")
 
+    # The v2 single-item endpoint answers with the same envelope as search --
+    # {"count": 1, "docs": [{...}]} -- so every field below has to be read off
+    # docs[0], not the envelope. A dict handed in without "docs" (test doubles,
+    # already-unwrapped records) is used as-is.
+    docs = item_details.get("docs")
+    item_doc = (
+        docs[0]
+        if isinstance(docs, list) and docs and isinstance(docs[0], dict)
+        else item_details
+    )
+
     # Manifest discovery from details and search fallbacks
     manifest_url = None
     # From details
     for field in ("object", "isShownAt", "isShownBy"):
-        v = item_details.get(field)
+        v = item_doc.get(field)
         if isinstance(v, str) and "manifest" in v and "iiif" in v:
             manifest_url = v
             break
     if not manifest_url:
-        hv = item_details.get("hasView")
+        hv = item_doc.get("hasView")
 
         def _from_hv(hv: Any) -> str | None:
             if isinstance(hv, list):
@@ -252,7 +263,7 @@ def download_dpla_work(
     # Prefer values from item_details; if not present, use search raw fields
     search_raw = item_data.raw if isinstance(item_data, SearchResult) else item_data
     for field in ("isShownBy", "hasView", "object"):
-        val = item_details.get(field)
+        val = item_doc.get(field)
         if val is None and isinstance(search_raw, dict):
             val = search_raw.get(field)
         if val is not None:
