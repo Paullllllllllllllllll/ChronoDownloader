@@ -321,6 +321,45 @@ class TestRateLimiterFunctions:
             assert rl is not None
             assert rl.min_interval_s == 0.1
 
+    def test_config_change_reconfigures_the_live_limiter(self) -> None:
+        """An in-process config change must not reset the pacing clock.
+
+        Swapping in a fresh limiter discarded _last_ts, granting every worker
+        one unpaced request the moment the config was reloaded.
+        """
+        from api.core.network import get_rate_limiter
+
+        with patch("api.core.network.get_network_config") as mock_config:
+            mock_config.return_value = {"delay_ms": 100, "jitter_ms": 0}
+            rl = get_rate_limiter("test")
+            assert rl is not None
+            rl._last_ts = 1234.5  # sentinel: the pacing clock is running
+
+            mock_config.return_value = {"delay_ms": 200, "jitter_ms": 0}
+            rl2 = get_rate_limiter("test")
+
+        assert rl2 is rl
+        assert rl.min_interval_s == 0.2
+        assert rl._last_ts == 1234.5
+
+    def test_negative_delay_is_clamped_and_stable(self) -> None:
+        """A negative delay_ms must not re-allocate the limiter per request.
+
+        __init__ clamps negatives to 0.0 while the old comparison used the
+        raw value, so the two never matched and every call swapped in a
+        fresh limiter.
+        """
+        from api.core.network import get_rate_limiter
+
+        with patch("api.core.network.get_network_config") as mock_config:
+            mock_config.return_value = {"delay_ms": -100, "jitter_ms": 0}
+            rl = get_rate_limiter("test")
+            rl2 = get_rate_limiter("test")
+
+        assert rl is not None
+        assert rl.min_interval_s == 0.0
+        assert rl2 is rl
+
 
 class TestSessionManagement:
     """Tests for session management."""

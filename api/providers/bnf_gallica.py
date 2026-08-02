@@ -83,12 +83,23 @@ def search_gallica(
         try:
             title_elements = record.findall("dc:title", namespaces)
             item_title = title_elements[0].text if title_elements else ""
-            creator_elements = record.findall("dc:creator", namespaces)
-            item_creator = creator_elements[0].text if creator_elements else None
+            # Keep every dc:creator: multi-author records are common, and the
+            # creator matcher scores against the best entry of the list, so
+            # dropping co-authors under-scored queries that name one.
+            item_creators = [
+                el.text.strip()
+                for el in record.findall("dc:creator", namespaces)
+                if el.text and el.text.strip()
+            ]
             ark_id = None
             for identifier_el in record.findall("dc:identifier", namespaces):
                 if identifier_el.text and "ark:/" in identifier_el.text:
-                    match = re.search(r"ark:/12148/([^/]+)", identifier_el.text)
+                    # Stop at the first character outside the ark name
+                    # alphabet: dc:identifier may embed the ark in prose, a
+                    # tracking query string, or a Gallica dot-qualifier
+                    # (".texteBrut"), and the old [^/]+ carried all of that
+                    # into the persisted identifier and the manifest URL.
+                    match = re.search(r"ark:/12148/([a-zA-Z0-9]+)", identifier_el.text)
                     if match:
                         ark_id = match.group(1)
                         break
@@ -101,9 +112,12 @@ def search_gallica(
             if ark_id:
                 raw = {
                     "title": item_title,
-                    "creator": item_creator,
+                    "creators": item_creators,
                     "date": item_date,
                     "ark_id": ark_id,
+                    # Landing page, persisted into the works CSV link column
+                    # and index.csv like every other connector's results.
+                    "item_url": f"https://gallica.bnf.fr/ark:/12148/{ark_id}",
                 }
                 results.append(convert_to_searchresult("BnF Gallica", raw))
         except Exception:

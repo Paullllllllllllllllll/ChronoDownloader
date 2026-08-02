@@ -386,6 +386,61 @@ class TestPerRecordGuards:
         assert [r.source_id for r in results] == ["w1"]
 
 
+class TestGallicaSearchParsing:
+    """Gallica must confine the ark capture and carry every field it parses."""
+
+    @staticmethod
+    def _sru_response(identifier: str, creators: list[str]) -> str:
+        creator_xml = "".join(f"<dc:creator>{c}</dc:creator>" for c in creators)
+        return (
+            '<srw:searchRetrieveResponse xmlns:srw="http://www.loc.gov/zing/srw/">'
+            "<srw:records><srw:record><srw:recordData>"
+            '<oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/"'
+            ' xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            "<dc:title>Le cuisinier royal</dc:title>"
+            f"{creator_xml}"
+            "<dc:date>1817</dc:date>"
+            f"<dc:identifier>{identifier}</dc:identifier>"
+            "</oai_dc:dc>"
+            "</srw:recordData></srw:record></srw:records>"
+            "</srw:searchRetrieveResponse>"
+        )
+
+    def _search(self, identifier: str, creators: list[str]) -> list[SearchResult]:
+        xml = self._sru_response(identifier, creators)
+        with patch("api.providers.bnf_gallica.make_request", return_value=xml):
+            from api.providers.bnf_gallica import search_gallica
+
+            return search_gallica("cuisinier royal")
+
+    def test_ark_capture_stops_at_qualifier_and_query(self) -> None:
+        """Dot-qualifiers, query strings, and prose stay out of the ark."""
+        identifier = (
+            "Disponible sur https://gallica.bnf.fr/ark:/12148/bpt6k12345q"
+            ".texteBrut?rk=21459;2 (consulté le 01.08.2026)"
+        )
+        results = self._search(identifier, ["Viard, Alexandre"])
+
+        assert [r.raw["ark_id"] for r in results] == ["bpt6k12345q"]
+
+    def test_every_creator_is_carried(self) -> None:
+        """Multi-author records keep all dc:creator entries for scoring."""
+        results = self._search(
+            "https://gallica.bnf.fr/ark:/12148/bpt6k12345q",
+            ["Viard, Alexandre", "Fouret, Léon"],
+        )
+
+        assert results[0].creators == ["Viard, Alexandre", "Fouret, Léon"]
+
+    def test_item_url_is_the_landing_page(self) -> None:
+        """The result carries the landing URL for the CSV link column."""
+        results = self._search(
+            "https://gallica.bnf.fr/ark:/12148/bpt6k12345q", ["Viard"]
+        )
+
+        assert results[0].item_url == "https://gallica.bnf.fr/ark:/12148/bpt6k12345q"
+
+
 def test_all_results_are_search_results() -> None:
     """Sanity: the guards above must not change the returned type."""
     payload = {"response": {"docs": [{"identifier": "x", "title": "y"}]}}

@@ -389,6 +389,22 @@ class RateLimiter:
         self._last_ts = 0.0
         self._lock = threading.Lock()
 
+    def reconfigure(self, min_interval_s: float, jitter_s: float) -> None:
+        """Apply refreshed config values under the limiter's own lock.
+
+        Mutating the existing instance instead of swapping in a fresh one
+        keeps ``_last_ts``, so an in-process config change cannot grant every
+        worker one unpaced request against the provider (matching the
+        circuit breaker's ``reconfigure`` semantics).
+
+        Args:
+            min_interval_s: Minimum interval between requests in seconds
+            jitter_s: Maximum random jitter added to the interval in seconds
+        """
+        with self._lock:
+            self.min_interval_s = max(0.0, float(min_interval_s or 0.0))
+            self.jitter_s = max(0.0, float(jitter_s or 0.0))
+
     def wait(self) -> None:
         """Wait until the minimum interval has passed since the last request."""
         if self.min_interval_s <= 0 and self.jitter_s <= 0:
@@ -460,14 +476,21 @@ def get_rate_limiter(provider_key: str | None) -> RateLimiter | None:
         return None
 
     net = get_network_config(provider_key)
-    delay_s = float(net.get("delay_ms", 0) or 0) / 1000.0
-    jitter_s = float(net.get("jitter_ms", 0) or 0) / 1000.0
+    # Clamp before comparing: __init__/reconfigure clamp negatives to 0.0, so
+    # comparing against the raw value made a negative delay_ms permanently
+    # unequal and re-triggered reconfiguration on every request.
+    delay_s = max(0.0, float(net.get("delay_ms", 0) or 0)) / 1000.0
+    jitter_s = max(0.0, float(net.get("jitter_ms", 0) or 0)) / 1000.0
 
     with _RATE_LIMITERS_LOCK:
         rl = _RATE_LIMITERS.get(provider_key)
-        if rl is None or rl.min_interval_s != delay_s or rl.jitter_s != jitter_s:
+        if rl is None:
             rl = RateLimiter(delay_s, jitter_s)
             _RATE_LIMITERS[provider_key] = rl
+        elif rl.min_interval_s != delay_s or rl.jitter_s != jitter_s:
+            # In-process config change: reconfigure the live limiter instead
+            # of swapping it, so the pacing clock survives the reload.
+            rl.reconfigure(delay_s, jitter_s)
 
     return rl
 
