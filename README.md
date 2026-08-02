@@ -1,4 +1,4 @@
-# ChronoDownloader v1.23.0
+# ChronoDownloader v1.24.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1374,6 +1374,23 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.24.0** (2 August 2026) -- Second-round maintenance sweep: deeper
+  bug fixes, no new features. Title matching gains true token-set
+  semantics, so a short-title query that is a token subset of the full
+  imprint title scores 100 instead of failing the selection gates;
+  directory slugs fold accents, making NFC/NFD forms of one title reach
+  one directory. The IIIF layer accounts for every canvas of mixed and
+  multi-sequence manifests and ranks renderings by whitelist preference.
+  The curl_cffi seam re-derives the error class from the libcurl result
+  code on streamed downloads (restoring the short connect budget and the
+  SSL policy), validates impersonation profiles up front, and terminal
+  SSL and invalid-URL failures now feed or bypass the circuit breaker
+  correctly. British Library SRU records, SBB volume PPNs, DDB manifest
+  URLs, and SLUB check-digit PPNs parse the shapes the APIs actually
+  send. The CLI rejects unrecognized flags instead of opening the
+  wizard, exits 2 on configuration and path errors, and keeps --json
+  output parseable; the state layer closes its last unlocked mutations.
 
 - **v1.23.0** (2 August 2026) -- Maintenance-sweep release: bug fixes
   across all layers, no new features. DPLA's single-item endpoint and
