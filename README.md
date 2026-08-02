@@ -1,4 +1,4 @@
-# ChronoDownloader v1.22.0
+# ChronoDownloader v1.23.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1375,6 +1375,23 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.23.0** (2 August 2026) -- Maintenance-sweep release: bug fixes
+  across all layers, no new features. DPLA's single-item endpoint and
+  Europeana's Record API fallback are parsed at the nesting the APIs
+  actually use, so their details-based media discovery fires for the
+  first time; IIIF v2 sequence-level PDF renderings are collected;
+  HathiTrust is honestly metadata-only. The search-only preview ranks
+  with the CSV year column like the batch run; quota limits follow
+  config.json edits instead of the persisted state; deferred-retry
+  successes reach the works CSV under row filters; postponed retries
+  and single-mode deferrals are counted as such. --min-title-score now
+  stamps per-provider thresholds (previously a no-op wherever a
+  provider carried its own), and the max_images cap binds Wellcome's
+  primary IIIF path. The curl_cffi seam refuses kwargs it cannot
+  forward, rebuilds sessions on a changed profile, and treats
+  status-less responses as transport errors. The README, example
+  config, and toggle template are realigned with the code (SLUB and
+  SBB now ship disabled, matching the documented reachability probe).
 - **v1.22.0** (1 August 2026) -- Decision close-out release. BNE is
   answerable again: both of its hosts reject the default client on its TLS
   fingerprint alone, so an optional `impersonate` extra (curl_cffi) can now
