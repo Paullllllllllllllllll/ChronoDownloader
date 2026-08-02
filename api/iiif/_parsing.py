@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "extract_image_service_bases",
     "extract_direct_image_urls",
+    "extract_page_sources",
     "image_url_candidates",
     "download_one_from_service",
 ]
@@ -92,16 +93,27 @@ def _unwrap_v3_choice(body: Any) -> Any:
 def _iter_v2_resources(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """Yield the primary image ``resource`` dict for each v2 canvas.
 
-    Walks ``sequences[0].canvases -> canvas.images[0].resource``, skipping any
-    canvas that raises or lacks images. Returns an empty list on any
-    structural error, mirroring the defensive traversal in the original
-    extractors.
+    Walks every ``sequences[n].canvases -> canvas.images[0].resource``, skipping
+    any canvas that raises or lacks images. Reading only ``sequences[0]`` lost
+    every page of a multi-sequence manifest beyond the first sequence, and a
+    dict-valued ``sequences`` (which several v2 producers emit) raised
+    ``KeyError`` into the blanket guard and yielded no pages at all.
     """
     resources: list[dict[str, Any]] = []
     try:
-        sequences = manifest.get("sequences") or []
-        if sequences:
-            canvases = sequences[0].get("canvases", [])
+        raw_sequences = manifest.get("sequences") or []
+        sequences = (
+            [raw_sequences] if isinstance(raw_sequences, dict) else raw_sequences
+        )
+        if not isinstance(sequences, list):
+            return resources
+
+        for sequence in sequences:
+            if not isinstance(sequence, dict):
+                continue
+            canvases = sequence.get("canvases", [])
+            if not isinstance(canvases, list):
+                continue
             for canvas in canvases:
                 try:
                     images = canvas.get("images", [])
@@ -149,27 +161,54 @@ def _iter_v3_bodies(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return bodies
 
 
+def _first_service_id(service: Any) -> str | None:
+    """Return the first usable ``@id``/``id`` among one or more service blocks.
+
+    The IIIF Presentation spec permits ``service`` to be an array, and real
+    manifests put non-image services (auth, search) in it. Taking ``service[0]``
+    blindly dropped the page whenever the leading entry carried no identifier,
+    so every entry is inspected in order.
+    """
+    entries = service if isinstance(service, list) else [service]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        svc_id = entry.get("@id") or entry.get("id")
+        if isinstance(svc_id, str) and svc_id:
+            return svc_id
+    return None
+
+
+def _v2_service_base(resource: dict[str, Any]) -> str | None:
+    """Return the Image API base for a v2 canvas resource, if it has one."""
+    svc_id = _first_service_id(resource.get("service", {}))
+    if svc_id:
+        return svc_id
+
+    img_id = resource.get("@id") or resource.get("id")
+    if isinstance(img_id, str) and "/full/" in img_id:
+        return img_id.split("/full/")[0]
+    return None
+
+
+def _v3_service_base(body: dict[str, Any]) -> str | None:
+    """Return the Image API base for a v3 annotation body, if it has one."""
+    svc_id = _first_service_id(body.get("service") or body.get("services"))
+    if svc_id:
+        return svc_id
+
+    body_id = body.get("id")
+    if isinstance(body_id, str) and "/full/" in body_id:
+        return body_id.split("/full/")[0]
+    return None
+
+
 def extract_image_service_bases(manifest: dict[str, Any]) -> list[str]:
     bases: list[str] = []
 
     for res in _iter_v2_resources(manifest):
         try:
-            # The IIIF Presentation v2 spec permits resource.service to be an
-            # array; several real manifests emit this. Normalize to a single
-            # dict as the v3 branch below already does, otherwise the whole
-            # manifest silently yields zero page images.
-            service = res.get("service", {})
-            if isinstance(service, list):
-                service = service[0] if service else {}
-            svc_id = None
-            if isinstance(service, dict):
-                svc_id = service.get("@id") or service.get("id")
-
-            if not svc_id:
-                img_id = res.get("@id") or res.get("id")
-                if img_id and "/full/" in img_id:
-                    svc_id = img_id.split("/full/")[0]
-
+            svc_id = _v2_service_base(res)
             if svc_id:
                 bases.append(svc_id)
         except Exception:
@@ -177,23 +216,7 @@ def extract_image_service_bases(manifest: dict[str, Any]) -> list[str]:
 
     for body in _iter_v3_bodies(manifest):
         try:
-            service = body.get("service") or body.get("services")
-            svc_obj = None
-
-            if isinstance(service, list) and service:
-                svc_obj = service[0]
-            elif isinstance(service, dict):
-                svc_obj = service
-
-            svc_id = None
-            if svc_obj:
-                svc_id = svc_obj.get("@id") or svc_obj.get("id")
-
-            if not svc_id:
-                body_id = body.get("id")
-                if body_id and "/full/" in body_id:
-                    svc_id = body_id.split("/full/")[0]
-
+            svc_id = _v3_service_base(body)
             if svc_id:
                 bases.append(svc_id)
         except Exception:
@@ -234,6 +257,58 @@ def extract_direct_image_urls(manifest: dict[str, Any]) -> list[str]:
         if u not in seen:
             seen.add(u)
             unique.append(u)
+
+    return unique
+
+
+def extract_page_sources(manifest: dict[str, Any]) -> list[tuple[str, str]]:
+    """Return one download source per canvas, in canvas order.
+
+    Each entry is ``("service", base_url)`` for a canvas that exposes an Image
+    API service, or ``("direct", image_url)`` for one that carries only a
+    whole-image URL; the service is preferred when a canvas offers both.
+    Canvases offering neither are skipped and duplicate URLs are dropped.
+
+    :func:`extract_image_service_bases` and :func:`extract_direct_image_urls`
+    are all-or-nothing at the manifest level: a manifest mixing both kinds of
+    canvas silently loses every direct-only page as soon as one canvas
+    advertises a service, which understates the expected page count and leaves
+    unrecorded gaps. Callers that must account for every page walk this list.
+    """
+    sources: list[tuple[str, str]] = []
+
+    for res in _iter_v2_resources(manifest):
+        try:
+            svc_id = _v2_service_base(res)
+            if svc_id:
+                sources.append(("service", svc_id))
+                continue
+            img_url = res.get("@id") or res.get("id")
+            if img_url and isinstance(img_url, str):
+                sources.append(("direct", img_url))
+        except Exception:
+            logger.debug("Skipping unparseable v2 canvas resource", exc_info=True)
+            continue
+
+    for body in _iter_v3_bodies(manifest):
+        try:
+            svc_id = _v3_service_base(body)
+            if svc_id:
+                sources.append(("service", svc_id))
+                continue
+            img_url = body.get("id")
+            if img_url and isinstance(img_url, str):
+                sources.append(("direct", img_url))
+        except Exception:
+            logger.debug("Skipping unparseable v3 annotation body", exc_info=True)
+            continue
+
+    seen: set[str] = set()
+    unique: list[tuple[str, str]] = []
+    for kind, url in sources:
+        if url not in seen:
+            seen.add(url)
+            unique.append((kind, url))
 
     return unique
 

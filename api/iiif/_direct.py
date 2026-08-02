@@ -29,12 +29,8 @@ from ..core.budget import budget_exhausted
 from ..core.config import get_config, get_max_pages, prefer_pdf_over_images
 from ..core.download import download_file, save_json
 from ..core.network import make_request
-from ._parsing import (
-    download_one_from_service,
-    extract_direct_image_urls,
-    extract_image_service_bases,
-)
-from ._renderings import download_iiif_renderings
+from ._parsing import download_one_from_service, extract_page_sources
+from ._renderings import collect_all_renderings, download_iiif_renderings
 
 logger = logging.getLogger(__name__)
 
@@ -206,22 +202,20 @@ def preview_manifest(manifest_url: str) -> dict[str, Any] | None:
     provider_key, provider_name = detect_provider_from_url(manifest_url)
     item_id = extract_item_id_from_url(manifest_url)
     meta = extract_manifest_metadata(manifest)
-    service_bases = extract_image_service_bases(manifest)
-    # Manifests that expose only whole-image URLs (no Image API service) still
-    # have downloadable pages; count those so page_count is not misleadingly 0.
-    page_count = len(service_bases) or len(extract_direct_image_urls(manifest))
+    # One source per canvas, whether it exposes an Image API service or only a
+    # whole-image URL, so the preview counts the same pages the download does.
+    page_count = len(extract_page_sources(manifest))
 
+    # Sequence-level renderings count too: Wellcome and the DFG viewer hang the
+    # whole-work PDF off the sequence, and scanning only the manifest level
+    # reported "has_renderings: False" for a work the download path does fetch.
     rendering_formats: list[str] = []
-    renderings = manifest.get("rendering") or []
-    if isinstance(renderings, dict):
-        renderings = [renderings]
-    if isinstance(renderings, list):
-        for r in renderings:
-            fmt = ""
-            if isinstance(r, dict):
-                fmt = r.get("format") or r.get("type") or ""
-            if fmt:
-                rendering_formats.append(str(fmt))
+    for r in collect_all_renderings(manifest):
+        fmt: Any = r.get("format") or r.get("type") or ""
+        if isinstance(fmt, list):
+            fmt = next((v for v in fmt if isinstance(v, str)), "")
+        if isinstance(fmt, str) and fmt:
+            rendering_formats.append(fmt)
 
     return {
         "url": manifest_url,
@@ -327,15 +321,13 @@ def download_from_iiif_manifest(
     except Exception as e:
         logger.exception("Error downloading manifest renderings: %s", e)
 
-    service_bases = extract_image_service_bases(manifest)
-    # Some manifests carry whole-image URLs on the canvas resource/body but no
-    # Image API service block. When no services are found, fall back to those
-    # direct URLs so such works are not misreported as having no content.
-    direct_urls: list[str] = []
-    if not service_bases:
-        direct_urls = extract_direct_image_urls(manifest)
+    # One source per canvas: an Image API service where the canvas offers one,
+    # the whole-image URL otherwise. Choosing between the two extractors at
+    # manifest level dropped every direct-only canvas of a mixed manifest, so
+    # pages_expected understated the work and the gap went unrecorded.
+    sources = extract_page_sources(manifest)
 
-    if not service_bases and not direct_urls:
+    if not sources:
         logger.info("No IIIF image services found in manifest")
         if any_downloaded:
             result["success"] = True
@@ -344,8 +336,6 @@ def download_from_iiif_manifest(
             result["error"] = "No downloadable content found in manifest"
         return result
 
-    use_direct = not service_bases
-    sources = direct_urls if use_direct else service_bases
     max_pages = get_max_pages(provider_key)
     total = len(sources)
     to_download = sources[:max_pages] if max_pages and max_pages > 0 else sources
@@ -359,7 +349,7 @@ def download_from_iiif_manifest(
         item_id,
     )
 
-    for idx, src in enumerate(to_download, start=1):
+    for idx, (kind, src) in enumerate(to_download, start=1):
         if budget_exhausted():
             logger.warning(
                 "Download budget exhausted; stopping at %d/%d pages",
@@ -369,7 +359,7 @@ def download_from_iiif_manifest(
             break
 
         try:
-            if use_direct:
+            if kind == "direct":
                 saved = download_file(src, output_folder, f"{prefix}_p{idx:05d}")
                 ok = saved is not None
             else:

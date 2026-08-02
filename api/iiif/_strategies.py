@@ -17,6 +17,7 @@ from ._parsing import (
     download_one_from_service,
     extract_direct_image_urls,
     extract_image_service_bases,
+    extract_page_sources,
 )
 from ._renderings import download_iiif_renderings
 
@@ -219,6 +220,88 @@ def download_direct_image_urls(
     return downloaded > 0
 
 
+def _download_page_sources(
+    sources: list[tuple[str, str]],
+    output_folder: str,
+    provider_key: str,
+    item_id: str,
+    *,
+    max_pages: int | None = None,
+) -> bool:
+    """Download a mixed list of per-canvas sources in canvas order.
+
+    Each entry is ``("service", base_url)`` or ``("direct", image_url)`` as
+    produced by :func:`extract_page_sources`. Mirrors the page-limit, budget
+    and logging semantics of :func:`download_page_images`; only manifests that
+    mix both kinds of canvas need it, since either kind alone is handled by
+    the dedicated helpers.
+
+    Returns:
+        ``True`` if at least one image was downloaded.
+    """
+    if not sources:
+        return False
+
+    if max_pages is None:
+        max_pages = get_max_pages(provider_key)
+    total = len(sources)
+    to_download = sources[:max_pages] if max_pages and max_pages > 0 else sources
+
+    logger.info(
+        "%s: downloading %d/%d page images for %s (mixed service/direct canvases)",
+        provider_key.upper(),
+        len(to_download),
+        total,
+        item_id,
+    )
+
+    downloaded = 0
+    for idx, (kind, src) in enumerate(to_download, start=1):
+        if budget_exhausted():
+            logger.warning(
+                "Download budget exhausted; stopping %s downloads at %d/%d "
+                "pages for %s",
+                provider_key,
+                idx - 1,
+                len(to_download),
+                item_id,
+            )
+            break
+
+        try:
+            stem = f"{provider_key}_{item_id}_p{idx:05d}"
+            if kind == "direct":
+                ok = download_file(src, output_folder, stem) is not None
+            else:
+                ok = download_one_from_service(src, output_folder, f"{stem}.jpg")
+
+            if ok:
+                downloaded += 1
+            else:
+                if budget_exhausted():
+                    logger.warning(
+                        "Download budget hit while downloading %s %s; stopping.",
+                        provider_key,
+                        item_id,
+                    )
+                    break
+                logger.warning(
+                    "Failed to download %s image from %s",
+                    provider_key,
+                    src,
+                )
+        except Exception:
+            logger.exception(
+                "Error downloading %s image for %s from %s",
+                provider_key,
+                item_id,
+                src,
+            )
+
+    _warn_if_incomplete(provider_key, item_id, downloaded, len(to_download))
+    return downloaded > 0
+
+
 def download_iiif_manifest_and_images(
     manifest_url: str,
     output_folder: str,
@@ -267,6 +350,16 @@ def download_iiif_manifest_and_images(
             provider_key.upper(),
             item_id,
         )
+
+    # A manifest whose canvases mix Image API services with bare image URLs
+    # used to lose every direct-only page, because the choice between the two
+    # extractors was made once for the whole manifest. Walk such manifests
+    # canvas by canvas instead; homogeneous ones keep the dedicated helpers.
+    page_sources = extract_page_sources(manifest)
+    if {kind for kind, _ in page_sources} == {"service", "direct"}:
+        if _download_page_sources(page_sources, output_folder, provider_key, item_id):
+            any_downloaded = True
+        return any_downloaded
 
     service_bases = extract_image_service_bases(manifest)
     if service_bases:

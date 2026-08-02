@@ -11,7 +11,11 @@ from api.iiif import (
     extract_image_service_bases,
     image_url_candidates,
 )
-from api.iiif._parsing import _INFO_JSON_CACHE, _fetch_info_json
+from api.iiif._parsing import (
+    _INFO_JSON_CACHE,
+    _fetch_info_json,
+    extract_page_sources,
+)
 from api.iiif._renderings import _MAX_RENDERING_ATTEMPTS, download_iiif_renderings
 
 # ============================================================================
@@ -881,3 +885,653 @@ class TestSequenceLevelRenderings:
             patch("api.iiif._renderings.download_file", return_value="/out/f"),
         ):
             assert download_iiif_renderings(manifest, "/out") == 0
+
+
+# ============================================================================
+# Multi-sequence and non-list sequence containers
+# ============================================================================
+
+
+class TestMultiSequenceManifests:
+    """Every v2 sequence carries pages, and ``sequences`` is not always a list.
+
+    The walker read ``sequences[0]`` only, so a multi-sequence manifest lost
+    every page beyond the first sequence, and a dict-valued ``sequences``
+    raised ``KeyError(0)`` into the blanket guard and yielded no pages at all.
+    """
+
+    @staticmethod
+    def _canvas(service_id: str) -> dict[str, Any]:
+        return {"images": [{"resource": {"service": {"@id": service_id}}}]}
+
+    def test_pages_from_every_sequence_are_kept(self) -> None:
+        manifest = {
+            "sequences": [
+                {"canvases": [self._canvas("https://example.org/iiif/v1p1")]},
+                {
+                    "canvases": [
+                        self._canvas("https://example.org/iiif/v2p1"),
+                        self._canvas("https://example.org/iiif/v2p2"),
+                    ]
+                },
+            ]
+        }
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/v1p1",
+            "https://example.org/iiif/v2p1",
+            "https://example.org/iiif/v2p2",
+        ]
+
+    def test_dict_valued_sequences_still_yield_pages(self) -> None:
+        manifest = {
+            "sequences": {"canvases": [self._canvas("https://example.org/iiif/img1")]}
+        }
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/img1"
+        ]
+
+    def test_non_dict_sequence_entries_are_skipped(self) -> None:
+        manifest = {
+            "sequences": [
+                "not-a-sequence",
+                {"canvases": [self._canvas("https://example.org/iiif/img1")]},
+            ]
+        }
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/img1"
+        ]
+
+    def test_non_list_canvases_are_skipped(self) -> None:
+        manifest = {
+            "sequences": [
+                {"canvases": "broken"},
+                {"canvases": [self._canvas("https://example.org/iiif/img1")]},
+            ]
+        }
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/img1"
+        ]
+
+    def test_direct_urls_span_every_sequence(self) -> None:
+        manifest = {
+            "sequences": [
+                {"canvases": [{"images": [{"resource": {"@id": "https://e/p1.jpg"}}]}]},
+                {"canvases": [{"images": [{"resource": {"@id": "https://e/p2.jpg"}}]}]},
+            ]
+        }
+        assert extract_direct_image_urls(manifest) == [
+            "https://e/p1.jpg",
+            "https://e/p2.jpg",
+        ]
+
+
+# ============================================================================
+# Service arrays whose leading entry is unusable
+# ============================================================================
+
+
+class TestServiceArrayFallback:
+    """A service array may lead with an entry that carries no identifier.
+
+    Auth and search services sit alongside the image service in real
+    manifests; taking ``service[0]`` blindly dropped the page whenever the
+    image service was not listed first.
+    """
+
+    def test_v2_skips_a_service_entry_without_an_id(self) -> None:
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": [
+                                            {"profile": "http://iiif.io/api/auth/1/"},
+                                            {"@id": "https://example.org/iiif/img1"},
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/img1"
+        ]
+
+    def test_v3_skips_a_service_entry_without_an_id(self) -> None:
+        manifest = {
+            "items": [
+                {
+                    "items": [
+                        {
+                            "items": [
+                                {
+                                    "body": {
+                                        "service": [
+                                            {"type": "AuthCookieService1"},
+                                            {"id": "https://example.org/iiif/img1"},
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/img1"
+        ]
+
+    def test_unusable_service_array_falls_back_to_the_resource_id(self) -> None:
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": ["junk", {"label": "no id"}],
+                                        "@id": (
+                                            "https://example.org/iiif/img1"
+                                            "/full/max/0/default.jpg"
+                                        ),
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/img1"
+        ]
+
+
+# ============================================================================
+# extract_page_sources
+# ============================================================================
+
+
+class TestExtractPageSources:
+    """Mixed manifests must keep every page.
+
+    Choosing between service-backed and direct extraction once per manifest
+    dropped the direct-only canvases of a mixed manifest without a trace, so
+    the expected page count was understated and the gaps went unrecorded.
+    """
+
+    def test_v2_mixed_canvases_keep_every_page(self) -> None:
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {
+                                            "@id": "https://example.org/iiif/img1"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/p2.jpg"}}
+                            ]
+                        },
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {
+                                            "@id": "https://example.org/iiif/img3"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                    ]
+                }
+            ]
+        }
+        assert extract_page_sources(manifest) == [
+            ("service", "https://example.org/iiif/img1"),
+            ("direct", "https://example.org/p2.jpg"),
+            ("service", "https://example.org/iiif/img3"),
+        ]
+        # The single-kind extractor still sees only its own half.
+        assert extract_image_service_bases(manifest) == [
+            "https://example.org/iiif/img1",
+            "https://example.org/iiif/img3",
+        ]
+
+    def test_v3_mixed_canvases_keep_every_page(self) -> None:
+        manifest = {
+            "items": [
+                {
+                    "items": [
+                        {
+                            "items": [
+                                {
+                                    "body": {
+                                        "service": [
+                                            {"id": "https://example.org/iiif/img1"}
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "items": [
+                        {"items": [{"body": {"id": "https://example.org/p2.jpg"}}]}
+                    ]
+                },
+            ]
+        }
+        assert extract_page_sources(manifest) == [
+            ("service", "https://example.org/iiif/img1"),
+            ("direct", "https://example.org/p2.jpg"),
+        ]
+
+    def test_service_wins_when_a_canvas_offers_both(self) -> None:
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "@id": "https://example.org/p1.jpg",
+                                        "service": {
+                                            "@id": "https://example.org/iiif/img1"
+                                        },
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        assert extract_page_sources(manifest) == [
+            ("service", "https://example.org/iiif/img1")
+        ]
+
+    def test_canvas_with_neither_source_is_skipped(self) -> None:
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {"images": [{"resource": {"label": "no id at all"}}]},
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/p2.jpg"}}
+                            ]
+                        },
+                    ]
+                }
+            ]
+        }
+        assert extract_page_sources(manifest) == [
+            ("direct", "https://example.org/p2.jpg")
+        ]
+
+    def test_duplicate_urls_are_dropped(self) -> None:
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/p.jpg"}}
+                            ]
+                        },
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/p.jpg"}}
+                            ]
+                        },
+                    ]
+                }
+            ]
+        }
+        assert extract_page_sources(manifest) == [
+            ("direct", "https://example.org/p.jpg")
+        ]
+
+    def test_empty_manifest_returns_empty(self) -> None:
+        assert extract_page_sources({}) == []
+
+
+# ============================================================================
+# Mixed manifests in download_iiif_manifest_and_images
+# ============================================================================
+
+
+class TestMixedManifestStrategy:
+    """The provider-facing strategy must not drop the direct-only canvases."""
+
+    @staticmethod
+    def _mixed_manifest() -> dict[str, Any]:
+        return {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {
+                                            "@id": "https://example.org/iiif/img1"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "images": [
+                                {"resource": {"@id": "https://example.org/p2.jpg"}}
+                            ]
+                        },
+                    ]
+                }
+            ]
+        }
+
+    def test_both_kinds_of_canvas_are_downloaded(self) -> None:
+        from api.iiif import download_iiif_manifest_and_images
+
+        with (
+            patch(
+                "api.iiif._strategies.make_request",
+                return_value=self._mixed_manifest(),
+            ),
+            patch("api.iiif._strategies.save_json"),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=0),
+            patch("api.iiif._strategies.get_max_pages", return_value=0),
+            patch("api.iiif._strategies.budget_exhausted", return_value=False),
+            patch(
+                "api.iiif._strategies.download_one_from_service", return_value=True
+            ) as mock_svc,
+            patch(
+                "api.iiif._strategies.download_file", return_value="/out/p2.jpg"
+            ) as mock_file,
+        ):
+            assert (
+                download_iiif_manifest_and_images(
+                    "https://example.org/manifest.json", "/out", "gallica", "item1"
+                )
+                is True
+            )
+
+        assert mock_svc.call_args_list[0].args[0] == "https://example.org/iiif/img1"
+        assert mock_svc.call_args_list[0].args[2] == "gallica_item1_p00001.jpg"
+        assert mock_file.call_args_list[0].args[0] == "https://example.org/p2.jpg"
+        assert mock_file.call_args_list[0].args[2] == "gallica_item1_p00002"
+
+    def test_homogeneous_manifest_still_uses_the_page_image_helper(self) -> None:
+        from api.iiif import download_iiif_manifest_and_images
+
+        manifest = {
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {
+                                            "@id": "https://example.org/iiif/img1"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        with (
+            patch("api.iiif._strategies.make_request", return_value=manifest),
+            patch("api.iiif._strategies.save_json"),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=0),
+            patch(
+                "api.iiif._strategies.download_page_images", return_value=True
+            ) as mock_pages,
+        ):
+            assert (
+                download_iiif_manifest_and_images(
+                    "https://example.org/manifest.json", "/out", "gallica", "item1"
+                )
+                is True
+            )
+
+        mock_pages.assert_called_once()
+        assert mock_pages.call_args.args[0] == ["https://example.org/iiif/img1"]
+
+
+# ============================================================================
+# Rendering selection order and malformed entries
+# ============================================================================
+
+
+class TestRenderingPriority:
+    """The MIME whitelist is an ordered preference, not a set.
+
+    Candidates were tried in document order, so with the shipped whitelist and
+    the default limit of one file a manifest that listed the EPUB before the
+    whole-work PDF handed back the EPUB.
+    """
+
+    def test_whitelist_order_beats_document_order(self) -> None:
+        manifest = {
+            "rendering": [
+                {
+                    "@id": "https://example.org/book.epub",
+                    "format": "application/epub+zip",
+                }
+            ],
+            "sequences": [
+                {
+                    "rendering": [
+                        {
+                            "@id": "https://example.org/volume.pdf",
+                            "format": "application/pdf",
+                        }
+                    ]
+                }
+            ],
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+        assert mock_dl.call_args_list[0].args[0] == "https://example.org/volume.pdf"
+
+    def test_undeclared_formats_rank_by_url_suffix(self) -> None:
+        manifest = {
+            "rendering": [
+                {"@id": "https://example.org/book.epub"},
+                {"@id": "https://example.org/book.pdf"},
+            ]
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 2},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 2
+
+        assert [c.args[0] for c in mock_dl.call_args_list] == [
+            "https://example.org/book.pdf",
+            "https://example.org/book.epub",
+        ]
+
+    def test_equal_rank_keeps_manifest_order(self) -> None:
+        manifest = {
+            "rendering": [
+                {"@id": "https://example.org/a.pdf", "format": "application/pdf"},
+                {"@id": "https://example.org/b.pdf", "format": "application/pdf"},
+            ]
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 2},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 2
+
+        assert [c.args[0] for c in mock_dl.call_args_list] == [
+            "https://example.org/a.pdf",
+            "https://example.org/b.pdf",
+        ]
+
+    def test_reordered_whitelist_reorders_the_candidates(self) -> None:
+        manifest = {
+            "rendering": [
+                {"@id": "https://example.org/book.pdf", "format": "application/pdf"},
+                {
+                    "@id": "https://example.org/book.epub",
+                    "format": "application/epub+zip",
+                },
+            ]
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={
+                    "rendering_mime_whitelist": [
+                        "application/epub+zip",
+                        "application/pdf",
+                    ],
+                    "max_renderings_per_manifest": 1,
+                },
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+        assert mock_dl.call_args_list[0].args[0] == "https://example.org/book.epub"
+
+
+class _ExplodingRendering(dict[str, Any]):
+    """A rendering entry whose every lookup fails, as a malformed one would."""
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        raise RuntimeError("malformed rendering entry")
+
+
+class TestMalformedRenderingEntries:
+    """One bad entry must cost its own rendering, not the whole manifest.
+
+    A list-valued ``format`` (which real manifests emit) raised
+    ``AttributeError`` out of the unguarded loop, so every rendering of that
+    manifest was lost and the caller fell back to page images.
+    """
+
+    def test_list_valued_format_is_normalized(self) -> None:
+        manifest = {
+            "rendering": [
+                {
+                    "@id": "https://example.org/book.epub",
+                    "format": ["application/epub+zip"],
+                },
+                {"@id": "https://example.org/book.pdf", "format": ["application/pdf"]},
+            ]
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 2},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 2
+
+        assert [c.args[0] for c in mock_dl.call_args_list] == [
+            "https://example.org/book.pdf",
+            "https://example.org/book.epub",
+        ]
+
+    def test_list_valued_format_still_binds_the_whitelist(self) -> None:
+        manifest = {
+            "rendering": [
+                {"@id": "https://example.org/book.pdf", "format": ["application/pdf"]}
+            ]
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={
+                    "rendering_mime_whitelist": ["application/epub+zip"],
+                    "max_renderings_per_manifest": 2,
+                },
+            ),
+            patch("api.iiif._renderings.download_file", return_value="/out/f"),
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 0
+
+    def test_non_string_format_falls_back_to_the_url_suffix(self) -> None:
+        manifest = {
+            "rendering": [{"@id": "https://example.org/book.pdf", "format": {"a": 1}}]
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch("api.iiif._renderings.download_file", return_value="/out/f"),
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+    def test_one_unreadable_entry_does_not_abort_the_rest(self) -> None:
+        manifest = {
+            "rendering": [
+                _ExplodingRendering(),
+                {"@id": "https://example.org/book.pdf", "format": "application/pdf"},
+            ]
+        }
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 2},
+            ),
+            patch(
+                "api.iiif._renderings.download_file", return_value="/out/f"
+            ) as mock_dl,
+        ):
+            assert download_iiif_renderings(manifest, "/out") == 1
+
+        assert mock_dl.call_args_list[0].args[0] == "https://example.org/book.pdf"

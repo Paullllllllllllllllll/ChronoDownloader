@@ -48,6 +48,87 @@ def _is_whitelisted(url: str, fmt: str, whitelist: list[str]) -> bool:
     return any(url.lower().endswith(ext) for ext in (".pdf", ".epub"))
 
 
+def _whitelist_rank(url: str, fmt: str, whitelist: list[str]) -> int:
+    """Rank a rendering by the position of its format in the whitelist.
+
+    The whitelist is an ordered preference, not a set: with the shipped
+    ``["application/pdf", "application/epub+zip"]`` and a limit of one file, a
+    manifest listing the EPUB before the whole-work PDF used to yield the EPUB
+    purely because candidates were tried in document order.
+
+    Args:
+        url: Rendering URL
+        fmt: Declared format/type, lowercased (may be empty)
+        whitelist: Lowercased allowed MIME fragments, most preferred first
+
+    Returns:
+        The index of the matching whitelist entry, or ``len(whitelist)`` when
+        nothing matches (such renderings sort last).
+    """
+    if "/" in fmt:
+        for idx, w in enumerate(whitelist):
+            if w in fmt:
+                return idx
+        return len(whitelist)
+
+    # No usable MIME type: fall back to the same suffixes _is_whitelisted
+    # accepts, mapped onto whichever whitelist entry names that format.
+    lowered = url.lower()
+    for ext, token in ((".pdf", "pdf"), (".epub", "epub")):
+        if lowered.endswith(ext):
+            for idx, w in enumerate(whitelist):
+                if token in w:
+                    return idx
+            break
+
+    return len(whitelist)
+
+
+def _collect_renderings(obj: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the ``rendering`` entries of a manifest or sequence as dicts."""
+    items: list[dict[str, Any]] = []
+    r = obj.get("rendering")
+    if isinstance(r, list):
+        for it in r:
+            if isinstance(it, dict):
+                items.append(it)
+    elif isinstance(r, dict):
+        items.append(r)
+    return items
+
+
+def collect_all_renderings(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return manifest-level and IIIF v2 sequence-level ``rendering`` entries.
+
+    Wellcome and the DFG viewer hang the whole-work PDF off the sequence rather
+    than the manifest, so a manifest-only scan misses it. Sequence entries are
+    appended after the manifest-level ones; callers dedup on URL.
+    """
+    candidates: list[dict[str, Any]] = _collect_renderings(manifest)
+
+    sequences = manifest.get("sequences")
+    if isinstance(sequences, list):
+        for seq in sequences:
+            if isinstance(seq, dict):
+                candidates.extend(_collect_renderings(seq))
+
+    return candidates
+
+
+def _rendering_format(value: Any) -> str:
+    """Normalize a rendering's ``format``/``type`` to a lowercase string.
+
+    Some manifests give ``format`` as a list. Calling ``.lower()`` on it raised
+    ``AttributeError``, and because the loop had no per-candidate guard that
+    single bad entry aborted every rendering of the manifest.
+    """
+    if isinstance(value, list):
+        value = next((v for v in value if isinstance(v, str)), "")
+    if not isinstance(value, str):
+        return ""
+    return value.lower()
+
+
 def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     """Download files referenced in IIIF manifest-level 'rendering' entries.
 
@@ -82,42 +163,32 @@ def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     except Exception:
         limit = DEFAULT_MAX_RENDERINGS_PER_MANIFEST
 
-    def _collect_renderings(obj: dict[str, Any]) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
-        r = obj.get("rendering")
-        if isinstance(r, list):
-            for it in r:
-                if isinstance(it, dict):
-                    items.append(it)
-        elif isinstance(r, dict):
-            items.append(r)
-        return items
-
-    candidates: list[dict[str, Any]] = _collect_renderings(manifest)
-
-    # IIIF Presentation v2 also hangs the whole-work PDF off the sequence
-    # (Wellcome and the DFG viewer both do), so a manifest-only scan missed it
-    # and fell back to page images. Appended after the manifest-level entries;
-    # the dedup below absorbs the overlap when both carry the same URL.
-    sequences = manifest.get("sequences")
-    if isinstance(sequences, list):
-        for seq in sequences:
-            if isinstance(seq, dict):
-                candidates.extend(_collect_renderings(seq))
+    candidates: list[dict[str, Any]] = collect_all_renderings(manifest)
 
     seen: set[str] = set()
     selected: list[dict[str, Any]] = []
     for it in candidates:
-        url = it.get("@id") or it.get("id")
-        fmt = (it.get("format") or it.get("type") or "").lower()
-        if not url or not isinstance(url, str):
+        # One malformed entry must not cost the manifest its other renderings.
+        try:
+            url = it.get("@id") or it.get("id")
+            fmt = _rendering_format(it.get("format") or it.get("type"))
+            if not url or not isinstance(url, str):
+                continue
+            if whitelist and not _is_whitelisted(url, fmt, whitelist):
+                continue
+            if url in seen:
+                continue
+            seen.add(url)
+            selected.append({"url": url, "format": fmt, "label": it.get("label")})
+        except Exception:
+            logger.debug("Skipping unparseable rendering entry", exc_info=True)
             continue
-        if whitelist and not _is_whitelisted(url, fmt, whitelist):
-            continue
-        if url in seen:
-            continue
-        seen.add(url)
-        selected.append({"url": url, "format": fmt, "label": it.get("label")})
+
+    # The whitelist is ordered by preference, so honor it before document
+    # order: a manifest listing the EPUB first and the whole-work PDF later
+    # otherwise handed back the EPUB under the default limit of one file. The
+    # sort is stable, so equally ranked renderings keep manifest order.
+    selected.sort(key=lambda r: _whitelist_rank(r["url"], r["format"], whitelist))
 
     # The limit counts files obtained, not attempts made. Truncating the
     # candidate list first meant that when the chosen renderings were dead the

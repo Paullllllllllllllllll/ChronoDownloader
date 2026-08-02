@@ -406,12 +406,88 @@ class TestPreviewManifest:
         result = preview_manifest("https://example.org/iiif/bad/manifest.json")
         assert result is None
 
+    @patch("api.iiif._direct.make_request")
+    def test_preview_reports_sequence_level_renderings(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Wellcome and the DFG viewer hang the whole-work PDF off the sequence.
+
+        The download path was taught about those renderings; the preview still
+        scanned the manifest level only and reported ``has_renderings: False``
+        for a work whose PDF it does in fact fetch.
+        """
+        mock_request.return_value = {
+            "@context": "http://iiif.io/api/presentation/2/context.json",
+            "label": "Wellcome-style volume",
+            "sequences": [
+                {
+                    "@type": "sc:Sequence",
+                    "rendering": {
+                        "@id": "https://example.org/volume.pdf",
+                        "format": "application/pdf",
+                        "label": "Download as PDF",
+                    },
+                    "canvases": [],
+                }
+            ],
+        }
+
+        result = preview_manifest("https://example.org/iiif/123/manifest.json")
+        assert result is not None
+        assert result["has_renderings"] is True
+        assert result["rendering_formats"] == ["application/pdf"]
+
+    @patch("api.iiif._direct.make_request")
+    def test_preview_normalizes_a_list_valued_rendering_format(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "rendering": [
+                {
+                    "@id": "https://example.org/volume.pdf",
+                    "format": ["application/pdf"],
+                }
+            ]
+        }
+
+        result = preview_manifest("https://example.org/iiif/123/manifest.json")
+        assert result is not None
+        assert result["rendering_formats"] == ["application/pdf"]
+
+    @patch("api.iiif._direct.make_request")
+    def test_preview_counts_mixed_canvases(self, mock_request: MagicMock) -> None:
+        """A manifest mixing service-backed and direct-URL canvases must report
+        every page, not just the service-backed ones."""
+        mock_request.return_value = {
+            "@context": "http://iiif.io/api/presentation/2/context.json",
+            "sequences": [
+                {
+                    "canvases": [
+                        {
+                            "images": [
+                                {
+                                    "resource": {
+                                        "service": {"@id": "https://ex.org/iiif/p1"}
+                                    }
+                                }
+                            ]
+                        },
+                        {"images": [{"resource": {"@id": "https://ex.org/p2.jpg"}}]},
+                    ]
+                }
+            ],
+        }
+
+        result = preview_manifest("https://example.org/iiif/123/manifest.json")
+        assert result is not None
+        assert result["page_count"] == 2
+
 
 class TestDownloadFromIIIFManifestFileStem:
     """Tests for download_from_iiif_manifest with file_stem parameter."""
 
     @patch("api.iiif._direct.download_one_from_service")
-    @patch("api.iiif._direct.extract_image_service_bases")
+    @patch("api.iiif._direct.extract_page_sources")
     @patch("api.iiif._direct.download_iiif_renderings")
     @patch("api.iiif._direct.save_json")
     @patch("api.iiif._direct.make_request")
@@ -430,7 +506,7 @@ class TestDownloadFromIIIFManifestFileStem:
         mock_config.return_value = {"direct_iiif": {"enabled": True}}
         mock_request.return_value = {"@context": "test"}
         mock_render.return_value = 0
-        mock_extract.return_value = ["https://example.org/iiif/img1"]
+        mock_extract.return_value = [("service", "https://example.org/iiif/img1")]
         mock_dl_one.return_value = True
 
         result = download_from_iiif_manifest(
@@ -452,7 +528,7 @@ class TestDownloadFromIIIFManifestFileStem:
         assert dl_args[0][2] == "MyCustomStem_p00001.jpg"
 
     @patch("api.iiif._direct.download_one_from_service")
-    @patch("api.iiif._direct.extract_image_service_bases")
+    @patch("api.iiif._direct.extract_page_sources")
     @patch("api.iiif._direct.download_iiif_renderings")
     @patch("api.iiif._direct.save_json")
     @patch("api.iiif._direct.make_request")
@@ -473,7 +549,7 @@ class TestDownloadFromIIIFManifestFileStem:
         }
         mock_request.return_value = {"@context": "test"}
         mock_render.return_value = 0
-        mock_extract.return_value = ["https://example.org/iiif/img1"]
+        mock_extract.return_value = [("service", "https://example.org/iiif/img1")]
         mock_dl_one.return_value = True
 
         result = download_from_iiif_manifest(
