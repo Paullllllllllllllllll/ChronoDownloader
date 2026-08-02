@@ -12,7 +12,11 @@
     "bne": false,
     "google_books": false,
     "hathitrust": false,
-    "wellcome": false
+    "wellcome": false,
+    "annas_archive": false,
+    "slub": false,
+    "e_rara": false,
+    "sbb_digital": false
   },
   "download": {
     "prefer_pdf_over_images": true,

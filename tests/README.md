@@ -41,22 +41,17 @@ uv run pytest tests/integration
 uv run pytest tests/unit/test_matching.py
 uv run pytest tests/unit/test_matching.py::TestTitleScore
 uv run pytest tests/unit/test_matching.py::TestTitleScore::test_exact_match
-
-# With coverage
-uv run pytest --cov=api --cov=main --cov-report=html
 ```
 
 ## Markers
 
-Defined in `pyproject.toml`:
-
-- `unit` -- unit tests (fast, no external dependencies)
-- `integration` -- integration tests (may use mocks)
-- `slow` -- slow-running tests
-- `network` -- tests requiring network access (skip by default)
+`pyproject.toml` declares `unit`, `integration`, `slow`, and `network`.
+Only `slow` is applied in practice, on the few long-running tests; the
+directory layout already separates unit from integration, and no test
+touches the live network. To skip the long ones:
 
 ```bash
-uv run pytest -m "not slow and not network"
+uv run pytest -m "not slow"
 ```
 
 ## Writing New Tests
@@ -65,5 +60,5 @@ Reuse the shared fixtures from `conftest.py` (temporary directories,
 sample configuration, sample works CSV data, `SearchResult` samples,
 and mocked provider search responses) rather than building ad hoc
 setup. Unit tests go in `tests/unit/`, mocked-API workflow tests in
-`tests/integration/`. Mock all HTTP traffic; only `network`-marked
-tests may touch the live providers.
+`tests/integration/`. Mock all HTTP traffic; live-provider checks
+belong in `tests/staging/`, which is run by hand.

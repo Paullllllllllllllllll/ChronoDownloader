@@ -253,11 +253,14 @@ def _run_subprocess_script(body: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.slow
 class TestProcessExitNotBlocked:
     """Regression: a stalled search must not pin the process at exit.
 
     Reproduces the live defect where non-daemon executor threads were joined
     at interpreter shutdown. With daemon threads the process exits promptly.
+
+    Marked slow: each test boots a fresh interpreter subprocess.
     """
 
     def test_parallel_fan_out_exits(self) -> None:

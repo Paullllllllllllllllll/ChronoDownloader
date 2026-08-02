@@ -78,7 +78,7 @@ extraction pipeline.
 | MDZ | Germany | No | Yes |
 | Polona | Poland | No | Yes |
 | Biblioteca Nacional de Espana | Spain | No | No |
-| HathiTrust | US | Optional | Yes |
+| HathiTrust | US | Unused | Yes |
 | Wellcome Collection | UK | No | Yes |
 | Anna's Archive | Global (Aggregator) | Optional* | No |
 | SLUB Dresden | Germany | No | Yes |
@@ -128,8 +128,10 @@ breaker, and a host that never completes a connection is retried
 twice rather than for the full budget, so a dead endpoint costs
 seconds per search rather than minutes and is skipped entirely for
 the rest of the cooldown.
-- **Anna's Archive** rotates mirror domains; the shipped base URL
-  points at whichever mirror last resolved, and may need updating.
+
+One caveat applies to an enabled provider: Anna's Archive rotates
+mirror domains, so the shipped base URL points at whichever mirror
+last resolved and may need updating.
 
 ## Installation
 
@@ -184,6 +186,7 @@ $env:DDB_API_KEY="your_key"
 $env:DPLA_API_KEY="your_key"
 $env:GOOGLE_BOOKS_API_KEY="your_key"
 $env:ANNAS_ARCHIVE_API_KEY="your_key"     # optional
+$env:HATHI_API_KEY="your_key"             # optional, see below
 
 # Linux / macOS
 export EUROPEANA_API_KEY=your_key
@@ -191,7 +194,16 @@ export DDB_API_KEY=your_key
 export DPLA_API_KEY=your_key
 export GOOGLE_BOOKS_API_KEY=your_key
 export ANNAS_ARCHIVE_API_KEY=your_key     # optional
+export HATHI_API_KEY=your_key             # optional, see below
 ```
+
+`HATHI_API_KEY` buys nothing at present. HathiTrust is a
+metadata-only provider here: page images are served solely by the
+OAuth 1.0a-signed Data API, which this tool does not implement, so a
+HathiTrust match saves its bibliographic record and reports no
+retrievable content whether the key is set or not. The variable is
+read (and honors the `api_keys.json` remapping below) against the day
+that path is supported.
 
 For persistent configuration, add these to your system environment
 variables or shell profile.
@@ -506,7 +518,10 @@ optional in interactive).
 - `--selection-strategy {collect_and_select,sequential_first_hit}`
 - `--min-title-score FLOAT` -- minimum PURE title-match score to
   accept a candidate (0--100). Creator similarity never lowers this
-  gate; missing creator metadata is not penalized.
+  gate; missing creator metadata is not penalized. As a global
+  override it sets `selection.min_title_score` and stamps every
+  per-provider `min_title_score` for the run (see Configuration,
+  section 6).
 - `--search-timeout SECONDS` -- per-provider search timeout (float);
   overrides `selection.search_timeout_seconds` for this run. A provider
   whose search exceeds it is dropped so one slow provider cannot stall the
@@ -670,6 +685,19 @@ quota management. Each provider key maps to a settings object:
 - `backoff_multiplier`: multiplier for exponential backoff
 - `max_backoff_s`: upper bound for backoff
 - `timeout_s`: request timeout
+- `verify_ssl`: verify the provider's TLS certificate (default
+  `true`); applies to searches and downloads alike
+- `ssl_error_policy`: what happens when verification fails --
+  `fail` (default) gives up on the request, `retry_insecure_once`
+  retries it once with verification off, logging a warning.
+  `config.example.json` sets it for Polona and Anna's Archive, whose
+  certificates break periodically
+- `dns_retry`: retry a name-resolution failure with backoff instead
+  of abandoning the host at once (default `false`); worth enabling
+  only behind a flaky resolver, since a genuine NXDOMAIN will not
+  start resolving
+- `headers`: extra request headers merged into the shared session's
+  (e.g. an `Accept` type an API insists on)
 - `impersonate`: route this provider through a browser-fingerprinted
   HTTP client (see below); off everywhere by default
 
@@ -756,6 +784,16 @@ the operator's decision, not a default: the extra is not installed by
 - `free_only`: only download free/public domain works
 - `prefer`: preferred download format (`pdf` or `epub`)
 - `allow_drm`: whether to allow DRM-protected content
+- `max_results`: how many hits to request from this provider,
+  overriding `selection.max_candidates_per_provider` for it alone
+- `min_title_score`: per-provider match threshold; see the
+  precedence note in section 6
+- `search_timeout_seconds`: per-provider search timeout, overriding
+  `selection.search_timeout_seconds`
+- `api_key` (Anna's Archive only): the member key, consulted when
+  `ANNAS_ARCHIVE_API_KEY` is unset. Prefer the environment variable:
+  a key written here sits in a config file that is easy to copy or
+  share by accident
 
 To adjust for slow providers, increase `delay_ms` and
 `jitter_ms` (e.g., `delay_ms: 2000`, `jitter_ms: 500`).
@@ -776,9 +814,11 @@ To adjust for slow providers, increase `delay_ms` and
     "overwrite_existing": false,
     "include_metadata": true,
     "allowed_object_extensions": [
-      ".pdf", ".epub", ".jpg", ".jpeg",
-      ".png", ".jp2", ".tif", ".tiff"
+      ".pdf", ".epub", ".zip", ".jpg", ".jpeg",
+      ".png", ".jp2", ".tif", ".tiff", ".webp",
+      ".bmp", ".gif"
     ],
+    "save_disallowed_to_metadata": true,
     "max_parallel_downloads": 3,
     "provider_concurrency": {
       "default": 2,
@@ -788,7 +828,7 @@ To adjust for slow providers, increase `delay_ms` and
       "internet_archive": 3,
       "mdz": 2
     },
-    "worker_timeout_s": 600
+    "worker_timeout_s": 0
   }
 }
 ```
@@ -813,13 +853,20 @@ To adjust for slow providers, increase `delay_ms` and
   `.epub` URL suffix instead
 - `overwrite_existing`: overwrite existing files
 - `include_metadata`: save metadata JSON files
-- `allowed_object_extensions`: file extensions to download
+- `allowed_object_extensions`: file extensions that count as
+  retrievable content and land in `objects/`; an empty list admits
+  everything
+- `save_disallowed_to_metadata`: what to do with a file whose
+  extension is not allowed (default `true`): `true` files it under
+  `metadata/` without counting it as a successful download, `false`
+  skips the download entirely
 - `max_parallel_downloads`: concurrent download workers
   (default 1 = sequential; `config.example.json` opts into 3)
 - `provider_concurrency`: per-provider concurrent download
   limits; prevents overwhelming rate-limited APIs
 - `worker_timeout_s`: total ceiling in seconds for the download phase
-  (the wait for all workers plus the shutdown), not a per-task limit
+  (the wait for all workers plus the shutdown), not a per-task limit.
+  `0`, the shipped and recommended value, waits indefinitely
 
 ### 5. Download Budget Limits
 
@@ -834,7 +881,7 @@ To adjust for slow providers, increase `delay_ms` and
     "per_work": {
       "images_gb": 5,
       "pdfs_gb": 3,
-      "metadata_mb": 10
+      "metadata_mb": 250
     },
     "on_exceed": "stop"
   }
@@ -885,7 +932,15 @@ To adjust for slow providers, increase `delay_ms` and
   modern English collections. The default when the key is absent
   is 85: a loose fallback risks downloading the wrong work, so a
   permissive threshold has to be set deliberately (as
-  `config.example.json` does, with 35 for early modern titles)
+  `config.example.json` does, with 35 for early modern titles).
+  Beware the precedence: a `provider_settings.<key>.min_title_score`
+  wins over `selection.min_title_score`, and every provider
+  configured in `config.example.json` carries one (30--50), which
+  makes the shipped selection value the fallback for the rest
+  rather than the effective gate. To move a threshold globally,
+  raise or delete the per-provider entries -- or pass
+  `--min-title-score`, which stamps both the selection value and
+  every per-provider entry for that run
 - `search_timeout_seconds`: per-provider search timeout in
   seconds (default 60); a provider whose search exceeds it is
   logged at WARNING and dropped so one slow provider cannot stall
@@ -958,6 +1013,28 @@ as long as the slowest one rather than the sum of all five.
   placeholders: `{entry_id}`, `{name}`, `{provider}`,
   `{item_id}`; page suffix (`_p00001.jpg`) appended
   automatically
+
+### 9. Deferred Downloads
+
+```json
+{
+  "deferred": {
+    "background_enabled": true,
+    "max_retries": 5
+  }
+}
+```
+
+- `background_enabled`: despite the historical name, this gates the
+  synchronous retry of ready deferred items at the start of a run
+  (default `true`); set it to `false` to begin the batch without
+  touching the deferred queue. There is no background daemon
+- `max_retries`: attempts a deferred item gets before it is marked
+  failed permanently (default 5)
+- `state_dir` (optional): directory holding the state file; the
+  standard filename is appended. Defaults to `~/.chronodownloader/`
+- `state_file` (optional): full path override for the state file;
+  takes precedence over `state_dir`, kept for backward compatibility
 
 ## Output Structure
 
@@ -1045,7 +1122,7 @@ per-provider semaphores.
 }
 ```
 
-Start with 4 workers and adjust based on your provider mix. Lower
+Start with 3 workers and adjust based on your provider mix. Lower
 concurrency for rate-limited providers (Anna's Archive, BnF
 Gallica), higher for generous ones (Internet Archive). Monitor
 logs for 429 errors and adjust `provider_concurrency` accordingly.
@@ -1350,7 +1427,6 @@ v1.0.0 do not exist.
   re-deferred work leaves unmoved; a failed ledger write is no longer
   committed by the next successful one; and the BNE search is constrained to
   historical imprints, failing open on undated and unparseable records.
-
 - **v1.20.0** (1 August 2026) -- Fourth maintenance round, driven by a live
   probe of all 17 search endpoints. Three providers were silently returning
   nothing and are repaired: Polona now queries its JSON gateway instead of

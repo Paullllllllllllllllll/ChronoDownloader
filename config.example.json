@@ -19,11 +19,24 @@
     "hathitrust": false,
     "wellcome": true,
     "annas_archive": true,
-    "slub": true,
+    "slub": false,
     "e_rara": true,
-    "sbb_digital": true
+    "sbb_digital": false
   },
   "provider_settings": {
+    "internet_archive": {
+      "max_pages": 0,
+      "min_title_score": 50,
+      "network": {
+        "delay_ms": 300,
+        "jitter_ms": 150,
+        "max_attempts": 8,
+        "base_backoff_s": 1.5,
+        "backoff_multiplier": 1.5,
+        "max_backoff_s": 60.0,
+        "timeout_s": 30
+      }
+    },
     "mdz": {
       "max_pages": 0,
       "min_title_score": 30,
@@ -323,5 +336,5 @@
     "_naming_vars": "Available: {entry_id}, {name}, {provider}, {item_id}. Page suffix _p00001.jpg is always appended automatically.",
     "_note": "When enabled, rows with IIIF manifest URLs in the direct_link column (or link column if check_link_column is true) will be downloaded directly without searching. Supports major digital libraries: Internet Archive, Gallica, MDZ, HathiTrust, LOC, Wellcome, British Library, e-rara, SLUB, and any IIIF-compliant repository."
   },
-  "_csv_format_note": "Expects sampling notebook format: entry_id, short_title, main_author, retrievable, link columns. Optionally add direct_link column for direct IIIF manifest URLs."
+  "_csv_format_note": "Expects sampling notebook format: entry_id, short_title, main_author, retrievable, link columns. Optionally add direct_link column for direct IIIF manifest URLs, and a year column carrying the four-digit publication year sought. The year column is read case-insensitively and accepts string, integer, or float cells; when it holds a usable year, candidates dated outside selection.year_tolerance around it take a ranking penalty. Without the column (or with an unusable cell) the penalty stays dormant for that row."
 }
