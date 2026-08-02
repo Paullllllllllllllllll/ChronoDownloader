@@ -103,10 +103,13 @@ def search_sbb_digital(
                 item_creator = mods_creator(mods, ns)
                 item_date = mods_date(mods, ns)
 
+                # Direct children only, for the same reason ``mods:name`` is
+                # read that way: ``.//`` descends into
+                # ``<relatedItem type="host">``, whose recordInfo names the
+                # *series*, so a volume was downloaded under the series PPN
+                # and the METS resolver returned the wrong object.
                 record_id = None
-                for rec_id in mods.findall(
-                    ".//mods:recordInfo/mods:recordIdentifier", ns
-                ):
+                for rec_id in mods.findall("mods:recordInfo/mods:recordIdentifier", ns):
                     if rec_id is None or not rec_id.text:
                         continue
                     if (
@@ -237,8 +240,12 @@ def download_sbb_digital_work(
             break
         if download_file(url, output_folder, f"sbb_{ppn}_content"):
             ok_any = True
-            if prefer_pdf_over_images():
-                return True
+
+    # Only once the whole PDF group is in: returning after the first success
+    # undid the page cap above, so a per-page PDF fileGrp downloaded page one
+    # and reported the work complete.
+    if ok_any and prefer_pdf_over_images():
+        return True
 
     to_download = image_urls[:max_pages] if max_pages and max_pages > 0 else image_urls
     for idx, url in enumerate(to_download, start=1):

@@ -89,7 +89,12 @@ def _search_bnb_sparql(
                     return v.get("value")
                 return None
 
-            title_v = _val("title") or title
+            # Never substitute the query here: a binding that carries no
+            # dct:title used to be handed the searched-for title, which
+            # scored a perfect 100 against it and let an arbitrary work
+            # sail through the min_title_score gate. An empty title
+            # scores 0 and is filtered like any other untitled record.
+            title_v = _val("title")
             creator_v = _val("creatorName")
             ark = None
             for key in ("same", "ident", "work"):
@@ -102,7 +107,7 @@ def _search_bnb_sparql(
             if ark:
                 raw = {
                     "title": title_v or "",
-                    "creator": creator_v or creator or None,
+                    "creator": creator_v or None,
                     "identifier": ark,
                     "source": "bnb_sparql",
                 }
@@ -153,7 +158,14 @@ def search_british_library(
         if root is not None:
             for record in root.findall(".//srw:recordData", namespaces):
                 try:
-                    dc = record.find("dc:dc", namespaces)
+                    # The DCMES namespace bound to "dc" below defines the
+                    # fifteen elements and no container, so no conformant
+                    # server ever sends a {dc}dc wrapper: SRU wraps the
+                    # payload in {info:srw/schema/1/dc-v1.1}dc and OAI-PMH
+                    # style responses in {...oai_dc/}dc. Take whatever
+                    # single element recordData carries and read the
+                    # dc:-prefixed children out of it.
+                    dc = next(iter(record), None)
                     if dc is None:
                         continue
                     title_el = dc.find("dc:title", namespaces)
@@ -162,7 +174,11 @@ def search_british_library(
                     identifier_el = dc.find("dc:identifier", namespaces)
                     identifier = None
                     if identifier_el is not None and identifier_el.text:
-                        match = re.search(r"ark:/81055/(.*)", identifier_el.text)
+                        # Stop at the first separator: a manifest URL would
+                        # otherwise carry "/manifest.json" and a prose
+                        # identifier its trailing gloss into the persisted
+                        # ARK and into the viewer fallback URL built from it.
+                        match = re.search(r"ark:/81055/([^\s/?#]+)", identifier_el.text)
                         if match:
                             identifier = match.group(1)
 

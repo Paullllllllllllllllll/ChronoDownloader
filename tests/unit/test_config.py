@@ -252,6 +252,37 @@ class TestGetNetworkConfig:
             result = get_network_config(None)
             assert isinstance(result, dict)
 
+    def test_legacy_delay_ms_is_lifted_into_network(
+        self, mock_config: dict[str, Any]
+    ) -> None:
+        """A provider block that only carries delay_ms still sets the delay."""
+        assert get_network_config("internet_archive")["delay_ms"] == 50
+
+    def test_alias_resolves_like_every_other_accessor(
+        self, mock_config: dict[str, Any]
+    ) -> None:
+        """The one provider-settings accessor that skipped the alias.
+
+        ``get_network_config("bnf_gallica")`` handed back the bare defaults
+        while ``("gallica")`` returned the configured block, so the same
+        provider had two network policies depending on the caller's spelling.
+        """
+        assert get_network_config("bnf_gallica") == get_network_config("gallica")
+        assert get_network_config("bnf_gallica")["max_attempts"] == 3
+        assert get_network_config("bnf_gallica")["delay_ms"] == 100
+
+    def test_malformed_provider_settings_do_not_raise(self) -> None:
+        """The shape guards the sibling accessors carry apply here too."""
+        for cfg in (
+            {"provider_settings": 1},
+            {"provider_settings": {"gallica": "strict"}},
+            {"provider_settings": {"gallica": {"network": "aggressive"}}},
+        ):
+            with patch("api.core.config.get_config", return_value=cfg):
+                result = get_network_config("bnf_gallica")
+                assert result["max_attempts"] == 5
+                assert result["delay_ms"] == 0
+
 
 class TestGetDownloadLimits:
     """Tests for get_download_limits function."""

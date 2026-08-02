@@ -166,8 +166,153 @@ class TestAnnasArchiveLinkFilter:
         assert not any("login" in u for u in urls)
 
 
+class TestDdbManifestPatterns:
+    """The isShownAt link DDB hands out varies in shape per provider."""
+
+    def test_every_bsb_url_shape_yields_the_manifest(self) -> None:
+        """The pattern demanded exactly one path segment before the id.
+
+        DDB's isShownAt for MDZ items arrives language-prefixed, as the
+        urn:nbn resolver form, and in the resolver's "details:" form; only
+        the bare /view/ shape matched, so the manifest was never built and
+        the connector fell back to the preview thumbnail.
+        """
+        from api.providers.ddb import _extract_iiif_manifest_url
+
+        expected = (
+            "https://api.digitale-sammlungen.de/iiif/presentation/v2/"
+            "bsb10301321/manifest"
+        )
+        for url in (
+            "https://www.digitale-sammlungen.de/view/bsb10301321",
+            "https://www.digitale-sammlungen.de/en/view/bsb10301321",
+            "https://www.digitale-sammlungen.de/de/view/bsb10301321?page=7",
+            "https://mdz-nbn-resolving.de/urn:nbn:de:bvb:12-bsb10301321-4",
+            "https://mdz-nbn-resolving.de/details:bsb10301321",
+        ):
+            assert _extract_iiif_manifest_url(url) == expected, url
+
+    def test_heidelberg_query_string_stays_out_of_the_manifest_url(self) -> None:
+        from api.providers.ddb import _extract_iiif_manifest_url
+
+        assert _extract_iiif_manifest_url(
+            "https://digi.ub.uni-heidelberg.de/diglit/rumohr1822?sid=abc123"
+        ) == ("https://digi.ub.uni-heidelberg.de/diglit/iiif/rumohr1822/manifest.json")
+
+    def test_unknown_host_yields_nothing(self) -> None:
+        from api.providers.ddb import _extract_iiif_manifest_url
+
+        assert _extract_iiif_manifest_url("https://example.org/item/1") is None
+        assert _extract_iiif_manifest_url("") is None
+
+
+class TestSlubPpnCheckDigit:
+    """K10plus PPNs end in a modulo-11 check digit that may be "X"."""
+
+    def test_trailing_check_digit_survives(self) -> None:
+        """``\\d+`` truncated the X for about one record in eleven, and the
+        manifest built from the short PPN 404s."""
+        from api.providers.slub import _extract_ppn_from_url
+
+        assert (
+            _extract_ppn_from_url("https://digital.slub-dresden.de/id33299526X")
+            == "33299526X"
+        )
+        assert (
+            _extract_ppn_from_url("http://digital.slub-dresden.de/ppn33299526X")
+            == "33299526X"
+        )
+
+    def test_numeric_ppns_are_unchanged(self) -> None:
+        from api.providers.slub import _extract_ppn_from_url
+
+        assert (
+            _extract_ppn_from_url("https://digital.slub-dresden.de/id403708982")
+            == "403708982"
+        )
+        assert _extract_ppn_from_url("https://example.org/no-ppn-here") is None
+        assert _extract_ppn_from_url(None) is None
+
+    def test_check_digit_reaches_the_manifest_url(self, temp_output_dir: str) -> None:
+        """End to end: the source record's 856 link builds the manifest URL."""
+        source_record = {
+            "856": [
+                {
+                    "__": [
+                        {
+                            "u": "https://digital.slub-dresden.de/id33299526X",
+                            "x": "Digitalisat",
+                        }
+                    ]
+                }
+            ]
+        }
+        with (
+            patch("api.providers.slub.make_request", return_value=source_record),
+            patch("api.providers.slub.save_json", return_value=None),
+            patch(
+                "api.providers.slub.download_iiif_manifest_and_images",
+                return_value=True,
+            ) as mock_dl,
+        ):
+            from api.providers.slub import download_slub_work
+
+            assert download_slub_work({"id": "kxp-de14-1"}, temp_output_dir) is True
+
+        assert mock_dl.call_args.kwargs["manifest_url"] == (
+            "https://iiif.slub-dresden.de/iiif/2/33299526X/manifest.json"
+        )
+
+
 class TestPerRecordGuards:
     """One malformed record must not discard a provider's whole result set."""
+
+    def test_ddb_skips_only_the_bad_doc(self) -> None:
+        payload = {
+            "results": [
+                {
+                    "docs": [
+                        # A non-dict doc raised AttributeError on .get and
+                        # discarded the good record behind it.
+                        "not-a-dict",
+                        {
+                            "id": "ABCDEF1234567890",
+                            "label": "Neues <match>Kochbuch</match>",
+                            "view": ["Braun, Emmy (Verfasser*in)"],
+                        },
+                    ]
+                }
+            ]
+        }
+        with (
+            patch("api.providers.ddb._api_key", return_value="KEY"),
+            patch("api.providers.ddb.make_request", return_value=payload),
+        ):
+            from api.providers.ddb import search_ddb
+
+            results = search_ddb("Kochbuch")
+
+        assert [r.source_id for r in results] == ["ABCDEF1234567890"]
+        assert results[0].title == "Neues Kochbuch"
+
+    def test_ddb_tolerates_a_null_docs_list(self) -> None:
+        """ "docs": null raised TypeError over the whole result set."""
+        payload = {
+            "results": [
+                {"docs": None},
+                {"docs": [{"id": "ABC", "label": "Kochbuch"}]},
+                "not-a-dict",
+            ]
+        }
+        with (
+            patch("api.providers.ddb._api_key", return_value="KEY"),
+            patch("api.providers.ddb.make_request", return_value=payload),
+        ):
+            from api.providers.ddb import search_ddb
+
+            results = search_ddb("Kochbuch")
+
+        assert [r.source_id for r in results] == ["ABC"]
 
     def test_internet_archive_skips_only_the_bad_doc(self) -> None:
         payload = {

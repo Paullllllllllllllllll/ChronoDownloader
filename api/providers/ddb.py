@@ -34,9 +34,10 @@ API_BASE_URL = "https://api.deutsche-digitale-bibliothek.de/"
 
 # Known patterns for IIIF manifest URLs from DDB providers
 IIIF_MANIFEST_PATTERNS = [
-    # Heidelberg University Library
+    # Heidelberg University Library. Stop at "?" and "#" as well as "/":
+    # a tracking query string otherwise rode into the manifest path.
     (
-        r"digi\.ub\.uni-heidelberg\.de/diglit/([^/]+)",
+        r"digi\.ub\.uni-heidelberg\.de/diglit/([^/?#]+)",
         "https://digi.ub.uni-heidelberg.de/diglit/iiif/{}/manifest.json",
     ),
     # Göttingen State and University Library
@@ -44,9 +45,11 @@ IIIF_MANIFEST_PATTERNS = [
         r"resolver\.sub\.uni-goettingen\.de/purl\?([^/&]+)",
         "https://manifests.sub.uni-goettingen.de/iiif/presentation/{}/manifest",
     ),
-    # Bavarian State Library (BSB/MDZ)
+    # Bavarian State Library (BSB/MDZ). The BSB number sits at a varying
+    # depth: /view/bsb..., /en/view/bsb..., /de/view/bsb... and the
+    # urn:nbn resolver's /bsb:/... form all occur in DDB's isShownAt.
     (
-        r"(?:mdz-nbn-resolving\.de|digitale-sammlungen\.de)/\w+/(bsb\d+)",
+        r"(?:mdz-nbn-resolving\.de|digitale-sammlungen\.de)\S*?(bsb\d+)",
         "https://api.digitale-sammlungen.de/iiif/presentation/v2/{}/manifest",
     ),
 ]
@@ -137,31 +140,43 @@ def search_ddb(
     if data.get("results"):
         # DDB API returns nested structure: results[].docs[]
         for result_group in data["results"]:
-            docs = result_group.get("docs", [])
-            for item in docs:
-                # Clean title by removing <match> tags. DDB may return a
-                # list-valued label/title, on which .replace would raise.
-                item_title = item.get("label") or item.get("title") or ""
-                if isinstance(item_title, list):
-                    item_title = item_title[0] if item_title else ""
-                item_title = (
-                    str(item_title).replace("<match>", "").replace("</match>", "")
-                )
+            if not isinstance(result_group, dict):
+                continue
+            # A group without docs, or with "docs": null, is empty rather
+            # than an error: .get("docs", []) returned None for the latter
+            # and the for loop raised TypeError over the whole result set.
+            for item in result_group.get("docs") or []:
+                # One malformed doc must not discard the whole result set.
+                try:
+                    # Clean title by removing <match> tags. DDB may return a
+                    # list-valued label/title, on which .replace would raise.
+                    item_title = item.get("label") or item.get("title") or ""
+                    if isinstance(item_title, list):
+                        item_title = item_title[0] if item_title else ""
+                    item_title = (
+                        str(item_title).replace("<match>", "").replace("</match>", "")
+                    )
 
-                item_creator = _creator_from_view(item.get("view"))
+                    item_creator = _creator_from_view(item.get("view"))
 
-                ddb_id = item.get("id")
-                raw = {
-                    "title": item_title,
-                    "creator": item_creator,
-                    "id": ddb_id,
-                    "item_url": f"https://www.deutsche-digitale-bibliothek.de/item/{ddb_id}"
-                    if ddb_id
-                    else None,
-                    "thumbnail": item.get("thumbnail"),
-                    "iiif_manifest": None,  # Will be fetched from item metadata
-                }
-                results.append(convert_to_searchresult("DDB", raw))
+                    ddb_id = item.get("id")
+                    item_url = (
+                        f"https://www.deutsche-digitale-bibliothek.de/item/{ddb_id}"
+                        if ddb_id
+                        else None
+                    )
+                    raw = {
+                        "title": item_title,
+                        "creator": item_creator,
+                        "id": ddb_id,
+                        "item_url": item_url,
+                        "thumbnail": item.get("thumbnail"),
+                        "iiif_manifest": None,  # Fetched from item metadata
+                    }
+                    results.append(convert_to_searchresult("DDB", raw))
+                except Exception:
+                    logger.warning("DDB: skipping malformed record", exc_info=True)
+                    continue
                 if len(results) >= max_results:
                     break
             if len(results) >= max_results:

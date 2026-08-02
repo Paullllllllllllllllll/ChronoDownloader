@@ -568,6 +568,94 @@ class TestSbbDigitalProvider:
             assert result is False
             mock_dl.assert_not_called()
 
+    def test_prefer_pdf_does_not_cut_the_pdf_loop_short(
+        self, temp_output_dir: str
+    ) -> None:
+        """Returning after the first successful PDF nullified the page cap.
+
+        A per-page PDF fileGrp holds one file per page, so the early return
+        downloaded page one and reported the whole work as complete.
+        """
+        with (
+            patch("api.providers.sbb_digital.make_request", return_value="<mets/>"),
+            patch("api.providers.sbb_digital.save_json", return_value=None),
+            patch(
+                "api.providers.sbb_digital._collect_mets_urls",
+                return_value=(["p1", "p2", "p3"], ["i1"]),
+            ),
+            patch("api.providers.sbb_digital.get_max_pages", return_value=0),
+            patch("api.providers.sbb_digital.budget_exhausted", return_value=False),
+            patch(
+                "api.providers.sbb_digital.prefer_pdf_over_images", return_value=True
+            ),
+            patch(
+                "api.providers.sbb_digital.download_file", return_value="/x/f.pdf"
+            ) as mock_dl,
+        ):
+            from api.providers.sbb_digital import download_sbb_digital_work
+
+            result = download_sbb_digital_work({"id": "PPN123"}, temp_output_dir)
+
+        assert result is True
+        # Every PDF, and no image once at least one PDF landed.
+        assert [call.args[0] for call in mock_dl.call_args_list] == ["p1", "p2", "p3"]
+
+    def test_prefer_pdf_still_honours_max_pages(self, temp_output_dir: str) -> None:
+        """The cap applies whether or not PDFs are preferred over images."""
+        with (
+            patch("api.providers.sbb_digital.make_request", return_value="<mets/>"),
+            patch("api.providers.sbb_digital.save_json", return_value=None),
+            patch(
+                "api.providers.sbb_digital._collect_mets_urls",
+                return_value=(["p1", "p2", "p3", "p4"], ["i1"]),
+            ),
+            patch("api.providers.sbb_digital.get_max_pages", return_value=2),
+            patch("api.providers.sbb_digital.budget_exhausted", return_value=False),
+            patch(
+                "api.providers.sbb_digital.prefer_pdf_over_images", return_value=True
+            ),
+            patch(
+                "api.providers.sbb_digital.download_file", return_value="/x/f.pdf"
+            ) as mock_dl,
+        ):
+            from api.providers.sbb_digital import download_sbb_digital_work
+
+            result = download_sbb_digital_work({"id": "PPN123"}, temp_output_dir)
+
+        assert result is True
+        assert [call.args[0] for call in mock_dl.call_args_list] == ["p1", "p2"]
+
+    def test_images_are_still_tried_when_no_pdf_succeeds(
+        self, temp_output_dir: str
+    ) -> None:
+        """The image fallback must survive a PDF group that fails outright."""
+
+        def fail_pdfs(url: str, *args: Any, **kwargs: Any) -> str | None:
+            return None if url.startswith("p") else "/x/i.jpg"
+
+        with (
+            patch("api.providers.sbb_digital.make_request", return_value="<mets/>"),
+            patch("api.providers.sbb_digital.save_json", return_value=None),
+            patch(
+                "api.providers.sbb_digital._collect_mets_urls",
+                return_value=(["p1"], ["i1", "i2"]),
+            ),
+            patch("api.providers.sbb_digital.get_max_pages", return_value=0),
+            patch("api.providers.sbb_digital.budget_exhausted", return_value=False),
+            patch(
+                "api.providers.sbb_digital.prefer_pdf_over_images", return_value=True
+            ),
+            patch(
+                "api.providers.sbb_digital.download_file", side_effect=fail_pdfs
+            ) as mock_dl,
+        ):
+            from api.providers.sbb_digital import download_sbb_digital_work
+
+            result = download_sbb_digital_work({"id": "PPN123"}, temp_output_dir)
+
+        assert result is True
+        assert [call.args[0] for call in mock_dl.call_args_list] == ["p1", "i1", "i2"]
+
     METS_MULTI_FILEGRP = (
         '<?xml version="1.0"?>'
         '<mets:mets xmlns:mets="http://www.loc.gov/METS/" '
@@ -948,19 +1036,152 @@ class TestGoogleBooksProvider:
         reset_counters()
 
 
+def _sru_envelope(records: str, count: int = 1) -> str:
+    """Wrap record elements in the SRU 1.2 searchRetrieveResponse envelope."""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<srw:searchRetrieveResponse xmlns:srw="http://www.loc.gov/zing/srw/">'
+        "<srw:version>1.2</srw:version>"
+        f"<srw:numberOfRecords>{count}</srw:numberOfRecords>"
+        f"<srw:records>{records}</srw:records>"
+        "</srw:searchRetrieveResponse>"
+    )
+
+
+def _srw_dc_record(fields: str, position: int = 1) -> str:
+    """One SRU record carrying the srw_dc container for recordSchema=dc.
+
+    The Dublin Core payload is wrapped in the record schema's own element,
+    ``{info:srw/schema/1/dc-v1.1}dc``. The DCMES namespace bound to the
+    ``dc:`` prefix on the children declares the fifteen elements and no
+    container, so no conformant server ever sends a ``{DCMES}dc`` wrapper.
+    """
+    return (
+        "<srw:record>"
+        "<srw:recordSchema>info:srw/schema/1/dc-v1.1</srw:recordSchema>"
+        "<srw:recordPacking>xml</srw:recordPacking>"
+        "<srw:recordData>"
+        '<srw_dc:dc xmlns:srw_dc="info:srw/schema/1/dc-v1.1"'
+        ' xmlns:dc="http://purl.org/dc/elements/1.1/"'
+        ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+        ' xsi:schemaLocation="info:srw/schema/1/dc-schema.xsd">'
+        f"{fields}"
+        "</srw_dc:dc>"
+        "</srw:recordData>"
+        f"<srw:recordPosition>{position}</srw:recordPosition>"
+        "</srw:record>"
+    )
+
+
+def _oai_dc_record(fields: str, position: int = 1) -> str:
+    """One SRU record carrying the OAI-PMH oai_dc container instead."""
+    return (
+        "<srw:record>"
+        "<srw:recordSchema>info:srw/schema/1/dc-v1.1</srw:recordSchema>"
+        "<srw:recordPacking>xml</srw:recordPacking>"
+        "<srw:recordData>"
+        '<oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/"'
+        ' xmlns:dc="http://purl.org/dc/elements/1.1/"'
+        ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+        ' xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/'
+        ' http://www.openarchives.org/OAI/2.0/oai_dc.xsd">'
+        f"{fields}"
+        "</oai_dc:dc>"
+        "</srw:recordData>"
+        f"<srw:recordPosition>{position}</srw:recordPosition>"
+        "</srw:record>"
+    )
+
+
 class TestBritishLibraryProvider:
     """Integration tests for the British Library provider."""
 
-    SRU_NO_ARK = (
-        '<?xml version="1.0"?>'
-        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
-        "<records><record><recordData>"
-        '<dc xmlns="http://purl.org/dc/elements/1.1/">'
-        "<title>Cookery</title><creator>Anon</creator>"
-        "<identifier>http://example.org/not-an-ark</identifier>"
-        "</dc></recordData></record></records>"
-        "</searchRetrieveResponse>"
+    SRU_NO_ARK = _sru_envelope(
+        _srw_dc_record(
+            "<dc:title>Cookery</dc:title>"
+            "<dc:creator>Anon</dc:creator>"
+            "<dc:identifier>http://example.org/not-an-ark</dc:identifier>"
+        )
     )
+
+    def test_srw_dc_wrapped_records_are_parsed(self) -> None:
+        """The container element sru.bl.uk actually sends.
+
+        The parser looked for ``{http://purl.org/dc/elements/1.1/}dc``, a
+        wrapper that namespace does not define, so the SRU branch returned
+        nothing against any conformant server and every search fell through
+        to the BNB SPARQL fallback.
+        """
+        xml = _sru_envelope(
+            _srw_dc_record(
+                "<dc:title>The Cook's Oracle</dc:title>"
+                "<dc:creator>Kitchiner, William</dc:creator>"
+                "<dc:date>1822</dc:date>"
+                "<dc:identifier>ark:/81055/vdc_100022589074.0x000002</dc:identifier>"
+            )
+        )
+        with patch("api.providers.british_library.make_request", return_value=xml):
+            from api.providers.british_library import search_british_library
+
+            results = search_british_library("The Cook's Oracle")
+
+        assert len(results) == 1
+        assert results[0].title == "The Cook's Oracle"
+        assert results[0].creators == ["Kitchiner, William"]
+        assert results[0].date == "1822"
+        assert results[0].source_id == "vdc_100022589074.0x000002"
+
+    def test_oai_dc_wrapped_records_are_parsed(self) -> None:
+        """The other container in the wild: the OAI-PMH oai_dc profile."""
+        xml = _sru_envelope(
+            _oai_dc_record(
+                "<dc:title>A New System of Domestic Cookery</dc:title>"
+                "<dc:creator>Rundell, Maria Eliza Ketelby</dc:creator>"
+                "<dc:date>1806</dc:date>"
+                "<dc:identifier>ark:/81055/vdc_100023054321.0x000001</dc:identifier>"
+            )
+        )
+        with patch("api.providers.british_library.make_request", return_value=xml):
+            from api.providers.british_library import search_british_library
+
+            results = search_british_library("A New System of Domestic Cookery")
+
+        assert len(results) == 1
+        assert results[0].source_id == "vdc_100023054321.0x000001"
+        assert results[0].date == "1806"
+
+    def test_ark_identifier_stops_at_the_first_separator(self) -> None:
+        """``ark:/81055/(.*)`` swallowed everything after the ARK.
+
+        BL hands the ARK out inside a manifest URL and inside prose; the
+        junk was persisted as the identifier and pasted into the viewer
+        fallback URL built from it.
+        """
+        xml = _sru_envelope(
+            _srw_dc_record(
+                "<dc:title>Modern Cookery</dc:title>"
+                "<dc:identifier>https://api.bl.uk/metadata/iiif/"
+                "ark:/81055/vdc_100000000795.0x000002/manifest.json"
+                "</dc:identifier>",
+                position=1,
+            )
+            + _srw_dc_record(
+                "<dc:title>The Frugal Housewife</dc:title>"
+                "<dc:identifier>ark:/81055/vdc_100000000796 "
+                "(digitised copy)</dc:identifier>",
+                position=2,
+            ),
+            count=2,
+        )
+        with patch("api.providers.british_library.make_request", return_value=xml):
+            from api.providers.british_library import search_british_library
+
+            results = search_british_library("Cookery", max_results=2)
+
+        assert [r.source_id for r in results] == [
+            "vdc_100000000795.0x000002",
+            "vdc_100000000796",
+        ]
 
     def test_sru_records_without_ark_fall_through_to_sparql(self) -> None:
         """An identifier-less SRU record is undownloadable (source_id=None) and
@@ -991,19 +1212,16 @@ class TestBritishLibraryProvider:
         """One bad record must not throw away records already parsed."""
         from api.providers import british_library
 
-        good = (
-            '<?xml version="1.0"?>'
-            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
-            "<records>"
-            "<record><recordData>"
-            '<dc xmlns="http://purl.org/dc/elements/1.1/">'
-            "<title>A</title><identifier>ark:/81055/vdc_A</identifier>"
-            "</dc></recordData></record>"
-            "<record><recordData>"
-            '<dc xmlns="http://purl.org/dc/elements/1.1/">'
-            "<title>B</title><identifier>ark:/81055/vdc_B</identifier>"
-            "</dc></recordData></record>"
-            "</records></searchRetrieveResponse>"
+        good = _sru_envelope(
+            _srw_dc_record(
+                "<dc:title>A</dc:title><dc:identifier>ark:/81055/vdc_A</dc:identifier>",
+                position=1,
+            )
+            + _srw_dc_record(
+                "<dc:title>B</dc:title><dc:identifier>ark:/81055/vdc_B</dc:identifier>",
+                position=2,
+            ),
+            count=2,
         )
 
         from api.model import convert_to_searchresult as real_convert
@@ -1031,15 +1249,11 @@ class TestBritishLibraryProvider:
     def test_sru_record_without_creator_has_none_not_na(self) -> None:
         """An SRU record with no <dc:creator> element must yield
         raw["creator"] is None, not the retired "N/A" sentinel."""
-        xml = (
-            '<?xml version="1.0"?>'
-            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
-            "<records><record><recordData>"
-            '<dc xmlns="http://purl.org/dc/elements/1.1/">'
-            "<title>Cookery</title>"
-            "<identifier>ark:/81055/vdc_X</identifier>"
-            "</dc></recordData></record></records>"
-            "</searchRetrieveResponse>"
+        xml = _sru_envelope(
+            _srw_dc_record(
+                "<dc:title>Cookery</dc:title>"
+                "<dc:identifier>ark:/81055/vdc_X</dc:identifier>"
+            )
         )
         with patch("api.providers.british_library.make_request", return_value=xml):
             from api.providers.british_library import search_british_library
@@ -1048,6 +1262,86 @@ class TestBritishLibraryProvider:
 
             assert len(results) == 1
             assert results[0].raw["creator"] is None
+
+    def test_sparql_binding_without_a_title_does_not_borrow_the_query(self) -> None:
+        """A binding with no dct:title was handed the searched-for title.
+
+        That fabricated a perfect title score, which min_title_score cannot
+        gate, so the pipeline could select and download an arbitrary work.
+        An empty title scores 0 and is filtered like any other untitled
+        record.
+        """
+        sparql_response = {
+            "head": {"vars": ["work", "title", "creatorName", "same", "ident"]},
+            "results": {
+                "bindings": [
+                    {
+                        "work": {
+                            "type": "uri",
+                            "value": "http://bnb.data.bl.uk/id/resource/009876543",
+                        },
+                        "same": {
+                            "type": "uri",
+                            "value": "http://api.bl.uk/metadata/iiif/"
+                            "ark:/81055/vdc_100000000999",
+                        },
+                    }
+                ]
+            },
+        }
+        with patch(
+            "api.providers.british_library.make_request",
+            side_effect=[self.SRU_NO_ARK, sparql_response],
+        ):
+            from api.providers.british_library import search_british_library
+
+            results = search_british_library("The Cook's Oracle", "Kitchiner")
+
+        assert len(results) == 1
+        assert results[0].title == ""
+        # The query creator must not be fabricated either.
+        assert results[0].creators == []
+        assert results[0].raw["creator"] is None
+
+    def test_sparql_binding_keeps_its_own_title_and_creator(self) -> None:
+        """The fields the endpoint does bind are still carried through."""
+        sparql_response = {
+            "head": {"vars": ["work", "title", "creatorName", "same", "ident"]},
+            "results": {
+                "bindings": [
+                    {
+                        "work": {
+                            "type": "uri",
+                            "value": "http://bnb.data.bl.uk/id/resource/009876544",
+                        },
+                        "title": {
+                            "type": "literal",
+                            "value": "The Cook's Oracle and Housekeeper's Manual",
+                        },
+                        "creatorName": {
+                            "type": "literal",
+                            "value": "Kitchiner, William",
+                        },
+                        "ident": {
+                            "type": "literal",
+                            "value": "ark:/81055/vdc_100000000998",
+                        },
+                    }
+                ]
+            },
+        }
+        with patch(
+            "api.providers.british_library.make_request",
+            side_effect=[self.SRU_NO_ARK, sparql_response],
+        ):
+            from api.providers.british_library import search_british_library
+
+            results = search_british_library("The Cook's Oracle", "Kitchiner")
+
+        assert len(results) == 1
+        assert results[0].title == "The Cook's Oracle and Housekeeper's Manual"
+        assert results[0].creators == ["Kitchiner, William"]
+        assert results[0].source_id == "vdc_100000000998"
 
     def test_viewer_fallback_runs_when_manifest_endpoint_returns_html(
         self, temp_output_dir: str

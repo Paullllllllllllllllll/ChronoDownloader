@@ -229,23 +229,28 @@ def include_metadata() -> bool:
 def get_network_config(provider_key: str | None) -> dict[str, Any]:
     """Return network policy for a provider, with sensible defaults.
 
+    The provider section is read through :func:`get_provider_setting`, so the
+    ``bnf_gallica`` -> ``gallica`` alias and the guards against a malformed
+    ``provider_settings`` block apply here exactly as they do to every other
+    provider-settings accessor.
+
     Args:
         provider_key: Provider identifier (may be None for generic defaults)
 
     Returns:
         Network configuration dictionary with all fields populated
     """
-    cfg = get_config()
-    prov_cfg = (
-        cfg.get("provider_settings", {}).get(provider_key or "", {})
-        if provider_key
-        else {}
+    missing = object()
+    raw_net = (
+        get_provider_setting(provider_key, "network", None) if provider_key else None
     )
-    net = dict(prov_cfg.get("network", {}) or {})
+    net: dict[str, Any] = dict(raw_net) if isinstance(raw_net, dict) else {}
 
     # Back-compat: lift legacy delay_ms into network if not provided
-    if "delay_ms" not in net and "delay_ms" in prov_cfg:
-        net["delay_ms"] = prov_cfg.get("delay_ms")
+    if "delay_ms" not in net and provider_key:
+        legacy_delay = get_provider_setting(provider_key, "delay_ms", missing)
+        if legacy_delay is not missing:
+            net["delay_ms"] = legacy_delay
 
     # Defaults
     net.setdefault("delay_ms", 0)

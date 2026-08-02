@@ -171,6 +171,99 @@ class TestModsDate:
 
 
 # ============================================================================
+# MODS record identifiers (SBB)
+# ============================================================================
+
+
+def _sbb_volume_sru(own_ppn: str | None = "PPN723456789") -> str:
+    """A multi-volume item as the GBV SRU endpoint returns it.
+
+    The volume's own recordInfo sits at the top level of the MODS record;
+    the series it belongs to carries a recordInfo of its own inside
+    ``<relatedItem type="host">``, which comes first in document order.
+    """
+    own = (
+        f"""<mods:recordInfo>
+            <mods:recordIdentifier source="gbv-ppn">{own_ppn}</mods:recordIdentifier>
+          </mods:recordInfo>"""
+        if own_ppn
+        else ""
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<srw:searchRetrieveResponse xmlns:srw="http://www.loc.gov/zing/srw/">
+  <srw:version>1.2</srw:version>
+  <srw:numberOfRecords>1</srw:numberOfRecords>
+  <srw:records>
+    <srw:record>
+      <srw:recordSchema>mods</srw:recordSchema>
+      <srw:recordPacking>xml</srw:recordPacking>
+      <srw:recordData>
+        <mods:mods xmlns:mods="http://www.loc.gov/mods/v3" version="3.7">
+          <mods:titleInfo>
+            <mods:title>Allgemeines deutsches Kochbuch</mods:title>
+            <mods:subTitle>Zweiter Band</mods:subTitle>
+          </mods:titleInfo>
+          <mods:name type="personal">
+            <mods:namePart>Loeffler, Friederike Luise</mods:namePart>
+          </mods:name>
+          <mods:originInfo>
+            <mods:place><mods:placeTerm>Stuttgart</mods:placeTerm></mods:place>
+            <mods:dateIssued>1846</mods:dateIssued>
+          </mods:originInfo>
+          <mods:relatedItem type="host">
+            <mods:titleInfo>
+              <mods:title>Allgemeines deutsches Kochbuch</mods:title>
+            </mods:titleInfo>
+            <mods:recordInfo>
+              <mods:recordIdentifier source="gbv-ppn"
+                >PPN100000000</mods:recordIdentifier>
+            </mods:recordInfo>
+          </mods:relatedItem>
+          {own}
+        </mods:mods>
+      </srw:recordData>
+      <srw:recordPosition>1</srw:recordPosition>
+    </srw:record>
+  </srw:records>
+</srw:searchRetrieveResponse>
+"""
+
+
+class TestSbbRecordIdentifier:
+    """A volume must be downloaded under its own PPN, not the series'.
+
+    ``.//mods:recordInfo`` descends into ``<relatedItem type="host">``, whose
+    recordInfo names the series. The METS resolver, the viewer URL and every
+    downloaded file then pointed at the wrong object -- the same defect class
+    that ``.//mods:name`` had for authorship.
+    """
+
+    def test_the_volumes_own_ppn_wins_over_the_host_record(self) -> None:
+        from api.providers.sbb_digital import search_sbb_digital
+
+        with patch(
+            "api.providers.sbb_digital.make_request", return_value=_sbb_volume_sru()
+        ):
+            results = search_sbb_digital("Allgemeines deutsches Kochbuch")
+
+        assert len(results) == 1
+        first = results[0]
+        assert first.source_id == "PPN723456789"
+        assert first.raw["mets_url"].endswith("PPN723456789")
+        assert first.raw["item_url"].endswith("PPN723456789")
+        assert first.creators == ["Loeffler, Friederike Luise"]
+        assert first.date == "1846"
+
+    def test_a_record_with_only_a_host_ppn_is_skipped(self) -> None:
+        """Without its own identifier the record cannot be resolved."""
+        from api.providers.sbb_digital import search_sbb_digital
+
+        host_only = _sbb_volume_sru(own_ppn=None)
+        with patch("api.providers.sbb_digital.make_request", return_value=host_only):
+            assert search_sbb_digital("Allgemeines deutsches Kochbuch") == []
+
+
+# ============================================================================
 # DPLA date unwrapping
 # ============================================================================
 

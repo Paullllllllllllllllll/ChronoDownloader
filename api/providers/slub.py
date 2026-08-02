@@ -62,10 +62,13 @@ def _extract_record_id(item: dict[str, Any]) -> str | None:
 def _extract_ppn_from_url(url: str | None) -> str | None:
     if not url or not isinstance(url, str):
         return None
-    match = re.search(r"ppn(\d+)", url, re.IGNORECASE)
+    # K10plus PPNs carry a modulo-11 check digit that is "X" for one number
+    # in eleven; \d+ truncated it, and the manifest built from the short PPN
+    # 404s (id33299526X -> 33299526).
+    match = re.search(r"ppn(\d+[\dxX]?)", url, re.IGNORECASE)
     if match:
         return match.group(1)
-    match = re.search(r"id(\d+)", url, re.IGNORECASE)
+    match = re.search(r"id(\d+[\dxX]?)", url, re.IGNORECASE)
     if match:
         return match.group(1)
     return None
