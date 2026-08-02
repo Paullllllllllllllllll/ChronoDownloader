@@ -45,6 +45,7 @@ from main.data.works_csv import (
     TITLE_COL,
     backup_works_csv,
     get_row_year,
+    load_works_csv,
     mark_deferred,
     mark_failed,
     mark_success,
@@ -85,16 +86,47 @@ def _run_eager_deferred_retry(
             csv_path=csv_path, csv_entry_titles=csv_entry_titles
         )
         if stats.get("attempted"):
+            # Postponed items (quota not back yet) are reported apart from
+            # failures: they are untouched and stay queued for the next run.
             logger.info(
-                "Eager deferred retry: %d attempted, %d succeeded, %d failed",
+                "Eager deferred retry: %d attempted, %d succeeded, %d failed, "
+                "%d postponed",
                 stats.get("attempted", 0),
                 stats.get("succeeded", 0),
                 stats.get("failed", 0),
+                stats.get("postponed", 0),
             )
         return completed_entry_ids
     except Exception:
         logger.exception("Eager deferred retry failed")
         return set()
+
+
+def _frame_entry_titles(works_df: pd.DataFrame) -> dict[str, str] | None:
+    """Build an ``entry_id -> title`` map from a works frame, or None."""
+    if ENTRY_ID_COL not in works_df.columns or TITLE_COL not in works_df.columns:
+        return None
+    return {
+        str(e): str(t)
+        for e, t in zip(works_df[ENTRY_ID_COL], works_df[TITLE_COL], strict=False)
+    }
+
+
+def _csv_entry_titles(
+    csv_path: str | None, logger: logging.Logger
+) -> dict[str, str] | None:
+    """Build an ``entry_id -> title`` map from the whole works CSV, or None.
+
+    Returns None when there is no CSV or it cannot be re-read, leaving the
+    caller to fall back to the (filtered) frame it already holds.
+    """
+    if not csv_path:
+        return None
+    try:
+        return _frame_entry_titles(load_works_csv(csv_path))
+    except Exception:
+        logger.debug("Could not re-read %s for deferred ownership", csv_path)
+        return None
 
 
 def run_batch_downloads(
@@ -152,14 +184,14 @@ def run_batch_downloads(
         # Pass this CSV's entry_id -> title map so the retry can tell whether a
         # queued item is actually one of these rows; entry_id schemes repeat
         # across sampling CSVs.
-        csv_entry_titles: dict[str, str] | None = None
-        if ENTRY_ID_COL in works_df.columns and TITLE_COL in works_df.columns:
-            csv_entry_titles = {
-                str(e): str(t)
-                for e, t in zip(
-                    works_df[ENTRY_ID_COL], works_df[TITLE_COL], strict=False
-                )
-            }
+        # Built from the full CSV, not works_df: callers hand this function an
+        # already-filtered frame (--pending-mode, --entry-ids, --limit), and a
+        # row this run happens to exclude is still one of this CSV's rows. Read
+        # from the frame it would look foreign, and its retry success would
+        # never be written back.
+        csv_entry_titles = _csv_entry_titles(csv_path, logger)
+        if csv_entry_titles is None:
+            csv_entry_titles = _frame_entry_titles(works_df)
         completed_entry_ids = _run_eager_deferred_retry(
             config, logger, csv_path, csv_entry_titles
         )

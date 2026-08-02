@@ -583,3 +583,44 @@ class TestInteractiveSessionDeferredAccounting:
 
         assert shown.get("deferred") == 0
         assert shown.get("succeeded") == 3
+
+    def test_single_mode_reports_its_own_deferral(self, temp_dir: str) -> None:
+        """Single mode books the status process_single_work returns.
+
+        The queue-length delta cannot see it: re-deferring a work already in
+        the queue dedupes, so the length is unchanged and the deferral was
+        reported as neither succeeded nor deferred.
+        """
+        from main.ui import interactive as mod
+
+        config = DownloadConfiguration()
+        config.mode = "single"
+        config.single_title = "Quota Book"
+        config.output_dir = temp_dir
+        config.dry_run = False
+
+        shown: dict[str, Any] = {}
+
+        def _capture(**kwargs: Any) -> None:
+            shown.update(kwargs)
+
+        with (
+            patch.object(ConsoleUI, "enable_ansi"),
+            patch.object(mod, "process_single_work", return_value="deferred"),
+            patch.object(mod, "get_deferred_queue") as queue,
+            patch(
+                "main.orchestration.pipeline.load_enabled_apis",
+                return_value=[("p", object(), object(), "P")],
+            ),
+            patch(
+                "main.orchestration.pipeline.filter_enabled_providers_for_keys",
+                side_effect=lambda providers: providers,
+            ),
+            patch.object(ConsoleUI, "print_session_summary", side_effect=_capture),
+        ):
+            queue.return_value.get_pending.return_value = ["already-queued"]
+            mod.run_interactive_session(config)
+
+        assert shown.get("deferred") == 1
+        assert shown.get("failed") == 0
+        assert shown.get("processed") == 1

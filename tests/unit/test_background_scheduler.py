@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from api.model import QuotaDeferredException, SearchResult
-from main.state.background import BackgroundRetryScheduler
+from main.state.background import (
+    RETRY_FAILED,
+    RETRY_POSTPONED,
+    RETRY_SUCCEEDED,
+    BackgroundRetryScheduler,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -174,7 +179,7 @@ class TestRetryItem:
         s._provider_download_fns = {"ia": download_fn}
 
         result = s._retry_item(_mock_item())
-        assert result is True
+        assert result == RETRY_SUCCEEDED
         s._queue.mark_completed.assert_called_once()
 
     def test_non_quota_success_does_not_record_quota(self) -> None:
@@ -186,7 +191,7 @@ class TestRetryItem:
 
         s._provider_download_fns = {"ia": MagicMock(return_value=True)}
 
-        assert s._retry_item(_mock_item()) is True
+        assert s._retry_item(_mock_item()) == RETRY_SUCCEEDED
         s._quota_manager.record_download.assert_not_called()
 
     def test_skips_when_no_download_fn(self) -> None:
@@ -198,7 +203,7 @@ class TestRetryItem:
         item.provider_key = "unknown"
 
         result = s._retry_item(item)
-        assert result is False
+        assert result == RETRY_FAILED
 
     def test_no_download_fn_marks_item_failed(self) -> None:
         """An item for an unregistered provider is failed, not skipped.
@@ -215,7 +220,7 @@ class TestRetryItem:
         item.provider_key = "gone_provider"
         item.id = "item1"
 
-        assert s._retry_item(item) is False
+        assert s._retry_item(item) == RETRY_FAILED
         s._queue.mark_failed.assert_called_once()
         assert s.get_stats()["retries_failed"] == 1
 
@@ -231,7 +236,7 @@ class TestRetryItem:
         s._quota_manager.has_quota.return_value = False
         s._provider_download_fns = {"ia": MagicMock(return_value=True)}
 
-        assert s._retry_item(_mock_item()) is True
+        assert s._retry_item(_mock_item()) == RETRY_SUCCEEDED
         s._quota_manager.can_download.assert_not_called()
 
     def test_skips_when_quota_not_ready(self) -> None:
@@ -246,8 +251,9 @@ class TestRetryItem:
         item.provider_key = "ia"
         item.reset_time = None
 
+        # Quota not back yet: postponed, which is not a retry failure.
         result = s._retry_item(item)
-        assert result is False
+        assert result == RETRY_POSTPONED
 
     def test_handles_quota_deferred_exception(self) -> None:
         s = BackgroundRetryScheduler()
@@ -263,7 +269,7 @@ class TestRetryItem:
         item.entry_id = None
 
         result = s._retry_item(item)
-        assert result is False
+        assert result == RETRY_POSTPONED
         assert s.get_stats()["retries_redeferred"] == 1
 
     def test_handles_download_failure(self) -> None:
@@ -284,7 +290,7 @@ class TestRetryItem:
         item.entry_id = None
 
         result = s._retry_item(item)
-        assert result is False
+        assert result == RETRY_FAILED
         on_failure.assert_called_once()
 
     def test_calls_success_callback(self) -> None:
@@ -304,3 +310,57 @@ class TestRetryItem:
 
         s._retry_item(item)
         on_success.assert_called_once_with(item)
+
+
+# ============================================================================
+# retry_ready_now accounting
+# ============================================================================
+
+
+class TestRetryReadyNowAccounting:
+    """A postponed item is not a failed retry."""
+
+    def test_quota_postponed_item_is_not_counted_as_failed(self) -> None:
+        s = BackgroundRetryScheduler()
+        queue = MagicMock()
+        item = _mock_item()
+        item.reset_time = None
+        queue.get_ready.return_value = [item]
+        quota_manager = MagicMock()
+        # Quota has not returned yet: the item stays queued, untouched.
+        quota_manager.can_download.return_value = (False, 3600.0)
+        s._provider_download_fns = {"ia": MagicMock()}
+
+        with (
+            patch("main.state.background.get_deferred_queue", return_value=queue),
+            patch(
+                "main.state.background.get_quota_manager", return_value=quota_manager
+            ),
+        ):
+            stats, completed = s.retry_ready_now()
+
+        assert stats["attempted"] == 1
+        assert stats["postponed"] == 1
+        assert stats["failed"] == 0
+        assert stats["succeeded"] == 0
+        assert completed == set()
+
+    def test_real_failure_is_still_counted_as_failed(self) -> None:
+        s = BackgroundRetryScheduler()
+        queue = MagicMock()
+        queue.mark_retrying.return_value = False
+        queue.get_ready.return_value = [_mock_item()]
+        quota_manager = MagicMock()
+        quota_manager.can_download.return_value = (True, 0)
+        s._provider_download_fns = {"ia": MagicMock(return_value=False)}
+
+        with (
+            patch("main.state.background.get_deferred_queue", return_value=queue),
+            patch(
+                "main.state.background.get_quota_manager", return_value=quota_manager
+            ),
+        ):
+            stats, _completed = s.retry_ready_now()
+
+        assert stats["failed"] == 1
+        assert stats["postponed"] == 0

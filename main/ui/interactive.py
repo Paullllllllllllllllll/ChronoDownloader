@@ -27,6 +27,7 @@ if __package__ is None or __package__ == "":
 from api.core.config import (
     get_config,
     get_download_config,
+    get_provider_setting,
     resolve_max_parallel_downloads,
 )
 from api.iiif import is_iiif_manifest_url
@@ -159,17 +160,17 @@ class InteractiveWorkflow:
 
         cfg = get_config()
         providers_cfg = cfg.get("providers", {})
-        provider_settings = cfg.get("provider_settings", {})
 
         enabled = []
         disabled = []
 
         for key, (_, _, name) in PROVIDERS.items():
             if providers_cfg.get(key, False):
-                # Check for quota info
-                settings = provider_settings.get(key, {})
-                quota = settings.get("quota", {})
-                if quota.get("enabled"):
+                # Check for quota info via the alias-aware accessor: a raw
+                # provider_settings.get(key) would miss the gallica block for
+                # the bnf_gallica registry key.
+                quota = get_provider_setting(key, "quota", {})
+                if isinstance(quota, dict) and quota.get("enabled"):
                     daily_limit = quota.get("daily_limit", "?")
                     enabled.append(f"{name} (quota: {daily_limit}/day)")
                 else:
@@ -191,8 +192,8 @@ class InteractiveWorkflow:
             key_settings = {}
             if dl_config.get("prefer_pdf_over_images"):
                 key_settings["Format preference"] = "PDF over images"
-            if dl_config.get("max_total_size_gb"):
-                key_settings["Max total size"] = f"{dl_config['max_total_size_gb']} GB"
+            # max_total_size_gb was never a real key: no config file ships it
+            # and no other code reads it, so the summary line could not fire.
             if resolve_max_parallel_downloads(dl_config) > 1:
                 key_settings["Parallel downloads"] = dl_config["max_parallel_downloads"]
 
@@ -920,6 +921,11 @@ def run_interactive_session(
         stats["processed"] = 1
         if single_status == "completed":
             stats["succeeded"] = 1
+        elif single_status == "deferred":
+            # process_single_work reports a quota deferral explicitly; the
+            # queue-length delta below cannot see it, because re-deferring an
+            # item already queued leaves the length unchanged.
+            stats["deferred"] = 1
         elif single_status == "failed":
             stats["failed"] = 1
     elif config.mode == "search":
@@ -965,11 +971,12 @@ def run_interactive_session(
                 stats["failed"] += 1
 
     # Handle deferred downloads. The batch modes already carry the honest
-    # per-run delta from run_batch_downloads; overwriting it with the whole
-    # backlog broke the parts-sum-to-total invariant of the session summary
-    # whenever the queue held items from another corpus.
+    # per-run delta from run_batch_downloads, and single mode books its own
+    # status above; overwriting either with the whole backlog broke the
+    # parts-sum-to-total invariant of the session summary whenever the queue
+    # held items from another corpus, and the delta is blind to queue dedup.
     pending = get_deferred_queue().get_pending()
-    if config.mode not in ("csv", "collection"):
+    if config.mode not in ("csv", "collection", "single"):
         stats["deferred"] = max(0, len(pending) - deferred_before)
 
     if pending:

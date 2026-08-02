@@ -224,7 +224,7 @@ class TestQuotaWaitDatetime:
     ) -> None:
         from datetime import datetime
 
-        from main.state.background import BackgroundRetryScheduler
+        from main.state.background import RETRY_POSTPONED, BackgroundRetryScheduler
 
         BackgroundRetryScheduler._instance = None
         try:
@@ -253,7 +253,8 @@ class TestQuotaWaitDatetime:
 
             result = scheduler._retry_item(item)
 
-            assert result is False  # still quota-limited, no crash
+            # Still quota-limited (postponed, not failed), and no crash.
+            assert result == RETRY_POSTPONED
             assert item.reset_time is not None
             reset_dt = datetime.fromisoformat(item.reset_time)
             now = datetime.now(UTC)

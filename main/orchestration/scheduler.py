@@ -136,7 +136,11 @@ class ProviderSemaphoreManager:
         Args:
             provider_key: Provider identifier
         """
-        sem = self._semaphores.get(provider_key)
+        # Read under the lock: dict lookups are not atomic under free
+        # threading, so a concurrent _get_or_create insert could be observed
+        # half-applied (same hygiene as the circuit breaker).
+        with self._lock:
+            sem = self._semaphores.get(provider_key)
         if sem:
             sem.release()
 

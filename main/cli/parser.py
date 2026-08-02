@@ -27,11 +27,10 @@ def create_cli_parser() -> argparse.ArgumentParser:
     """Create the argument parser for CLI mode."""
     parser = argparse.ArgumentParser(
         description="ChronoDownloader - Historical Document Download Tool (CLI Mode)",
-        # Abbreviated flags are refused: the maintenance commands
-        # (--status, --quota-status, --cleanup-deferred) are dispatched by
-        # exact-string scanning of sys.argv in main.cli.entry, so an
-        # abbreviation like "--stat" would parse fine here but bypass that
-        # dispatch and start a real download run.
+        # Abbreviated flags are refused: an abbreviation like "--stat" is
+        # ambiguous between --status and other flags, and silently guessing
+        # one of them can start a real download run instead of a maintenance
+        # command.
         allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""

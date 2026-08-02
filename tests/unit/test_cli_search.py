@@ -179,7 +179,7 @@ class TestRunSearchCliAdHoc:
         }
         args = self._args(["--search", "T", "--creator", "C"])
         run_search_cli(args, {}, logger)
-        mock_search.assert_called_once_with("T", "C", None)
+        mock_search.assert_called_once_with("T", "C", None, query_year=None)
 
     def test_human_output_renders(self, capsys: Any) -> None:
         with patch("main.cli.commands.search.pipeline.search_work") as mock_search:
@@ -239,7 +239,7 @@ class TestRunSearchCliCsv:
     def test_all_rows_searched(
         self, mock_search: MagicMock, tmp_path: Path, capsys: Any
     ) -> None:
-        mock_search.side_effect = lambda title, creator, entry_id: {
+        mock_search.side_effect = lambda title, creator, entry_id, query_year=None: {
             "entry_id": entry_id,
             "query": {"title": title, "creator": creator},
             "status": "match",
@@ -256,6 +256,43 @@ class TestRunSearchCliCsv:
         ]
         assert len(out_lines) == 3
         assert json.loads(out_lines[0])["entry_id"] == "E1"
+
+    @patch("main.cli.commands.search.pipeline.search_work")
+    def test_year_column_reaches_search_work(
+        self, mock_search: MagicMock, tmp_path: Path
+    ) -> None:
+        """The preview must rank exactly as the batch run, which passes the
+        row's year; without it the edition-year penalty stayed dormant here."""
+        csv_path = tmp_path / "works_with_year.csv"
+        csv_path.write_text(
+            "entry_id,short_title,main_author,year\nE1,First Book,Author One,1651\n",
+            encoding="utf-8",
+        )
+        mock_search.return_value = {
+            "entry_id": "E1",
+            "query": {"title": "First Book", "creator": "Author One"},
+            "status": "match",
+            "selected": {},
+            "candidates": [],
+        }
+        args = self._args([str(csv_path), "--search-only"])
+        assert run_search_cli(args, {}, logger) == EXIT_OK
+        assert mock_search.call_args.kwargs["query_year"] == 1651
+
+    @patch("main.cli.commands.search.pipeline.search_work")
+    def test_missing_year_column_leaves_the_penalty_dormant(
+        self, mock_search: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_search.return_value = {
+            "entry_id": "E1",
+            "query": {"title": "First Book", "creator": "Author One"},
+            "status": "match",
+            "selected": {},
+            "candidates": [],
+        }
+        args = self._args([self._write_csv(tmp_path), "--search-only", "--limit", "1"])
+        assert run_search_cli(args, {}, logger) == EXIT_OK
+        assert mock_search.call_args.kwargs["query_year"] is None
 
     @patch("main.cli.commands.search.pipeline.search_work")
     def test_entry_ids_and_limit_filters(
@@ -304,7 +341,7 @@ class TestRunSearchCliCsv:
         self, mock_search: MagicMock, tmp_path: Path
     ) -> None:
         results = iter(["match", "no_match", "match"])
-        mock_search.side_effect = lambda title, creator, entry_id: {
+        mock_search.side_effect = lambda title, creator, entry_id, query_year=None: {
             "entry_id": entry_id,
             "query": {"title": title, "creator": creator},
             "status": next(results),

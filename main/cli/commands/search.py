@@ -20,6 +20,7 @@ from main.data.works_csv import (
     CREATOR_COL,
     ENTRY_ID_COL,
     TITLE_COL,
+    get_row_year,
     load_works_csv,
 )
 from main.orchestration import pipeline
@@ -88,12 +89,15 @@ def _emit(result: dict[str, Any], as_json: bool) -> None:
 def _queries_from_csv(
     args: argparse.Namespace,
     logger: logging.Logger,
-) -> list[tuple[str, str | None, str | None]] | None:
-    """Build (title, creator, entry_id) queries from the works CSV.
+) -> list[tuple[str, str | None, str | None, int | None]] | None:
+    """Build (title, creator, entry_id, query_year) queries from the works CSV.
 
     Search mode deliberately ignores the retrievable/pending status: searching
     is free and idempotent, so every row with a title is queried. Only
     --entry-ids and --limit narrow the set. Returns None on a usage error.
+
+    The query year is carried along so the preview ranks exactly as the batch
+    run does; the batch paths read it from the same column.
     """
     try:
         works_df = load_works_csv(args.csv_file)
@@ -122,7 +126,7 @@ def _queries_from_csv(
     if limit is not None and limit >= 0:
         works_df = works_df.head(limit)
 
-    queries: list[tuple[str, str | None, str | None]] = []
+    queries: list[tuple[str, str | None, str | None, int | None]] = []
     skipped = 0
     for _, row in works_df.iterrows():
         title = row.get(TITLE_COL)
@@ -133,7 +137,7 @@ def _queries_from_csv(
         creator_str = None if (creator is None or pd.isna(creator)) else str(creator)
         entry_id = row.get(ENTRY_ID_COL)
         entry_id_str = None if pd.isna(entry_id) else str(entry_id)
-        queries.append((str(title), creator_str, entry_id_str))
+        queries.append((str(title), creator_str, entry_id_str, get_row_year(row)))
 
     if skipped:
         logger.info("Skipping %d row(s) without a searchable title.", skipped)
@@ -159,9 +163,10 @@ def run_search_cli(
     if as_json:
         _redirect_logging_to_stderr()
 
-    queries: list[tuple[str, str | None, str | None]]
+    queries: list[tuple[str, str | None, str | None, int | None]]
     if getattr(args, "search", None):
-        queries = [(str(args.search), getattr(args, "creator", None), None)]
+        # Ad hoc search has no year source, so the year penalty stays dormant.
+        queries = [(str(args.search), getattr(args, "creator", None), None, None)]
     else:
         if not args.csv_file:
             logger.error("--search-only requires a CSV file (or use --search TITLE).")
@@ -183,8 +188,8 @@ def run_search_cli(
         return EXIT_USAGE
 
     matched = 0
-    for title, creator, entry_id in queries:
-        result = pipeline.search_work(title, creator, entry_id)
+    for title, creator, entry_id, query_year in queries:
+        result = pipeline.search_work(title, creator, entry_id, query_year=query_year)
         if result.get("status") == "match":
             matched += 1
         _emit(result, as_json)

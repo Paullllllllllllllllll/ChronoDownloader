@@ -151,6 +151,28 @@ class TestGetGeneralConfig:
             assert gen["default_output_dir"] == "downloaded_works"
             assert gen["default_csv_path"] == "sample_works.csv"
 
+    def test_empty_string_paths_fall_back_to_defaults(self) -> None:
+        """config.example.json ships "" for both paths; "" is not a path.
+
+        setdefault let the empty strings through, so a fresh clone running on
+        the example file handed downstream code blank output and CSV paths.
+        interactive_mode: False must survive -- it is a legitimate value.
+        """
+        config: dict[str, Any] = {
+            "general": {
+                "interactive_mode": False,
+                "default_output_dir": "",
+                "default_csv_path": "",
+            }
+        }
+
+        with patch("main.ui.mode.get_config", return_value=config):
+            gen = get_general_config()
+
+            assert gen["interactive_mode"] is False
+            assert gen["default_output_dir"] == "downloaded_works"
+            assert gen["default_csv_path"] == "sample_works.csv"
+
     def test_handles_missing_general_section(self) -> None:
         """Test handles missing general section."""
         config: dict[str, Any] = {}

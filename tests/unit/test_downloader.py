@@ -254,6 +254,37 @@ class TestCliHelpers:
         assert merged["selection"]["download_strategy"] == "all"
         assert merged["selection"]["keep_non_selected_metadata"] is False
 
+    def test_min_title_score_flag_stamps_per_provider_thresholds(self) -> None:
+        """--min-title-score must reach providers carrying their own threshold.
+
+        get_min_title_score prefers provider_settings.<key>.min_title_score
+        over the selection value, and the example config sets one for every
+        provider, so writing only selection.min_title_score made the flag a
+        no-op exactly where it was documented to act.
+        """
+        from main.cli import create_cli_parser
+        from main.cli.overrides import _apply_runtime_config_overrides
+
+        args = create_cli_parser().parse_args(["--min-title-score", "77"])
+        config: dict[str, Any] = {
+            "selection": {"min_title_score": 35},
+            "provider_settings": {
+                "gallica": {"min_title_score": 30, "max_pages": 500},
+                "mdz": {"delay_ms": 300},
+                "bne": True,
+            },
+        }
+
+        merged = _apply_runtime_config_overrides(args, config, MagicMock())
+
+        assert merged["selection"]["min_title_score"] == 77.0
+        assert merged["provider_settings"]["gallica"]["min_title_score"] == 77.0
+        # Entries without the key and malformed entries are left alone.
+        assert "min_title_score" not in merged["provider_settings"]["mdz"]
+        assert merged["provider_settings"]["bne"] is True
+        # The original config dict is never mutated in place.
+        assert config["provider_settings"]["gallica"]["min_title_score"] == 30
+
     def test_apply_provider_cli_overrides(self) -> None:
         """Provider overrides respect explicit list, enable, and disable controls."""
         from main.cli.overrides import _apply_provider_cli_overrides
@@ -707,6 +738,48 @@ class TestMain:
         ):
             main()
             mock_cleanup.assert_called_once()
+
+    def test_maintenance_flags_are_read_from_the_parsed_namespace(self) -> None:
+        """A maintenance flag in a value position is not a maintenance command.
+
+        The dispatch used to scan sys.argv for the literal strings, so a token
+        argparse hands to a value (here a positional escaped with ``--``) ran
+        the status command instead of the requested run.
+        """
+        from main.cli.entry import main
+
+        mock_args = MagicMock()
+        mock_args.interactive = False
+        mock_args.cli = True
+        mock_args.non_interactive = False
+        mock_args.verify = False
+
+        with (
+            patch.object(sys, "argv", ["downloader.py", "--", "--status"]),
+            patch("main.cli.entry._show_status") as mock_status,
+            patch("main.cli.entry.show_quota_status") as mock_quota,
+            patch(
+                "main.cli.entry.run_with_mode_detection",
+                return_value=({}, False, mock_args),
+            ),
+            patch("main.cli.entry.run_cli", return_value=0) as mock_run_cli,
+        ):
+            main()
+
+        mock_status.assert_not_called()
+        mock_quota.assert_not_called()
+        mock_run_cli.assert_called_once()
+
+    def test_main_handles_status_flag(self) -> None:
+        """The real --status invocation still dispatches."""
+        from main.cli.entry import main
+
+        with (
+            patch.object(sys, "argv", ["downloader.py", "--status"]),
+            patch("main.cli.entry._show_status") as mock_status,
+        ):
+            main()
+            mock_status.assert_called_once_with(None)
 
     def test_main_handles_keyboard_interrupt(self) -> None:
         """main handles KeyboardInterrupt with exit code 130 (CLI contract)."""

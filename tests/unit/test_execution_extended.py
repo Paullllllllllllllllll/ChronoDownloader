@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -567,6 +568,97 @@ class TestRunBatchDownloads:
         mock_seq.assert_called_once()
         passed_df = mock_seq.call_args[0][0]
         assert list(passed_df["entry_id"]) == ["E002"]
+
+    @patch("main.orchestration.execution.backup_works_csv")
+    @patch("main.orchestration.execution._run_eager_deferred_retry")
+    @patch("main.orchestration.execution._run_sequential")
+    @patch("main.orchestration.execution.get_deferred_queue")
+    def test_ownership_map_covers_rows_this_run_filtered_out(
+        self,
+        mock_queue: MagicMock,
+        mock_seq: MagicMock,
+        mock_eager: MagicMock,
+        mock_backup: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Callers pass an already-filtered frame (--pending-mode, --entry-ids,
+        --limit). Built from that frame, a deferred row this run excludes looked
+        like another corpus's, so its retry success was never written back."""
+        csv_path = tmp_path / "works.csv"
+        csv_path.write_text(
+            "entry_id,short_title,main_author\n"
+            "E001,Book One,Author One\n"
+            "E002,Book Two,Author Two\n",
+            encoding="utf-8",
+        )
+        mock_eager.return_value = set()
+        mock_seq.return_value = {
+            "processed": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "skipped": 0,
+        }
+        mock_queue.return_value.get_pending.return_value = []
+
+        pending_df = pd.DataFrame(
+            {
+                "short_title": ["Book Two"],
+                "main_author": ["Author Two"],
+                "entry_id": ["E002"],
+            }
+        )
+        run_batch_downloads(
+            pending_df,
+            "/output",
+            {},
+            use_parallel=False,
+            csv_path=str(csv_path),
+            enable_background_retry=True,
+        )
+
+        assert mock_eager.call_args[0][3] == {
+            "E001": "Book One",
+            "E002": "Book Two",
+        }
+
+    @patch("main.orchestration.execution.backup_works_csv")
+    @patch("main.orchestration.execution._run_eager_deferred_retry")
+    @patch("main.orchestration.execution._run_sequential")
+    @patch("main.orchestration.execution.get_deferred_queue")
+    def test_ownership_map_falls_back_to_the_frame_when_the_csv_is_unreadable(
+        self,
+        mock_queue: MagicMock,
+        mock_seq: MagicMock,
+        mock_eager: MagicMock,
+        mock_backup: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        mock_eager.return_value = set()
+        mock_seq.return_value = {
+            "processed": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "skipped": 0,
+        }
+        mock_queue.return_value.get_pending.return_value = []
+
+        works_df = pd.DataFrame(
+            {
+                "short_title": ["Book Two"],
+                "main_author": ["Author Two"],
+                "entry_id": ["E002"],
+            }
+        )
+        run_batch_downloads(
+            works_df,
+            "/output",
+            {},
+            use_parallel=False,
+            csv_path=str(tmp_path / "gone.csv"),
+            enable_background_retry=True,
+        )
+
+        assert mock_eager.call_args[0][3] == {"E002": "Book Two"}
 
 
 # ============================================================================

@@ -58,6 +58,32 @@ class TestProviderSemaphoreManager:
         mgr.release("limited_provider")
         t.join()
 
+    def test_release_reads_the_semaphore_map_under_the_lock(self) -> None:
+        """Free-threading hygiene: the dict read must be guarded like the
+        _get_or_create insert it races with."""
+        from main.orchestration.scheduler import ProviderSemaphoreManager
+
+        mgr = ProviderSemaphoreManager({"p": 1})
+        mgr.acquire("p")
+
+        entries: list[int] = []
+        real_lock = mgr._lock
+
+        class _TrackingLock:
+            def __enter__(self) -> None:
+                entries.append(1)
+                real_lock.acquire()
+
+            def __exit__(self, *exc: Any) -> None:
+                real_lock.release()
+
+        mgr._lock = _TrackingLock()  # type: ignore[assignment]
+        mgr.release("p")
+
+        assert entries == [1]
+        # The release still happened: the slot is free again.
+        assert mgr._semaphores["p"].acquire(timeout=0.1) is True
+
 
 class TestDownloadTask:
     """Tests for DownloadTask dataclass."""

@@ -109,6 +109,16 @@ def _apply_runtime_config_overrides(
         sel_cfg["strategy"] = selection_strategy
     if min_title_score is not None:
         sel_cfg["min_title_score"] = float(min_title_score)
+        # get_min_title_score prefers provider_settings.<key>.min_title_score
+        # over the selection value, and the example config sets one for every
+        # provider -- writing only selection.min_title_score made the flag a
+        # no-op there. The flag is a global override, so it stamps the
+        # per-provider values too (merged is a deep copy; safe to mutate).
+        ps_cfg = merged.get("provider_settings")
+        if isinstance(ps_cfg, dict):
+            for entry in ps_cfg.values():
+                if isinstance(entry, dict) and "min_title_score" in entry:
+                    entry["min_title_score"] = float(min_title_score)
     if search_timeout is not None:
         sel_cfg["search_timeout_seconds"] = float(search_timeout)
     if creator_weight is not None:

@@ -31,6 +31,12 @@ from .quota import QuotaManager, get_quota_manager
 
 logger = logging.getLogger(__name__)
 
+# Outcomes of a single retry attempt. "postponed" is not a failure: the
+# provider's quota simply has not returned yet, so the item stays queued.
+RETRY_SUCCEEDED = "succeeded"
+RETRY_FAILED = "failed"
+RETRY_POSTPONED = "postponed"
+
 
 def _consumed_quota_unit(provider_key: str) -> bool:
     """Return True when a just-succeeded retry actually used a quota-gated unit.
@@ -157,10 +163,12 @@ class BackgroundRetryScheduler:
 
         Returns:
             A tuple of ``(stats, completed_entry_ids)`` where ``stats`` holds
-            ``attempted``, ``succeeded``, ``failed`` counts and
-            ``completed_entry_ids`` is the set of entry_ids (as ``str``) whose
-            retry just completed. The caller uses the latter to drop rows the
-            batch loop would otherwise re-download (and possibly re-defer).
+            ``attempted``, ``succeeded``, ``failed``, and ``postponed`` counts
+            (an item whose quota has not returned yet is postponed, not
+            failed) and ``completed_entry_ids`` is the set of entry_ids (as
+            ``str``) whose retry just completed. The caller uses the latter to
+            drop rows the batch loop would otherwise re-download (and possibly
+            re-defer).
         """
         self._queue = get_deferred_queue()
         self._quota_manager = get_quota_manager()
@@ -168,7 +176,7 @@ class BackgroundRetryScheduler:
             self._register_all_providers()
 
         ready = self._queue.get_ready()
-        stats = {"attempted": 0, "succeeded": 0, "failed": 0}
+        stats = {"attempted": 0, "succeeded": 0, "failed": 0, "postponed": 0}
         completed_entry_ids: set[str] = set()
         if not ready:
             return stats, completed_entry_ids
@@ -176,8 +184,8 @@ class BackgroundRetryScheduler:
         logger.info("Eager retry: %d deferred item(s) ready", len(ready))
         for item in ready:
             stats["attempted"] += 1
-            if self._retry_item(item):
-                stats["succeeded"] += 1
+            outcome = self._retry_item(item)
+            if outcome == RETRY_SUCCEEDED:
                 # entry_id schemes repeat across sampling CSVs, so an id match
                 # alone is not proof of ownership: it stamped this item's
                 # success (link, provider, timestamp) into an unrelated work's
@@ -190,8 +198,13 @@ class BackgroundRetryScheduler:
                     csv_entry_titles.get(str(item.entry_id)) == item.title
                 )
                 self._persist_retry_success(item, csv_path if owns_csv else None)
+                stats["succeeded"] += 1
                 if item.entry_id and owns_csv:
                     completed_entry_ids.add(str(item.entry_id))
+            elif outcome == RETRY_POSTPONED:
+                # The quota has not returned yet: the item stays queued and
+                # untouched, which is not a failure of the retry.
+                stats["postponed"] += 1
             else:
                 stats["failed"] += 1
         return stats, completed_entry_ids
@@ -261,14 +274,15 @@ class BackgroundRetryScheduler:
                 return datetime.now(UTC) + timedelta(seconds=seconds)
         return datetime.now(UTC) + timedelta(hours=1)
 
-    def _retry_item(self, item: DeferredItem) -> bool:
+    def _retry_item(self, item: DeferredItem) -> str:
         """Attempt to retry a deferred item.
 
         Args:
             item: DeferredItem to retry
 
         Returns:
-            True if successful, False otherwise
+            :data:`RETRY_SUCCEEDED`, :data:`RETRY_POSTPONED` (quota not back
+            yet, item untouched and still queued), or :data:`RETRY_FAILED`.
         """
         with self._stats_lock:
             self._stats["retries_attempted"] += 1
@@ -289,7 +303,7 @@ class BackgroundRetryScheduler:
                 self._stats["retries_failed"] += 1
             if self._on_retry_failure:
                 self._on_retry_failure(item, reason)
-            return False
+            return RETRY_FAILED
 
         # Check quota before attempting. Only consult the quota manager for
         # providers that actually have quotas: can_download would otherwise
@@ -312,7 +326,7 @@ class BackgroundRetryScheduler:
                     provider_key,
                     item.title,
                 )
-                return False
+                return RETRY_POSTPONED
 
         logger.info(
             "Retrying deferred download: '%s' from %s", item.title, item.provider_name
@@ -327,7 +341,7 @@ class BackgroundRetryScheduler:
                 self._stats["retries_failed"] += 1
             if self._on_retry_failure:
                 self._on_retry_failure(item, "Could not reconstruct search result")
-            return False
+            return RETRY_FAILED
 
         # Reproduce the original run's naming context so a retried download
         # lands in the same work directory with the same filename stem, rather
@@ -372,7 +386,7 @@ class BackgroundRetryScheduler:
                 if self._on_retry_success:
                     self._on_retry_success(item)
 
-                return True
+                return RETRY_SUCCEEDED
             else:
                 # Download failed but not due to quota
                 can_retry = self._queue.mark_retrying(item.id) if self._queue else False
@@ -381,7 +395,7 @@ class BackgroundRetryScheduler:
                         self._stats["retries_failed"] += 1
                     if self._on_retry_failure:
                         self._on_retry_failure(item, "Max retries exceeded")
-                return False
+                return RETRY_FAILED
 
         except QuotaDeferredException as qde:
             # Quota hit again - update reset time
@@ -395,7 +409,7 @@ class BackgroundRetryScheduler:
             logger.info(
                 "Deferred download hit quota again: '%s' - %s", item.title, qde.message
             )
-            return False
+            return RETRY_POSTPONED
 
         except Exception as e:
             logger.exception("Error retrying deferred download '%s': %s", item.title, e)
@@ -405,7 +419,7 @@ class BackgroundRetryScheduler:
                     self._stats["retries_failed"] += 1
                 if self._on_retry_failure:
                     self._on_retry_failure(item, str(e))
-            return False
+            return RETRY_FAILED
 
     def _reconstruct_search_result(self, item: DeferredItem) -> SearchResult | None:
         """Reconstruct a SearchResult from stored DeferredItem data.
@@ -447,4 +461,7 @@ def get_background_scheduler() -> BackgroundRetryScheduler:
 __all__ = [
     "BackgroundRetryScheduler",
     "get_background_scheduler",
+    "RETRY_SUCCEEDED",
+    "RETRY_FAILED",
+    "RETRY_POSTPONED",
 ]

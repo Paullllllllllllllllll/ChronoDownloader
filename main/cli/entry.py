@@ -89,18 +89,21 @@ def _show_status(csv_file: str | None) -> None:
 def main() -> None:
     """Main entry point supporting both interactive and CLI modes."""
     try:
-        if "--quota-status" in sys.argv:
-            _apply_pre_config()
+        # Dispatched from the parsed namespace, not a raw sys.argv scan: the
+        # scan also matched value positions, so an invocation that merely
+        # mentions "--status" as another flag's argument ran the maintenance
+        # command instead of the requested one (or instead of erroring).
+        pre_args = _apply_pre_config()
+
+        if pre_args.quota_status:
             show_quota_status()
             return
 
-        if "--status" in sys.argv:
-            pre_args = _apply_pre_config()
+        if pre_args.status:
             _show_status(pre_args.csv_file)
             return
 
-        if "--cleanup-deferred" in sys.argv:
-            _apply_pre_config()
+        if pre_args.cleanup_deferred:
             cleanup_deferred_queue()
             return
 

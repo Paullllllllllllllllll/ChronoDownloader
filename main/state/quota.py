@@ -55,6 +55,38 @@ def _coerce_int(value: Any, default: int, provider_key: str, field: str) -> int:
         return default
 
 
+def _resolve_quota_limits(provider_key: str) -> tuple[int, int]:
+    """Resolve ``(daily_limit, reset_hours)`` for a provider from config.
+
+    Prefers the ``quota`` block when it is enabled and falls back to the
+    legacy flat keys otherwise. Values are coerced so a hand-edited config
+    cannot raise out of quota initialization.
+    """
+    quota_config = get_provider_setting(provider_key, "quota", {})
+
+    if isinstance(quota_config, dict) and quota_config.get("enabled"):
+        # New config structure with quota.enabled = true
+        daily_limit = quota_config.get("daily_limit", 875)
+        reset_hours = quota_config.get("reset_hours", 24)
+    else:
+        # Fallback to legacy config for backward compatibility
+        daily_limit = get_provider_setting(
+            provider_key,
+            "daily_download_limit",
+            get_provider_setting(provider_key, "daily_fast_download_limit", 10),
+        )
+        reset_hours = get_provider_setting(
+            provider_key,
+            "quota_reset_hours",
+            get_provider_setting(provider_key, "quota_reset_wait_hours", 24),
+        )
+
+    return (
+        _coerce_int(daily_limit, 10, provider_key, "daily_limit"),
+        _coerce_int(reset_hours, 24, provider_key, "reset_hours"),
+    )
+
+
 @dataclass
 class ProviderQuota:
     """Quota state for a single provider.
@@ -274,37 +306,24 @@ class QuotaManager:
         For unlimited providers, this will still create a quota object but it won't
         be enforced (use has_quota() to check first).
 
+        The limits are refreshed from config on every call: counters are state
+        and belong to the persisted record, but daily_limit and reset_hours are
+        configuration, and reading them only at creation time pinned an
+        operator's config.json edit to whatever the state file already held.
+
         Args:
             provider_key: Provider identifier
 
         Returns:
             ProviderQuota instance
         """
+        daily_limit, reset_hours = _resolve_quota_limits(provider_key)
+
         if provider_key not in self._quotas:
-            # Check for new quota config structure first
-            quota_config = get_provider_setting(provider_key, "quota", {})
-
-            if isinstance(quota_config, dict) and quota_config.get("enabled"):
-                # New config structure with quota.enabled = true
-                daily_limit = quota_config.get("daily_limit", 875)
-                reset_hours = quota_config.get("reset_hours", 24)
-            else:
-                # Fallback to legacy config for backward compatibility
-                daily_limit = get_provider_setting(
-                    provider_key,
-                    "daily_download_limit",
-                    get_provider_setting(provider_key, "daily_fast_download_limit", 10),
-                )
-                reset_hours = get_provider_setting(
-                    provider_key,
-                    "quota_reset_hours",
-                    get_provider_setting(provider_key, "quota_reset_wait_hours", 24),
-                )
-
             quota = ProviderQuota(
                 provider_key=provider_key,
-                daily_limit=_coerce_int(daily_limit, 10, provider_key, "daily_limit"),
-                reset_hours=_coerce_int(reset_hours, 24, provider_key, "reset_hours"),
+                daily_limit=daily_limit,
+                reset_hours=reset_hours,
                 period_start=datetime.now(UTC).isoformat(),
             )
             self._quotas[provider_key] = quota
@@ -318,8 +337,23 @@ class QuotaManager:
                 quota.daily_limit,
                 quota.reset_hours,
             )
+            return quota
 
-        return self._quotas[provider_key]
+        quota = self._quotas[provider_key]
+        if quota.daily_limit != daily_limit or quota.reset_hours != reset_hours:
+            logger.info(
+                "Quota config changed for %s: %d per %dh -> %d per %dh",
+                provider_key,
+                quota.daily_limit,
+                quota.reset_hours,
+                daily_limit,
+                reset_hours,
+            )
+            quota.daily_limit = daily_limit
+            quota.reset_hours = reset_hours
+            self._save_state()
+
+        return quota
 
     def _check_and_reset_period(self, quota: ProviderQuota) -> bool:
         """Check if quota period should reset and apply if needed.
@@ -478,7 +512,10 @@ class QuotaManager:
         with self._data_lock:
             earliest: tuple[str, datetime] | None = None
 
-            for provider_key, quota in self._quotas.items():
+            # Refreshed like every other read path: is_exhausted() compares
+            # against daily_limit, which is configuration, not state.
+            for provider_key in list(self._quotas):
+                quota = self._get_or_create_quota(provider_key)
                 if quota.is_exhausted():
                     reset_time = quota.get_reset_time()
                     if reset_time and (earliest is None or reset_time < earliest[1]):
@@ -493,7 +530,11 @@ class QuotaManager:
             List of provider keys
         """
         with self._data_lock:
-            return [k for k, v in self._quotas.items() if v.is_exhausted()]
+            return [
+                k
+                for k in list(self._quotas)
+                if self._get_or_create_quota(k).is_exhausted()
+            ]
 
     def reset_provider(self, provider_key: str) -> None:
         """Manually reset quota for a provider.

@@ -12,6 +12,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+def _quota_config(limits: dict[str, tuple[int, int]]) -> Any:
+    """Patch config resolution to back the given providers with quota limits.
+
+    ``_get_or_create_quota`` refreshes daily_limit/reset_hours from config on
+    every access, so a record injected straight into ``_quotas`` needs a
+    matching config entry to keep its limits.
+    """
+
+    def _setting(provider_key: str, key: str, default: Any = None) -> Any:
+        if key == "quota" and provider_key in limits:
+            daily_limit, reset_hours = limits[provider_key]
+            return {
+                "enabled": True,
+                "daily_limit": daily_limit,
+                "reset_hours": reset_hours,
+            }
+        return default
+
+    return patch("main.state.quota.get_provider_setting", side_effect=_setting)
+
+
 class TestProviderQuota:
     """Tests for ProviderQuota dataclass."""
 
@@ -241,7 +262,8 @@ class TestQuotaManagerOperations:
         )
         manager._quotas["test_provider"] = quota
 
-        can, wait = manager.can_download("test_provider")
+        with _quota_config({"test_provider": (5, 24)}):
+            can, wait = manager.can_download("test_provider")
 
         assert can is False
         assert wait is not None
@@ -303,10 +325,38 @@ class TestQuotaManagerOperations:
         )
         manager._quotas["test"] = quota
 
-        remaining = manager.record_download("test")
+        with _quota_config({"test": (1, 24)}):
+            remaining = manager.record_download("test")
 
         assert remaining == 0
         assert manager._quotas["test"].exhausted_at is not None
+
+    def test_config_change_refreshes_persisted_limits(self, manager: Any) -> None:
+        """Counters are state; limits are configuration.
+
+        A record restored from the state file kept the limits it was created
+        with, so raising or lowering them in config.json never took effect.
+        """
+        from main.state.quota import ProviderQuota
+
+        manager._quotas["test_provider"] = ProviderQuota(
+            provider_key="test_provider",
+            daily_limit=5,
+            reset_hours=24,
+            downloads_used=5,
+            period_start=datetime.now(UTC).isoformat(),
+        )
+
+        with _quota_config({"test_provider": (50, 12)}):
+            can, _wait = manager.can_download("test_provider")
+            status = manager.get_quota_status("test_provider")
+
+        assert can is True
+        assert status["daily_limit"] == 50
+        assert status["remaining"] == 45
+        assert manager._quotas["test_provider"].reset_hours == 12
+        # The consumed counter is state and must survive the config change.
+        assert manager._quotas["test_provider"].downloads_used == 5
 
     def test_get_quota_status_returns_complete_info(self, manager: Any) -> None:
         """get_quota_status returns comprehensive status dict."""
@@ -375,7 +425,8 @@ class TestQuotaManagerOperations:
             provider_key="available", daily_limit=10, downloads_used=1
         )
 
-        exhausted = manager.get_exhausted_providers()
+        with _quota_config({"exhausted": (1, 24), "available": (10, 24)}):
+            exhausted = manager.get_exhausted_providers()
 
         assert "exhausted" in exhausted
         assert "available" not in exhausted
@@ -404,7 +455,8 @@ class TestQuotaManagerOperations:
             period_start=now.isoformat(),
         )
 
-        result = manager.get_next_reset()
+        with _quota_config({"later": (1, 48), "earlier": (1, 12)}):
+            result = manager.get_next_reset()
 
         assert result is not None
         assert result[0] == "earlier"

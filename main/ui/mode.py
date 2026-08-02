@@ -102,9 +102,11 @@ def get_general_config() -> dict[str, Any]:
     cfg = get_config()
     gen = dict(cfg.get("general", {}) or {})
 
-    # Defaults
+    # Defaults. The two paths use "or", not setdefault: an empty string in
+    # config would otherwise survive and hand downstream code a blank path.
+    # interactive_mode keeps setdefault -- False is a legitimate value.
     gen.setdefault("interactive_mode", True)
-    gen.setdefault("default_output_dir", "downloaded_works")
-    gen.setdefault("default_csv_path", "sample_works.csv")
+    gen["default_output_dir"] = gen.get("default_output_dir") or "downloaded_works"
+    gen["default_csv_path"] = gen.get("default_csv_path") or "sample_works.csv"
 
     return gen
