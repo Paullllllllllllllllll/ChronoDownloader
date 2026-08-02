@@ -19,6 +19,8 @@ import requests
 
 from api.core import download as dl_mod
 from api.core.budget import DownloadBudget
+from api.core.context import peek_counter
+from api.core.naming import get_provider_slug, to_snake_case
 from api.core.network import CONNECT_FAILURE_MAX_ATTEMPTS
 
 
@@ -518,3 +520,169 @@ class TestSaveJsonBudget:
             patch("api.core.budget.get_download_limits", return_value={}),
         ):
             assert dl_mod.save_json({"a": 1}, temp_output_dir, "meta") is None
+
+
+class TestSaveJsonCounterReservations:
+    """A save that writes nothing must hand its sequence number back.
+
+    ``save_json`` reserves the number before it knows whether the file will be
+    written. Spending it on a refusal leaves a permanent gap in the metadata
+    numbering (the next save lands at ``_2`` with nothing at ``_1``), and a run
+    refused on every item marched the counter on regardless.
+    """
+
+    @staticmethod
+    def _key() -> tuple[str, str, str]:
+        """Mirror the key save_json builds for filename ``meta``."""
+        return (
+            to_snake_case("meta"),
+            get_provider_slug(None, None) or "unknown",
+            "metadata",
+        )
+
+    def test_budget_exhausted_skip_returns_the_number(
+        self, temp_output_dir: str
+    ) -> None:
+        budget = DownloadBudget()
+        budget._exhausted = True
+        with (
+            patch.object(dl_mod, "_BUDGET", budget),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value={}),
+        ):
+            assert dl_mod.save_json({"a": 1}, temp_output_dir, "meta") is None
+
+        assert peek_counter(self._key()) == 1
+
+    def test_metadata_refusal_returns_the_number(self, temp_output_dir: str) -> None:
+        budget = DownloadBudget()
+        limits = {"total": {"metadata_gb": 1e-9}, "on_exceed": "stop"}
+        with (
+            patch.object(dl_mod, "_BUDGET", budget),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value=limits),
+        ):
+            assert (
+                dl_mod.save_json({"payload": "x" * 5000}, temp_output_dir, "meta")
+                is None
+            )
+
+        assert peek_counter(self._key()) == 1
+
+    def test_serialization_failure_returns_the_number(
+        self, temp_output_dir: str
+    ) -> None:
+        budget = DownloadBudget()
+        with (
+            patch.object(dl_mod, "_BUDGET", budget),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value={}),
+        ):
+            assert dl_mod.save_json({"bad": object()}, temp_output_dir, "meta") is None
+
+        assert peek_counter(self._key()) == 1
+
+    def test_a_later_save_still_numbers_from_one(self, temp_output_dir: str) -> None:
+        """The user-visible consequence: no hole in front of the first file."""
+        exhausted = DownloadBudget()
+        exhausted._exhausted = True
+        with (
+            patch.object(dl_mod, "_BUDGET", exhausted),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value={}),
+        ):
+            assert dl_mod.save_json({"a": 1}, temp_output_dir, "meta") is None
+
+        with (
+            patch.object(dl_mod, "_BUDGET", DownloadBudget()),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value={}),
+        ):
+            path = dl_mod.save_json({"a": 1}, temp_output_dir, "meta")
+
+        assert path is not None
+        assert not os.path.basename(path).endswith("_2.json")
+
+    def test_written_files_keep_their_numbers(self, temp_output_dir: str) -> None:
+        """Only refusals are refunded; consecutive saves still count upwards."""
+        with (
+            patch.object(dl_mod, "_BUDGET", DownloadBudget()),
+            patch("api.core.download.include_metadata", return_value=True),
+            patch("api.core.budget.get_download_limits", return_value={}),
+        ):
+            first = dl_mod.save_json({"a": 1}, temp_output_dir, "meta")
+            second = dl_mod.save_json({"a": 2}, temp_output_dir, "meta")
+
+        assert first is not None and second is not None
+        assert first != second
+        assert os.path.basename(second).endswith("_2.json")
+
+
+class TestDownloadFileTerminalFailures:
+    """Terminal transport failures in ``download_file`` and their bookkeeping."""
+
+    @staticmethod
+    def _run(
+        exc: Exception, folder: str, net: dict[str, Any] | None = None
+    ) -> tuple[MagicMock, MagicMock]:
+        session = MagicMock()
+        session.get.side_effect = exc
+
+        mock_cb = MagicMock()
+        mock_cb.allow_request.return_value = True
+
+        config: dict[str, Any] = {"max_attempts": 4, "base_backoff_s": 0.0}
+        config.update(net or {})
+
+        dl_mod._BUDGET._exhausted = False
+        with (
+            patch.object(dl_mod, "get_session", return_value=session),
+            patch.object(dl_mod, "get_circuit_breaker", return_value=mock_cb),
+            patch.object(dl_mod, "get_network_config", return_value=config),
+            patch("api.core.download.time.sleep"),
+        ):
+            assert (
+                dl_mod.download_file("https://bad.example/book.pdf", folder, "book")
+                is None
+            )
+
+        return session, mock_cb
+
+    def test_ssl_error_feeds_the_breaker(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Mirrors make_request: an unusable handshake is a provider outage."""
+        session, cb = self._run(
+            requests.exceptions.SSLError("certificate verify failed"),
+            str(tmp_path / "work"),
+        )
+        assert session.get.call_count == 1
+        cb.record_failure.assert_called_once()
+
+    def test_ssl_policy_still_retries_insecurely_once(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        session, cb = self._run(
+            requests.exceptions.SSLError("certificate verify failed"),
+            str(tmp_path / "work"),
+            net={"ssl_error_policy": "retry_insecure_once"},
+        )
+        assert session.get.call_count == 2
+        cb.record_failure.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            requests.exceptions.MissingSchema("no schema"),
+            requests.exceptions.InvalidSchema("no adapter"),
+            requests.exceptions.InvalidURL("invalid label"),
+            requests.exceptions.URLRequired("no url"),
+        ],
+    )
+    def test_invalid_url_is_not_retried_or_charged_to_the_breaker(
+        self, exc: Exception, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Bad provider metadata must not mark the provider itself unhealthy."""
+        session, cb = self._run(exc, str(tmp_path / "work"))
+        assert session.get.call_count == 1
+        cb.record_failure.assert_not_called()

@@ -435,6 +435,101 @@ class TestHalfOpenRetryReport:
         assert cb.time_until_retry() > 0.0
 
 
+class TestSslFailuresFeedTheBreaker:
+    """A provider whose certificate never verifies has to trip its breaker.
+
+    Both terminal SSL returns used to leave the breaker untouched, so a host
+    failing 100% of its requests on the handshake stayed nominally healthy and
+    every later work re-attempted it.
+    """
+
+    @staticmethod
+    def _run(net: dict[str, object]) -> MagicMock:
+        mock_cb = MagicMock()
+        mock_cb.allow_request.return_value = True
+
+        session = MagicMock()
+        session.get.side_effect = requests.exceptions.SSLError(
+            "certificate verify failed: unable to get local issuer certificate"
+        )
+        config: dict[str, object] = {"max_attempts": 3, "base_backoff_s": 0.0}
+        config.update(net)
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=mock_cb),
+            patch("api.core.network.get_network_config", return_value=config),
+            patch("api.core.network.time.sleep"),
+        ):
+            assert make_request("https://bad-cert.example/api") is None
+
+        return mock_cb
+
+    def test_policy_disallowed_records_failure(self) -> None:
+        self._run({}).record_failure.assert_called_once()
+
+    def test_exhausted_insecure_retry_records_failure(self) -> None:
+        cb = self._run({"ssl_error_policy": "retry_insecure_once"})
+        cb.record_failure.assert_called_once()
+
+
+class TestInvalidUrlIsNotRetried:
+    """A malformed URL is a metadata defect, not a provider outage.
+
+    requests raises these before any socket is opened, so retrying burns the
+    whole backoff budget for nothing and the breaker entry it used to record
+    marked a perfectly healthy provider as failing.
+    """
+
+    @staticmethod
+    def _run(exc: Exception) -> tuple[MagicMock, MagicMock]:
+        mock_cb = MagicMock()
+        mock_cb.allow_request.return_value = True
+
+        session = MagicMock()
+        session.get.side_effect = exc
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=mock_cb),
+            patch(
+                "api.core.network.get_network_config",
+                return_value={"max_attempts": 5, "base_backoff_s": 0.0},
+            ),
+            patch("api.core.network.time.sleep"),
+        ):
+            assert make_request("not-a-url") is None
+
+        return session, mock_cb
+
+    def test_missing_schema_fails_immediately(self) -> None:
+        session, cb = self._run(requests.exceptions.MissingSchema("no schema"))
+        assert session.get.call_count == 1
+        cb.record_failure.assert_not_called()
+
+    def test_invalid_schema_fails_immediately(self) -> None:
+        session, cb = self._run(
+            requests.exceptions.InvalidSchema("no adapter for x://")
+        )
+        assert session.get.call_count == 1
+        cb.record_failure.assert_not_called()
+
+    def test_invalid_url_fails_immediately(self) -> None:
+        session, cb = self._run(requests.exceptions.InvalidURL("invalid label"))
+        assert session.get.call_count == 1
+        cb.record_failure.assert_not_called()
+
+    def test_url_required_fails_immediately(self) -> None:
+        session, cb = self._run(requests.exceptions.URLRequired("no url"))
+        assert session.get.call_count == 1
+        cb.record_failure.assert_not_called()
+
+    def test_other_request_errors_are_still_retried(self) -> None:
+        session, cb = self._run(requests.exceptions.ConnectionError("reset by peer"))
+        assert session.get.call_count == 5
+        cb.record_failure.assert_called_once()
+
+
 class TestDdbManifestHostsArePaced:
     """DDB manifests live at the holding library, not at DDB's own hosts."""
 

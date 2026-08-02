@@ -42,6 +42,7 @@ from .context import (
 )
 from .naming import get_provider_slug, sanitize_filename, to_snake_case
 from .network import (
+    INVALID_URL_ERRORS,
     NON_RETRYABLE_STATUSES,
     connect_aware_attempt_cap,
     get_circuit_breaker,
@@ -789,9 +790,22 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 insecure_retry_used = True
                 continue
             logger.error("SSL error downloading %s: %s", url, e)
+            # A handshake this client can never complete is a provider-level
+            # outage, so it feeds the breaker like any other terminal transport
+            # failure; otherwise a provider failing 100% of the time on
+            # certificates would stay "healthy" for the whole run.
+            if cb:
+                cb.record_failure(provider or "unknown")
             return None
 
         except requests.exceptions.RequestException as e:
+            # A malformed URL cannot be fixed by trying again, and the provider
+            # is not the one at fault: skip both the backoff budget and the
+            # breaker so one bad item's metadata does not poison the rest.
+            if isinstance(e, INVALID_URL_ERRORS):
+                logger.error("Invalid URL %s: %s; not retrying", url, e)
+                return None
+
             # Transient network failures (timeouts, connection resets) are
             # retried with backoff like make_request; previously any such
             # error on the initial GET aborted the download outright, so the
@@ -870,8 +884,14 @@ def save_json(data: Any, folder_path: str, filename: str) -> str | None:
         base = f"{stem}_{prov_slug}_{idx}"
         filepath = os.path.join(meta_dir, sanitize_filename(base) + ".json")
 
+    # Every path that leaves without writing hands the reserved sequence number
+    # back. Spending it would leave a permanent hole in the metadata numbering
+    # (the next save lands at _2 with nothing at _1), and a run that saves
+    # nothing at all would still march the counter upwards. Only the collision
+    # loop above keeps its increments: those correspond to files on disk.
     if _BUDGET.exhausted():
         logger.warning("Download budget exhausted; skipping metadata save %s", filename)
+        release_counter(key)
         return None
 
     try:
@@ -896,11 +916,13 @@ def save_json(data: Any, folder_path: str, filename: str) -> str | None:
                 size,
             )
             _safe_remove(filepath)
+            release_counter(key)
             return None
         logger.info("Saved JSON: %s", filepath)
         return filepath
     except (OSError, TypeError, ValueError) as e:
         logger.error("Error saving JSON %s: %s", filepath, e)
+        release_counter(key)
         return None
 
 

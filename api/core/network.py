@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
-from typing import Any, cast
+from typing import Any, cast, get_args
 from urllib.parse import urlparse
 
 import requests
@@ -526,7 +526,48 @@ _CURL_ERROR_CLASS_MAP: dict[str, type[requests.exceptions.RequestException]] = {
 # logic reads transport failure out of urllib3's message text.
 _CURL_COULDNT_RESOLVE_HOST = 6
 _CURL_COULDNT_CONNECT = 7
+_CURL_PARTIAL_FILE = 18
 _CURL_OPERATION_TIMEDOUT = 28
+
+# libcurl result code -> requests equivalent, consulted only when the class-name
+# walk above resolved to the catch-all entry. curl_cffi's streaming path (the
+# one download_file uses) wraps every transport failure as a bare
+# ``RequestException`` rather than as the specific subclass, so a connect
+# timeout would lose its Timeout/ConnectTimeout classification (and with it the
+# short connect budget) and a certificate failure its SSLError one (leaving
+# ssl_error_policy inoperative). The result code survives that wrapping, so it
+# carries the classification instead. Codes are libcurl's CURLE_* symbols.
+_CURL_ERROR_CODE_MAP: dict[int, type[requests.exceptions.RequestException]] = {
+    _CURL_COULDNT_RESOLVE_HOST: requests.exceptions.ConnectionError,  # RESOLVE_HOST
+    _CURL_COULDNT_CONNECT: requests.exceptions.ConnectionError,  # COULDNT_CONNECT
+    _CURL_PARTIAL_FILE: requests.exceptions.ChunkedEncodingError,  # PARTIAL_FILE
+    _CURL_OPERATION_TIMEDOUT: requests.exceptions.Timeout,  # OPERATION_TIMEDOUT
+    35: requests.exceptions.SSLError,  # SSL_CONNECT_ERROR
+    53: requests.exceptions.SSLError,  # SSL_ENGINE_NOTFOUND
+    54: requests.exceptions.SSLError,  # SSL_ENGINE_SETFAILED
+    58: requests.exceptions.SSLError,  # SSL_CERTPROBLEM
+    59: requests.exceptions.SSLError,  # SSL_CIPHER
+    60: requests.exceptions.SSLError,  # PEER_FAILED_VERIFICATION
+    64: requests.exceptions.SSLError,  # USE_SSL_FAILED
+    66: requests.exceptions.SSLError,  # SSL_ENGINE_INITFAILED
+    77: requests.exceptions.SSLError,  # SSL_CACERT_BADFILE
+    80: requests.exceptions.SSLError,  # SSL_SHUTDOWN_FAILED
+    82: requests.exceptions.SSLError,  # SSL_CRL_BADFILE
+    83: requests.exceptions.SSLError,  # SSL_ISSUER_ERROR
+    90: requests.exceptions.SSLError,  # SSL_PINNEDPUBKEYNOTMATCH
+    91: requests.exceptions.SSLError,  # SSL_INVALIDCERTSTATUS
+}
+
+# Malformed URLs (a provider handing over a relative path, an empty string, or
+# a scheme requests cannot speak). No number of retries makes such a request
+# work, and charging it to the circuit breaker would mark a healthy provider as
+# failing over a defect in one item's metadata.
+INVALID_URL_ERRORS = (
+    requests.exceptions.MissingSchema,
+    requests.exceptions.InvalidSchema,
+    requests.exceptions.InvalidURL,
+    requests.exceptions.URLRequired,
+)
 
 # curl reports connect-phase and read-phase timeouts under the same result code
 # (28) and never raises its own ConnectTimeout, so the phase is read off the
@@ -599,6 +640,11 @@ def translate_curl_error(
         return None
 
     code = _curl_error_code(exc)
+    # Only the catch-all entry is refined by code: any more specific name the
+    # walk found is curl_cffi stating the kind of failure itself.
+    if target is requests.exceptions.RequestException and code:
+        target = _CURL_ERROR_CODE_MAP.get(code, target)
+
     if (
         target is requests.exceptions.Timeout
         and code == _CURL_OPERATION_TIMEDOUT
@@ -628,7 +674,12 @@ class _CurlResponseBody:
         """Yield the body in ``amt``-sized chunks (curl decodes transparently)."""
         try:
             if self._stream:
-                yield from self._raw.iter_content(chunk_size=amt)
+                # curl_cffi's iter_content takes no chunk size -- it yields
+                # whatever the transfer hands it -- and emits a CurlCffiWarning
+                # on every streamed download when one is passed. The caller's
+                # ``amt`` is only a hint, so it is dropped here rather than
+                # warned about once per file.
+                yield from self._raw.iter_content()
                 return
             content = self._raw.content or b""
             if not amt or amt <= 0:
@@ -690,12 +741,16 @@ def adapt_curl_response(raw: Any, url: str, stream: bool) -> requests.Response:
     reason = getattr(raw, "reason", "")
     resp.reason = str(reason) if reason else ""
 
-    # Fall back to requests' own header parsing when curl declares no charset,
-    # so ``resp.text`` decodes a provider's XML/JSON exactly as it did before.
-    encoding = getattr(raw, "encoding", None)
+    # ``raw.encoding`` is the wrong source: curl_cffi always answers it with a
+    # string, falling back to its own default_encoding, so it would never yield
+    # to the header parsing below and every charset-less response would silently
+    # be declared UTF-8. ``charset_encoding`` is the one that stays None unless
+    # the Content-Type actually declared a charset, which is exactly requests'
+    # own rule -- so ``resp.text`` decodes a provider's XML/JSON as before.
+    charset = getattr(raw, "charset_encoding", None)
     resp.encoding = (
-        encoding
-        if isinstance(encoding, str)
+        charset
+        if isinstance(charset, str) and charset
         else get_encoding_from_headers(resp.headers)
     )
 
@@ -830,6 +885,32 @@ def resolve_impersonate_target(provider_key: str | None) -> str | None:
     return None
 
 
+def _impersonate_target_is_known(curl_requests: Any, target: str) -> bool:
+    """Report whether curl_cffi ships a browser profile called ``target``.
+
+    ``curl_cffi.requests.Session(impersonate=...)`` only stores the value; the
+    profile is resolved when the first request is sent, so a typo constructs a
+    perfectly healthy-looking session and then fails *every* request with an
+    ImpersonateError. That arrives here as a bare ``RequestException``, which
+    the retry loops treat as a transient transport failure and grind through the
+    full backoff budget on -- instead of falling back to the plain client once.
+    Checking the profile up front turns the typo back into a startup fallback.
+
+    Args:
+        curl_requests: The imported ``curl_cffi.requests`` module
+        target: Browser profile name from the provider's config
+
+    Returns:
+        True when the profile is known, or when this curl_cffi build exposes no
+        list of profiles to check against (then curl decides, as before)
+    """
+    try:
+        known = get_args(curl_requests.BrowserTypeLiteral)
+    except AttributeError:
+        return True
+    return not known or target in known
+
+
 def _build_impersonating_session(
     provider_key: str, target: str
 ) -> requests.Session | None:
@@ -843,6 +924,17 @@ def _build_impersonating_session(
             "Install it with: uv sync --extra impersonate",
             provider_key,
             target,
+        )
+        return None
+
+    if not _impersonate_target_is_known(curl_requests, target):
+        logger.warning(
+            "curl_cffi knows no browser profile named %r (network.impersonate "
+            "for %s); falling back to the standard HTTP client, which this "
+            'provider may reject. Name a profile curl_cffi ships (e.g. "chrome" '
+            'or "safari17_0").',
+            target,
+            provider_key,
         )
         return None
 
@@ -1160,6 +1252,13 @@ def make_request(
         except requests.exceptions.RequestException as e:
             msg = str(e).lower()
 
+            # A malformed URL cannot be fixed by trying again, and the provider
+            # is not the one at fault: skip both the backoff budget and the
+            # breaker so one bad item's metadata does not poison the rest.
+            if isinstance(e, INVALID_URL_ERRORS):
+                logger.error("Invalid URL %s: %s; not retrying", url, e)
+                return None
+
             # Handle DNS/Name resolution errors
             if any(
                 term in msg
@@ -1210,6 +1309,12 @@ def make_request(
                         url,
                         e,
                     )
+                    # Like the DNS branch above: a handshake this client can
+                    # never complete is a provider-level outage, so it has to
+                    # reach the breaker. Without this a provider failing 100%
+                    # of the time on certificates never trips it.
+                    if cb:
+                        cb.record_failure(provider or "unknown")
                     return None
 
                 if ssl_policy == "retry_insecure_once" and verify:
@@ -1227,6 +1332,8 @@ def make_request(
                     url,
                     e,
                 )
+                if cb:
+                    cb.record_failure(provider or "unknown")
                 return None
 
             # Generic retry for other errors. A connection that never came up

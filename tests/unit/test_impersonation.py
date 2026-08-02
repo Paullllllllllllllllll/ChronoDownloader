@@ -14,12 +14,13 @@ import logging
 import os
 from collections.abc import Generator, Iterator
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 from requests.adapters import HTTPAdapter
+from requests.utils import get_encoding_from_headers
 
 from api.core import download as dl_mod
 from api.core import network
@@ -113,18 +114,25 @@ class FakeCurlResponse:
         reason: str = "OK",
         chunks: list[bytes] | None = None,
         stream_error: BaseException | None = None,
+        charset_encoding: str | None = None,
     ) -> None:
         self.status_code = status_code
         self.headers = headers if headers is not None else {}
         self.content = content
         self.url = url
         self.reason = reason
-        self.encoding = None
+        # curl_cffi answers ``encoding`` with a string unconditionally (its
+        # default_encoding when the response declares none), and reports the
+        # declared charset -- or None -- through ``charset_encoding``.
+        self.encoding = "utf-8"
+        self.charset_encoding = charset_encoding
         self.closed = False
+        self.chunk_sizes: list[int | None] = []
         self._chunks = chunks
         self._stream_error = stream_error
 
     def iter_content(self, chunk_size: int | None = None) -> Iterator[bytes]:
+        self.chunk_sizes.append(chunk_size)
         yield from self._chunks if self._chunks is not None else [self.content]
         if self._stream_error is not None:
             raise self._stream_error
@@ -161,6 +169,11 @@ class FakeCurlSession:
         self.closed = True
 
 
+# curl_cffi publishes the profiles it can impersonate as a typing Literal;
+# a handful of the real names is enough to exercise the pre-flight check.
+FakeBrowserTypeLiteral = Literal["chrome", "chrome124", "safari17_0", "firefox135"]
+
+
 def fake_curl_module(session: FakeCurlSession) -> SimpleNamespace:
     """Return a stand-in for the ``curl_cffi.requests`` module."""
     constructed: list[str] = []
@@ -170,7 +183,11 @@ def fake_curl_module(session: FakeCurlSession) -> SimpleNamespace:
         session.impersonate = impersonate
         return session
 
-    return SimpleNamespace(Session=make_session, constructed=constructed)
+    return SimpleNamespace(
+        Session=make_session,
+        constructed=constructed,
+        BrowserTypeLiteral=FakeBrowserTypeLiteral,
+    )
 
 
 def impersonating(session: FakeCurlSession, target: str = "chrome") -> requests.Session:
@@ -320,13 +337,19 @@ class TestSessionSelection:
         assert len(warnings) == 1
         assert "uv sync --extra impersonate" in warnings[0].getMessage()
 
-    def test_unusable_target_falls_back_to_plain_client(
+    def test_unknown_target_falls_back_before_any_request(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        def exploding_session(impersonate: str) -> FakeCurlSession:
-            raise CurlErrors.ImpersonateError(f"unknown browser {impersonate}")
+        """curl_cffi resolves the profile per request, not in ``Session()``.
 
-        module = SimpleNamespace(Session=exploding_session)
+        A typo therefore constructs a healthy-looking session and then fails
+        every request with an ImpersonateError, which reaches the retry loop as
+        a bare RequestException and burns the whole backoff budget on each URL.
+        The profile is checked up front so it stays a one-time fallback.
+        """
+        curl_session = FakeCurlSession()
+        module = fake_curl_module(curl_session)
+
         with (
             patch(
                 "api.core.network.get_network_config",
@@ -338,7 +361,60 @@ class TestSessionSelection:
             session = get_session("bne")
 
         assert not isinstance(session, ImpersonatingSession)
+        assert module.constructed == []
         assert any("netscape" in r.getMessage() for r in caplog.records)
+
+    def test_known_target_passes_the_preflight_check(self) -> None:
+        module = fake_curl_module(FakeCurlSession())
+        with (
+            patch(
+                "api.core.network.get_network_config",
+                return_value={"impersonate": "safari17_0"},
+            ),
+            patch("api.core.network._load_curl_requests", return_value=module),
+        ):
+            session = get_session("bne")
+
+        assert isinstance(session, ImpersonatingSession)
+        assert module.constructed == ["safari17_0"]
+
+    def test_target_is_not_checked_when_curl_lists_no_profiles(self) -> None:
+        """A future curl_cffi without the literal must not break impersonation."""
+        curl_session = FakeCurlSession()
+        module = SimpleNamespace(Session=lambda impersonate: curl_session)
+
+        with (
+            patch(
+                "api.core.network.get_network_config",
+                return_value={"impersonate": "chrome999"},
+            ),
+            patch("api.core.network._load_curl_requests", return_value=module),
+        ):
+            session = get_session("bne")
+
+        assert isinstance(session, ImpersonatingSession)
+
+    def test_failing_constructor_still_falls_back(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def exploding_session(impersonate: str) -> FakeCurlSession:
+            raise CurlErrors.ImpersonateError(f"cannot start {impersonate}")
+
+        module = SimpleNamespace(
+            Session=exploding_session, BrowserTypeLiteral=FakeBrowserTypeLiteral
+        )
+        with (
+            patch(
+                "api.core.network.get_network_config",
+                return_value={"impersonate": "chrome"},
+            ),
+            patch("api.core.network._load_curl_requests", return_value=module),
+            caplog.at_level(logging.WARNING, logger="api.core.network"),
+        ):
+            session = get_session("bne")
+
+        assert not isinstance(session, ImpersonatingSession)
+        assert any("cannot start chrome" in r.getMessage() for r in caplog.records)
 
     def test_not_configured_uses_the_shared_plain_session(self) -> None:
         with patch("api.core.network.get_network_config", return_value={}):
@@ -539,6 +615,78 @@ class TestTranslateCurlError:
         assert connect_aware_attempt_cap(mapped, 25) == 25
 
 
+class TestTranslateBareCurlRequestException:
+    """The streaming path erases the class, so the result code has to carry it.
+
+    curl_cffi's stream implementation re-raises every transport failure as a
+    bare ``RequestException(str(e), e.code, rsp)``. The name walk can then only
+    reach the catch-all entry, which cost a connect timeout its short budget and
+    a certificate failure its ``ssl_error_policy`` handling entirely.
+    """
+
+    @pytest.mark.parametrize(
+        "code", [35, 53, 54, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90, 91]
+    )
+    def test_ssl_result_codes_become_ssl_errors(self, code: int) -> None:
+        mapped = translate_curl_error(
+            CurlErrors.RequestException("SSL peer certificate problem", code=code)
+        )
+        assert type(mapped) is requests.exceptions.SSLError
+
+    def test_connect_phase_timeout_code_becomes_a_connect_timeout(self) -> None:
+        mapped = translate_curl_error(
+            CurlErrors.RequestException(
+                "Failed to connect to bnedigital.bne.es port 443 after 10000 ms: "
+                "Timeout was reached",
+                code=28,
+            )
+        )
+        assert type(mapped) is requests.exceptions.ConnectTimeout
+        assert connect_aware_attempt_cap(mapped, 25) == CONNECT_FAILURE_MAX_ATTEMPTS
+
+    def test_read_phase_timeout_code_becomes_a_plain_timeout(self) -> None:
+        mapped = translate_curl_error(
+            CurlErrors.RequestException("Operation timed out after 30000 ms", code=28)
+        )
+        assert type(mapped) is requests.exceptions.Timeout
+        assert connect_aware_attempt_cap(mapped, 25) == 25
+
+    def test_partial_file_code_becomes_a_chunked_encoding_error(self) -> None:
+        mapped = translate_curl_error(
+            CurlErrors.RequestException("transfer closed with bytes remaining", code=18)
+        )
+        assert type(mapped) is requests.exceptions.ChunkedEncodingError
+
+    def test_resolution_code_becomes_a_connection_error_with_markers(self) -> None:
+        mapped = translate_curl_error(
+            CurlErrors.RequestException("Could not resolve host: datos.bne.es", code=6)
+        )
+        assert type(mapped) is requests.exceptions.ConnectionError
+        assert "nameresolutionerror" in str(mapped).lower()
+
+    def test_connect_refused_code_gets_the_short_budget(self) -> None:
+        mapped = translate_curl_error(
+            CurlErrors.RequestException("Failed to connect: refused", code=7)
+        )
+        assert type(mapped) is requests.exceptions.ConnectionError
+        assert is_connect_failure(mapped) is True
+
+    def test_unmapped_code_stays_a_generic_request_exception(self) -> None:
+        mapped = translate_curl_error(
+            CurlErrors.RequestException("something curl-specific", code=23)
+        )
+        assert type(mapped) is requests.exceptions.RequestException
+
+    def test_codeless_error_stays_a_generic_request_exception(self) -> None:
+        mapped = translate_curl_error(CurlErrors.RequestException("no code at all"))
+        assert type(mapped) is requests.exceptions.RequestException
+
+    def test_a_named_class_is_never_overridden_by_its_code(self) -> None:
+        """curl naming the failure itself outranks the code lookup."""
+        mapped = translate_curl_error(CurlErrors.HTTPError("bad status", code=60))
+        assert type(mapped) is requests.exceptions.HTTPError
+
+
 # ============================================================================
 # Translated errors inside make_request
 # ============================================================================
@@ -622,13 +770,18 @@ class TestTranslatedErrorsReachTheRightBranch:
         assert len(curl_session.calls) == CONNECT_FAILURE_MAX_ATTEMPTS
         cb.record_failure.assert_called_once()
 
-    def test_certificate_error_aborts_without_touching_the_breaker(self) -> None:
+    def test_certificate_error_aborts_and_feeds_the_breaker(self) -> None:
+        """A handshake that never completes is a provider outage, not a hiccup.
+
+        The branch used to return without recording, so a provider failing every
+        request on its certificate never tripped its breaker.
+        """
         cb, curl_session, result = _run_make_request(
             CurlErrors.CertificateVerifyError("certificate verify failed", code=60)
         )
         assert result is None
         assert len(curl_session.calls) == 1
-        cb.record_failure.assert_not_called()
+        cb.record_failure.assert_called_once()
         cb.record_success.assert_not_called()
 
     def test_ssl_policy_retries_insecurely_once(self) -> None:
@@ -641,6 +794,34 @@ class TestTranslatedErrorsReachTheRightBranch:
         assert len(curl_session.calls) == 2
         assert curl_session.calls[0][2]["verify"] is True
         assert curl_session.calls[1][2]["verify"] is False
+        cb.record_failure.assert_called_once()
+
+    def test_stream_wrapped_ssl_error_still_reaches_the_ssl_policy(self) -> None:
+        """The bare RequestException curl's stream path raises must not retry.
+
+        Without the result-code fallback this landed in the generic branch and
+        was retried through the full budget with ``verify`` untouched, so
+        ``ssl_error_policy`` never applied to a streamed download.
+        """
+        cb, curl_session, result = _run_make_request(
+            CurlErrors.RequestException("SSL peer certificate problem", code=60),
+            net={"ssl_error_policy": "retry_insecure_once"},
+        )
+        assert result is None
+        assert len(curl_session.calls) == 2
+        assert curl_session.calls[1][2]["verify"] is False
+        cb.record_failure.assert_called_once()
+
+    def test_stream_wrapped_connect_timeout_gets_the_short_budget(self) -> None:
+        cb, curl_session, result = _run_make_request(
+            CurlErrors.RequestException(
+                "Failed to connect to datos.bne.es port 443 after 10000 ms", code=28
+            ),
+            net={"max_attempts": 25},
+        )
+        assert result is None
+        assert len(curl_session.calls) == CONNECT_FAILURE_MAX_ATTEMPTS
+        cb.record_failure.assert_called_once()
 
     def test_unknown_error_is_retried_like_any_transport_error(self) -> None:
         cb, curl_session, result = _run_make_request(
@@ -671,6 +852,33 @@ class TestAdaptedResponses:
         )
         _, _, result = _run_make_request(response=response)
         assert result == "Nuevo arte de cocina española"
+
+    def test_declared_charset_is_honored(self) -> None:
+        raw = FakeCurlResponse(
+            headers={"Content-Type": "text/plain; charset=iso-8859-1"},
+            content="café".encode("iso-8859-1"),
+            charset_encoding="iso-8859-1",
+        )
+        resp = network.adapt_curl_response(raw, "https://datos.bne.es/x", False)
+        assert resp.encoding == "iso-8859-1"
+        assert resp.text == "café"
+
+    def test_undeclared_charset_falls_back_to_requests_header_rule(self) -> None:
+        """``raw.encoding`` always answers, so reading it masked requests' rule.
+
+        curl_cffi fills ``encoding`` from its own ``default_encoding`` when the
+        response declares no charset, which made the header fallback below dead
+        code and silently declared every such body UTF-8.
+        """
+        raw = FakeCurlResponse(
+            headers={"Content-Type": "text/html"}, content=b"<html></html>"
+        )
+        assert raw.encoding == "utf-8"
+        assert raw.charset_encoding is None
+
+        resp = network.adapt_curl_response(raw, "https://datos.bne.es/x", False)
+        assert resp.encoding == get_encoding_from_headers(resp.headers)
+        assert resp.encoding == "ISO-8859-1"
 
     def test_binary_response_is_returned_as_bytes(self) -> None:
         response = FakeCurlResponse(
@@ -866,6 +1074,25 @@ class TestStreamingThroughCurl:
         assert len(curl_session.calls) == 2
         # The failed attempt returned its sequence number, so no gap appears.
         assert _objects(folder) == ["bne_x_bne.pdf"]
+
+    def test_stream_passes_no_chunk_size_to_curl(self) -> None:
+        """curl_cffi ignores chunk_size and warns once per streamed download.
+
+        Its iter_content yields whatever the transfer delivers, so forwarding
+        the caller's hint bought nothing and emitted a CurlCffiWarning on every
+        file. The requests-side chunking of the buffered (non-stream) branch is
+        unaffected.
+        """
+        raw = FakeCurlResponse(chunks=[b"ab", b"cd"])
+        body = network._CurlResponseBody(raw, stream=True)
+
+        assert list(body.stream(65536)) == [b"ab", b"cd"]
+        assert raw.chunk_sizes == [None]
+
+    def test_buffered_body_still_honors_the_requested_chunk_size(self) -> None:
+        raw = FakeCurlResponse(content=b"abcdef")
+        body = network._CurlResponseBody(raw, stream=False)
+        assert list(body.stream(2)) == [b"ab", b"cd", b"ef"]
 
     def test_stream_error_that_is_not_a_curl_error_propagates(self) -> None:
         raw = FakeCurlResponse(chunks=[b"abc"], stream_error=ValueError("bug"))
