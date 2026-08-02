@@ -169,6 +169,10 @@ def get_provider_setting(provider_key: str, setting: str, default: Any = None) -
     """
     cfg = get_config()
     ps = cfg.get("provider_settings", {})
+    # A malformed section ("provider_settings": "none", "bne": true) must fall
+    # back to the default rather than raise AttributeError on .get().
+    if not isinstance(ps, dict):
+        return default
 
     # Map known aliases to config keys
     aliases = {
@@ -179,7 +183,10 @@ def get_provider_setting(provider_key: str, setting: str, default: Any = None) -
     if key not in ps:
         key = aliases.get(provider_key, provider_key)
 
-    return ps.get(key, {}).get(setting, default)
+    entry = ps.get(key, {})
+    if not isinstance(entry, dict):
+        return default
+    return entry.get(setting, default)
 
 
 def get_download_config() -> dict[str, Any]:
@@ -319,6 +326,11 @@ def get_max_pages(provider_key: str) -> int | None:
     """
     val = get_provider_setting(provider_key, "max_pages", None)
     if val is None:
+        # Wellcome ships "max_images" instead of "max_pages"; without this
+        # fallback that cap only bound the legacy image-service branch while
+        # the primary IIIF path ran unlimited.
+        val = get_provider_setting(provider_key, "max_images", None)
+    if val is None:
         return None
     # Coerce rather than type-test: JSON admits "500" and 500.0, and every
     # caller reads None as "unlimited", so rejecting a hand-written string
@@ -389,7 +401,7 @@ def get_min_title_score(
 
     # Fall back to global selection.min_title_score
     sel = cfg.get("selection", {})
-    global_score = sel.get("min_title_score")
+    global_score = sel.get("min_title_score") if isinstance(sel, dict) else None
     if global_score is not None:
         try:
             return float(global_score)

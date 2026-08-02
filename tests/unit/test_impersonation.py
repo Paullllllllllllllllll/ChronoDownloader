@@ -180,14 +180,16 @@ def impersonating(session: FakeCurlSession, target: str = "chrome") -> requests.
 
 @pytest.fixture(autouse=True)
 def reset_network_state() -> Generator[None, None, None]:
-    """Clear cached sessions, breakers, and limiters around every test."""
+    """Clear cached sessions, breakers, limiters, and warnings around a test."""
     network._SESSION = None
     network._IMPERSONATED_SESSIONS.clear()
+    network._IMPERSONATE_TYPE_WARNED.clear()
     network._CIRCUIT_BREAKERS.clear()
     network._RATE_LIMITERS.clear()
     yield
     network._SESSION = None
     network._IMPERSONATED_SESSIONS.clear()
+    network._IMPERSONATE_TYPE_WARNED.clear()
     network._CIRCUIT_BREAKERS.clear()
     network._RATE_LIMITERS.clear()
 
@@ -225,6 +227,45 @@ class TestResolveImpersonateTarget:
 
     def test_no_provider_never_impersonates(self) -> None:
         assert self._target({"impersonate": "chrome"}, provider=None) is None
+
+    @pytest.mark.parametrize("raw", [1, {}, {"name": "chrome"}, ["chrome"], 2.5])
+    def test_unusable_type_disables_impersonation(self, raw: Any) -> None:
+        assert self._target({"impersonate": raw}) is None
+
+    def test_truthy_non_string_warns_once_per_provider(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A silent disable is a config trap; the resolver runs per request.
+
+        The warning therefore has to fire, and has to be deduped per provider
+        or it would be logged on every single request.
+        """
+        with caplog.at_level(logging.WARNING, logger="api.core.network"):
+            assert self._target({"impersonate": 1}) is None
+            assert self._target({"impersonate": 1}) is None
+            assert self._target({"impersonate": 1}, provider="polona") is None
+
+        warnings = [
+            r for r in caplog.records if "network.impersonate" in r.getMessage()
+        ]
+        assert len(warnings) == 2
+        assert "bne" in warnings[0].getMessage()
+        assert "polona" in warnings[1].getMessage()
+
+    def test_falsy_and_valid_values_are_never_warned_about(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="api.core.network"):
+            self._target({"impersonate": False})
+            self._target({"impersonate": 0})
+            self._target({"impersonate": None})
+            self._target({"impersonate": "   "})
+            self._target({"impersonate": "chrome"})
+            self._target({"delay_ms": 500})
+
+        assert not [
+            r for r in caplog.records if "network.impersonate" in r.getMessage()
+        ]
 
 
 # ============================================================================
@@ -322,6 +363,49 @@ class TestSessionSelection:
 
         assert first is second
         assert module.constructed == ["chrome"]
+
+    def test_changed_target_rebuilds_the_cached_session(self) -> None:
+        """A reloaded config naming another profile must not serve the old one.
+
+        The cache used to be keyed by provider alone, so editing the profile
+        string kept every later request on the session built for the previous
+        browser fingerprint.
+        """
+        module = fake_curl_module(FakeCurlSession())
+        net: dict[str, Any] = {"impersonate": "chrome"}
+
+        with (
+            patch("api.core.network.get_network_config", return_value=net),
+            patch("api.core.network._load_curl_requests", return_value=module),
+        ):
+            first = get_session("bne")
+            net["impersonate"] = "safari17_0"
+            second = get_session("bne")
+            third = get_session("bne")
+
+        assert first is not second
+        assert second is third
+        assert module.constructed == ["chrome", "safari17_0"]
+        assert isinstance(second, ImpersonatingSession)
+        assert second.impersonate == "safari17_0"
+
+    def test_cached_fallback_is_tied_to_its_target(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The plain-session fallback is cached per target, not per provider."""
+        net: dict[str, Any] = {"impersonate": "chrome"}
+        with (
+            patch("api.core.network.get_network_config", return_value=net),
+            patch("api.core.network._load_curl_requests", return_value=None),
+            caplog.at_level(logging.WARNING, logger="api.core.network"),
+        ):
+            first = get_session("bne")
+            net["impersonate"] = "safari17_0"
+            second = get_session("bne")
+
+        assert first is not second
+        warnings = [r for r in caplog.records if "curl_cffi" in r.getMessage()]
+        assert len(warnings) == 2
 
     def test_impersonating_provider_does_not_touch_the_shared_session(self) -> None:
         module = fake_curl_module(FakeCurlSession())
@@ -634,6 +718,68 @@ class TestAdaptedResponses:
         assert kwargs["timeout"] == 30.0
         assert kwargs["verify"] is True
         assert kwargs["stream"] is False
+
+    def test_supported_arguments_may_be_none(self) -> None:
+        """An unset optional argument is omitted rather than forwarded as None."""
+        session = impersonating(FakeCurlSession(response=FakeCurlResponse()))
+        session.get(
+            "https://datos.bne.es/sparql", params=None, headers=None, timeout=None
+        )
+        curl_session = session._curl_session  # type: ignore[attr-defined]
+        _, _, kwargs = curl_session.calls[0]
+        assert set(kwargs) == {"stream", "allow_redirects"}
+        assert kwargs["stream"] is False
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"json": {"query": "SELECT *"}},
+            {"data": b"payload"},
+            {"cookies": {"session": "x"}},
+            {"auth": ("user", "pass")},
+            {"proxies": {"https": "http://127.0.0.1:8080"}},
+            {"cert": "client.pem"},
+        ],
+    )
+    def test_unforwarded_arguments_are_refused(self, kwargs: dict[str, Any]) -> None:
+        """Silently dropping a body would send a bodiless request instead.
+
+        Everything outside the forwarded set has to fail loudly, so a future
+        call that carries one is caught here rather than on the provider's side.
+        """
+        curl_session = FakeCurlSession(response=FakeCurlResponse())
+        session = impersonating(curl_session)
+
+        with pytest.raises(TypeError, match=next(iter(kwargs))):
+            session.request("POST", "https://datos.bne.es/sparql", **kwargs)
+
+        assert curl_session.calls == []
+
+    def test_positional_arguments_are_still_refused(self) -> None:
+        curl_session = FakeCurlSession(response=FakeCurlResponse())
+        session = impersonating(curl_session)
+        with pytest.raises(TypeError, match="keyword arguments only"):
+            session.request("POST", "https://datos.bne.es/sparql", b"body")
+        assert curl_session.calls == []
+
+    @pytest.mark.parametrize("status", [0, None, "", "oops"])
+    def test_unusable_status_is_a_transport_error(self, status: Any) -> None:
+        """Status 0 would pass raise_for_status() and count as a success."""
+        raw = SimpleNamespace(
+            status_code=status, headers={}, content=b"", url="", reason=""
+        )
+        with pytest.raises(requests.exceptions.ConnectionError):
+            network.adapt_curl_response(raw, "https://datos.bne.es/sparql", False)
+
+    def test_response_without_status_never_records_a_success(self) -> None:
+        """It has to reach the retry/breaker machinery as a failure instead."""
+        response = FakeCurlResponse(status_code=0, headers={}, content=b"")
+        cb, curl_session, result = _run_make_request(response=response)
+
+        assert result is None
+        cb.record_success.assert_not_called()
+        assert len(curl_session.calls) == 3
+        cb.record_failure.assert_called_once()
 
     def test_close_closes_the_curl_session(self) -> None:
         curl_session = FakeCurlSession()

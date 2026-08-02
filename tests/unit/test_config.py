@@ -11,10 +11,12 @@ import pytest
 
 import api.core.config as config_module
 from api.core.config import (
+    DEFAULT_MIN_TITLE_SCORE,
     get_config,
     get_download_config,
     get_download_limits,
     get_max_pages,
+    get_min_title_score,
     get_network_config,
     get_provider_setting,
     get_resume_mode,
@@ -109,6 +111,51 @@ class TestGetProviderSetting:
         """Test that bnf_gallica maps to gallica."""
         result = get_provider_setting("bnf_gallica", "max_pages")
         assert result == 500
+
+
+class TestMalformedConfigShapes:
+    """A hand-edited config of the wrong shape must degrade to the defaults.
+
+    ``"selection": "strict"`` or ``"bne": true`` used to raise AttributeError
+    out of a plain ``.get()`` chain, aborting the run instead of falling back
+    the way ``get_year_tolerance`` and ``get_search_timeout`` already do.
+    """
+
+    def test_scalar_provider_settings_section(self) -> None:
+        with patch("api.core.config.get_config", return_value={"provider_settings": 1}):
+            assert get_provider_setting("gallica", "max_pages", default=7) == 7
+
+    def test_scalar_provider_entry(self) -> None:
+        cfg = {"provider_settings": {"bne": True}}
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_provider_setting("bne", "max_pages", default=7) == 7
+            assert get_max_pages("bne") is None
+
+    def test_scalar_alias_target(self) -> None:
+        cfg = {"provider_settings": {"gallica": "strict"}}
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_provider_setting("bnf_gallica", "max_pages", default=7) == 7
+
+    def test_alias_still_resolves_for_a_well_formed_section(self) -> None:
+        """The bnf_gallica -> gallica alias survives the shape guard."""
+        cfg = {"provider_settings": {"gallica": {"max_pages": 500}}}
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_provider_setting("bnf_gallica", "max_pages") == 500
+            assert get_provider_setting("gallica", "max_pages") == 500
+
+    def test_scalar_selection_section_for_min_title_score(self) -> None:
+        with patch("api.core.config.get_config", return_value={"selection": "strict"}):
+            assert get_min_title_score() == DEFAULT_MIN_TITLE_SCORE
+            assert get_min_title_score("mdz") == DEFAULT_MIN_TITLE_SCORE
+
+    def test_provider_override_still_wins_for_min_title_score(self) -> None:
+        cfg = {
+            "selection": {"min_title_score": 40},
+            "provider_settings": {"mdz": {"min_title_score": 70}},
+        }
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_min_title_score("mdz") == 70.0
+            assert get_min_title_score() == 40.0
 
 
 class TestGetDownloadConfig:
@@ -251,6 +298,21 @@ class TestGetMaxPages:
         cfg = {"provider_settings": {"gallica": {"max_pages": "many"}}}
         with patch("api.core.config.get_config", return_value=cfg):
             assert get_max_pages("gallica") is None
+
+    def test_max_images_caps_when_max_pages_is_absent(self) -> None:
+        """Wellcome ships "max_images"; the cap must bind the IIIF path too.
+
+        Without the fallback the key only bounded the legacy image-service
+        branch while the primary manifest path downloaded without limit.
+        """
+        cfg = {"provider_settings": {"wellcome": {"max_images": 40}}}
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_max_pages("wellcome") == 40
+
+    def test_max_pages_wins_over_max_images(self) -> None:
+        cfg = {"provider_settings": {"wellcome": {"max_pages": 10, "max_images": 40}}}
+        with patch("api.core.config.get_config", return_value=cfg):
+            assert get_max_pages("wellcome") == 10
 
 
 class TestGetResumeMode:

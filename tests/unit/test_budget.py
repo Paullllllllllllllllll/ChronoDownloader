@@ -87,6 +87,20 @@ class TestDownloadBudget:
         fresh_budget._exhausted = True
         assert fresh_budget.allow_new_file("internet_archive", "work_1") is False
 
+    def test_allow_new_file_reads_the_flag_under_the_lock(
+        self, fresh_budget: DownloadBudget
+    ) -> None:
+        """The flag is read through ``exhausted()``, not off the attribute.
+
+        ``allow_new_file`` used to read ``_exhausted`` unlocked while every
+        other reader took the lock for the same field.
+        """
+        with patch.object(
+            fresh_budget, "exhausted", wraps=fresh_budget.exhausted
+        ) as locked_read:
+            assert fresh_budget.allow_new_file("internet_archive", "work_1") is True
+            locked_read.assert_called_once()
+
     def test_add_bytes_success(self, fresh_budget: DownloadBudget) -> None:
         """Test adding bytes successfully."""
         with patch("api.core.budget.get_download_limits", return_value={}):

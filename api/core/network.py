@@ -308,9 +308,15 @@ def get_circuit_breaker(provider_key: str | None) -> CircuitBreaker | None:
 # Global session (lazy-initialized)
 _SESSION: requests.Session | None = None
 
-# Per-provider sessions for providers that opt into browser impersonation.
-_IMPERSONATED_SESSIONS: dict[str, requests.Session] = {}
+# Per-provider sessions for providers that opt into browser impersonation,
+# stored as (impersonate target, session) so a changed profile rebuilds instead
+# of serving the session built for the previous one.
+_IMPERSONATED_SESSIONS: dict[str, tuple[str, requests.Session]] = {}
 _IMPERSONATED_SESSIONS_LOCK = threading.Lock()
+
+# Providers already warned about an unusable network.impersonate value.
+_IMPERSONATE_TYPE_WARNED: set[str] = set()
+_IMPERSONATE_TYPE_WARNED_LOCK = threading.Lock()
 
 # Map URL hostnames to provider keys for rate limiting and policies
 PROVIDER_HOST_MAP: dict[str, tuple[str, ...]] = {
@@ -653,9 +659,28 @@ def adapt_curl_response(raw: Any, url: str, stream: bool) -> requests.Response:
 
     Returns:
         A requests.Response whose body is read from ``raw``
+
+    Raises:
+        requests.exceptions.ConnectionError: When ``raw`` carries no usable
+            HTTP status. Fabricating status 0 would sail through
+            ``raise_for_status()`` and be recorded as a breaker *success*; a
+            transport error instead flows into the retry/breaker machinery.
     """
+    raw_status = getattr(raw, "status_code", None)
+    try:
+        status = int(raw_status or 0)
+    except (TypeError, ValueError) as exc:
+        raise requests.exceptions.ConnectionError(
+            f"curl_cffi response for {url} carries an unusable status code "
+            f"{raw_status!r}"
+        ) from exc
+    if status <= 0:
+        raise requests.exceptions.ConnectionError(
+            f"curl_cffi response for {url} carries no HTTP status code ({raw_status!r})"
+        )
+
     resp = requests.Response()
-    resp.status_code = int(getattr(raw, "status_code", 0) or 0)
+    resp.status_code = status
 
     headers: Any = getattr(raw, "headers", None) or {}
     items = headers.items() if hasattr(headers, "items") else []
@@ -676,6 +701,14 @@ def adapt_curl_response(raw: Any, url: str, stream: bool) -> requests.Response:
 
     resp.raw = _CurlResponseBody(raw, stream)
     return resp
+
+
+# The only request arguments the seam forwards to curl_cffi. Anything else a
+# caller passes (data, json, cookies, auth, proxies, cert, ...) would be dropped
+# on the floor and the request sent without it, so it is refused outright.
+_FORWARDED_REQUEST_KWARGS = frozenset(
+    {"stream", "params", "headers", "timeout", "verify", "allow_redirects"}
+)
 
 
 class ImpersonatingSession(requests.Session):
@@ -706,6 +739,13 @@ class ImpersonatingSession(requests.Session):
         if args:
             raise TypeError(
                 "ImpersonatingSession.request accepts keyword arguments only"
+            )
+        unsupported = sorted(set(kwargs) - _FORWARDED_REQUEST_KWARGS)
+        if unsupported:
+            raise TypeError(
+                "ImpersonatingSession.request does not forward "
+                f"{', '.join(unsupported)} to curl_cffi; supported keywords are "
+                f"{', '.join(sorted(_FORWARDED_REQUEST_KWARGS))}"
             )
 
         url_text = url.decode() if isinstance(url, bytes) else str(url)
@@ -744,6 +784,24 @@ def _load_curl_requests() -> Any | None:
     return curl_requests
 
 
+def _warn_unusable_impersonate_value(provider_key: str, raw: Any) -> None:
+    """Warn once per provider about an ``impersonate`` value of the wrong type.
+
+    ``get_session`` resolves the target on every request, so a per-call warning
+    would flood the log; deduped per provider like the missing-extra warning.
+    """
+    with _IMPERSONATE_TYPE_WARNED_LOCK:
+        if provider_key in _IMPERSONATE_TYPE_WARNED:
+            return
+        _IMPERSONATE_TYPE_WARNED.add(provider_key)
+    logger.warning(
+        "Ignoring network.impersonate=%r for %s: expected a browser name "
+        '(e.g. "chrome") or true; impersonation stays off.',
+        raw,
+        provider_key,
+    )
+
+
 def resolve_impersonate_target(provider_key: str | None) -> str | None:
     """Return the browser profile a provider is configured to impersonate.
 
@@ -763,8 +821,12 @@ def resolve_impersonate_target(provider_key: str | None) -> str | None:
     raw = get_network_config(provider_key).get("impersonate")
     if raw is True:
         return DEFAULT_IMPERSONATE_TARGET
-    if isinstance(raw, str) and raw.strip():
-        return raw.strip()
+    if isinstance(raw, str):
+        return raw.strip() or None
+    # A truthy value of any other type (1, {}, [...]) is a config mistake that
+    # would otherwise disable impersonation in silence.
+    if raw:
+        _warn_unusable_impersonate_value(provider_key, raw)
     return None
 
 
@@ -880,15 +942,20 @@ def get_session(provider_key: str | None = None) -> requests.Session:
     """
     global _SESSION
 
-    if provider_key and resolve_impersonate_target(provider_key):
+    target = resolve_impersonate_target(provider_key) if provider_key else None
+    if provider_key and target:
         with _IMPERSONATED_SESSIONS_LOCK:
-            session = _IMPERSONATED_SESSIONS.get(provider_key)
-            if session is None:
-                # A build that falls back to the plain client is cached too, so
-                # the "curl_cffi is missing" warning is logged once per provider
-                # rather than once per request.
-                session = build_session(provider_key)
-                _IMPERSONATED_SESSIONS[provider_key] = session
+            cached = _IMPERSONATED_SESSIONS.get(provider_key)
+            if cached is not None and cached[0] == target:
+                return cached[1]
+            # A build that falls back to the plain client is cached too, so the
+            # "curl_cffi is missing" warning is logged once per provider rather
+            # than once per request -- but tied to the target it was built for,
+            # so an in-process config reload that names another browser profile
+            # is not served the stale session. A superseded session is left to
+            # be collected; a concurrent worker may still be reading from it.
+            session = build_session(provider_key)
+            _IMPERSONATED_SESSIONS[provider_key] = (target, session)
             return session
 
     if _SESSION is None:

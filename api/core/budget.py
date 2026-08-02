@@ -237,9 +237,10 @@ class DownloadBudget:
         """Return True while the budget is not exhausted (legacy compatibility).
 
         Returns False once a "stop" on_exceed policy has tripped the exhausted
-        flag; otherwise True.
+        flag; otherwise True. Reads the flag through the locked accessor, so a
+        download worker cannot observe it mid-write from another thread.
         """
-        return not self._exhausted
+        return not self.exhausted()
 
     def allow_bytes(
         self,
