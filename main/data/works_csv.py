@@ -40,6 +40,10 @@ _csv_lock = threading.Lock()
 
 _csv_cache: dict[str, tuple[pd.DataFrame, tuple[float, int]]] = {}
 
+# Per-path line terminator sniffed at load time, so status writes hand an
+# Excel-authored CRLF frame back as CRLF and an LF frame back as LF.
+_csv_terminator: dict[str, str] = {}
+
 # Column names from the sampling notebook
 ENTRY_ID_COL = "entry_id"
 TITLE_COL = "short_title"
@@ -61,8 +65,12 @@ DIRECT_LINK_COL = "direct_link"
 # a ``year`` column. Without it the edition-year penalty stays dormant.
 YEAR_COLS = ("year",)
 
-_TRUTHY = frozenset({"true", "1", "yes", "y"})
-_FALSY = frozenset({"false", "0", "no", "n"})
+# "wahr"/"falsch": German-locale Excel and LibreOffice save typed boolean
+# literals and formula results in the localized form, which previously fell
+# through to "pending" -- completed works were re-downloaded and --status
+# counted FALSCH rows as pending rather than failed.
+_TRUTHY = frozenset({"true", "1", "yes", "y", "wahr"})
+_FALSY = frozenset({"false", "0", "no", "n", "falsch"})
 
 
 def _parse_status(val: object) -> str:
@@ -247,18 +255,22 @@ def backup_works_csv(csv_path: str) -> str | None:
         return None
 
 
-def _save_csv(df: pd.DataFrame, csv_path: str) -> None:
+def _save_csv(df: pd.DataFrame, csv_path: str, lineterminator: str = "\n") -> None:
     """Save DataFrame to CSV atomically, preserving all columns.
 
     Args:
         df: DataFrame to save
         csv_path: Path to save to
+        lineterminator: Line terminator to write (the one sniffed at load)
     """
-    # lineterminator is pinned to "\n": pandas defaults to os.linesep, so on
-    # Windows the first status write rewrote every line of an LF works CSV as
-    # CRLF -- a whole-file diff in the sampling frame, and a breach of the
-    # byte-identical round-trip contract outside the updated cells.
-    csv_text = df.to_csv(index=False, lineterminator="\n")
+    # The terminator is threaded through from the load-time sniff rather than
+    # left to pandas' os.linesep default: on Windows the first status write
+    # rewrote every line of an LF works CSV as CRLF, and pinning "\n" flat
+    # inverted the same whole-file diff for CRLF frames saved from Excel.
+    # Cell values round-trip byte-identically (dtype=str, keep_default_na);
+    # quoting is normalized to pandas' minimal style, so a fully-quoted
+    # export sees a one-time whole-file diff on the first status write.
+    csv_text = df.to_csv(index=False, lineterminator=lineterminator)
     atomic_write_text(csv_path, csv_text)
 
 
@@ -292,13 +304,24 @@ def _load_csv_for_update(csv_path: str) -> pd.DataFrame:
     # written back as "1490.0" and zero-padded ids lose their padding). With
     # dtype=str + keep_default_na=False all untouched cells round-trip
     # byte-identically; _parse_status already classifies the string forms.
+    _csv_terminator[csv_path] = _sniff_lineterminator(csv_path)
     df = pd.read_csv(csv_path, encoding="utf-8", dtype=str, keep_default_na=False)
     _csv_cache[csv_path] = (df, _csv_stat(csv_path))
     return df
 
 
+def _sniff_lineterminator(csv_path: str) -> str:
+    """Return the line terminator of ``csv_path``'s first line (default LF)."""
+    try:
+        with open(csv_path, "rb") as f:
+            first_line = f.readline()
+    except OSError:
+        return "\n"
+    return "\r\n" if first_line.endswith(b"\r\n") else "\n"
+
+
 def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
-    _save_csv(df, csv_path)
+    _save_csv(df, csv_path, _csv_terminator.get(csv_path, "\n"))
     _csv_cache[csv_path] = (df, _csv_stat(csv_path))
 
 

@@ -7,9 +7,11 @@ slugs and sequence numbers.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 from ..matching import NON_DECOMPOSABLE_TRANSLIT, strip_accents
@@ -265,7 +267,19 @@ def build_work_directory_name(
         Directory name in snake_case format
     """
     entry_slug = to_snake_case(str(entry_id)) if entry_id else None
-    title_slug = to_snake_case(str(title))[:max_len] if title else "untitled"
+    if title:
+        title_slug = to_snake_case(str(title))[:max_len]
+        if not title_slug:
+            # A wholly non-Latin title (Cyrillic, Greek, CJK) slugs to "":
+            # without a stand-in, the directory name collapses to the entry
+            # slug alone, and two such works accepted with the same default
+            # entry id share one directory and overwrite each other. A short
+            # digest of the NFC form keeps the name stable across Unicode
+            # normalization forms and distinct per title.
+            digest_src = unicodedata.normalize("NFC", str(title)).encode("utf-8")
+            title_slug = "t_" + hashlib.sha1(digest_src).hexdigest()[:8]
+    else:
+        title_slug = "untitled"
 
     creator_slug = None
     if include_creator and creator:

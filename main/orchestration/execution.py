@@ -614,7 +614,8 @@ def _run_sequential(
             # than leaving the row silently pending.
             if write_csv and csv_path and mark_deferred(csv_path, str(entry_id)):
                 logger.debug("Marked entry %s as deferred in source CSV", entry_id)
-        # Other statuses (dry_run, no_match) - don't update CSV
+        # Other statuses (dry_run) - don't update CSV; a no-selection outcome
+        # returns "failed" above, never a distinct "no_match" status
         # result is None means skipped (resume) - don't update CSV
 
         processed += 1

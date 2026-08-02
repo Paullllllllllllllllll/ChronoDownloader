@@ -346,3 +346,38 @@ class TestPathLengthWarning:
             warn_if_path_too_long(r"C:\out\e_0001_the_art_of_cooking", "W0001")
 
         assert caplog.text == ""
+
+
+class TestNonLatinTitleFallback:
+    """Titles that slug to empty need a stable, distinct stand-in.
+
+    A wholly non-Latin title slugged to "", collapsing the directory name to
+    the entry slug alone -- two such works accepted with the interactive
+    default entry id then shared one directory.
+    """
+
+    def test_non_latin_title_yields_a_stable_component(self) -> None:
+        first = build_work_directory_name("W0001", "Домострой")
+        second = build_work_directory_name("W0001", "Домострой")
+
+        assert first == second
+        assert first != "w_0001"
+        assert first.startswith("w_0001_t_")
+
+    def test_distinct_non_latin_titles_do_not_collide(self) -> None:
+        first = build_work_directory_name("W0001", "Домострой")
+        second = build_work_directory_name("W0001", "食譜")
+
+        assert first != second
+
+    def test_unicode_normalization_forms_reach_one_directory(self) -> None:
+        import unicodedata
+
+        nfc = build_work_directory_name(
+            "W0001", unicodedata.normalize("NFC", "Домострой")
+        )
+        nfd = build_work_directory_name(
+            "W0001", unicodedata.normalize("NFD", "Домострой")
+        )
+
+        assert nfc == nfd

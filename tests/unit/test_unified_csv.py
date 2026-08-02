@@ -527,3 +527,82 @@ class TestFailedWriteDoesNotLeakThroughTheCache:
         assert str(e002[STATUS_COL]).strip() == ""
         e001 = df.loc[df[ENTRY_ID_COL] == "E001"].iloc[0]
         assert str(e001[STATUS_COL]).strip().lower() == "true"
+
+
+class TestGermanLocaleBooleans:
+    """WAHR/FALSCH from German-locale Excel classify as completed/failed.
+
+    Typed boolean literals and formula results are saved in the localized
+    form; falling through to "pending" re-downloaded completed works and
+    counted FALSCH rows as pending in --status.
+    """
+
+    @staticmethod
+    def _df(status_values: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                ENTRY_ID_COL: [f"E{i:03d}" for i in range(len(status_values))],
+                TITLE_COL: ["T"] * len(status_values),
+                STATUS_COL: status_values,
+            }
+        )
+
+    def test_wahr_counts_as_completed(self) -> None:
+        df = self._df(["WAHR", "wahr"])
+
+        assert get_completed_entry_ids(df) == {"E000", "E001"}
+        assert len(get_pending_works(df)) == 0
+
+    def test_falsch_counts_as_failed(self, tmp_path: Any) -> None:
+        csv_path = str(tmp_path / "works.csv")
+        self._df(["FALSCH", "WAHR"]).to_csv(csv_path, index=False)
+
+        stats = get_stats(csv_path)
+
+        assert stats["failed"] == 1
+        assert stats["completed"] == 1
+        assert stats["pending"] == 0
+
+
+class TestLineTerminatorRoundTrip:
+    """Status writes hand back the terminator the frame was authored with.
+
+    Pinning "\n" flat fixed the LF frame on Windows but inverted the same
+    whole-file diff for CRLF frames saved from Excel.
+    """
+
+    @staticmethod
+    def _write_csv(path: str, terminator: str) -> None:
+        header = f"{ENTRY_ID_COL},{TITLE_COL},{STATUS_COL}"
+        lines = [header, "E001,Title A,", "E002,Title B,"]
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(terminator.join(lines) + terminator)
+
+    def test_crlf_frame_stays_crlf(self, tmp_path: Any) -> None:
+        import main.data.works_csv as wc
+
+        csv_path = str(tmp_path / "works_crlf.csv")
+        self._write_csv(csv_path, "\r\n")
+        wc._csv_cache.clear()
+
+        assert mark_success(csv_path, "E001", "http://x", "P") is True
+
+        with open(csv_path, "rb") as f:
+            data = f.read()
+        assert b"\r\n" in data
+        assert data.replace(b"\r\n", b"") == data.replace(b"\r\n", b"").replace(
+            b"\n", b""
+        ), "no bare LF line endings may remain in a CRLF frame"
+
+    def test_lf_frame_stays_lf(self, tmp_path: Any) -> None:
+        import main.data.works_csv as wc
+
+        csv_path = str(tmp_path / "works_lf.csv")
+        self._write_csv(csv_path, "\n")
+        wc._csv_cache.clear()
+
+        assert mark_success(csv_path, "E001", "http://x", "P") is True
+
+        with open(csv_path, "rb") as f:
+            data = f.read()
+        assert b"\r\n" not in data

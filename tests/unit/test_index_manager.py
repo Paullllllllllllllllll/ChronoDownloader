@@ -362,3 +362,31 @@ class TestUpsertKeyedOnEntryId:
         assert pd.isna(row["selected_provider_key"])
         assert pd.isna(row["item_url"])
         assert row["status"] == "no_match"
+
+
+class TestBomPrefixedLedger:
+    """An Excel "CSV UTF-8" save prefixes a BOM the reader must strip.
+
+    Read as plain utf-8, the first fieldname became BOM + "work_id": the next
+    rewrite blanked that column and the upsert, unable to match, appended a
+    duplicate row for the work.
+    """
+
+    def test_bom_ledger_upserts_instead_of_duplicating(
+        self, temp_output_dir: str
+    ) -> None:
+        index_path = os.path.join(temp_output_dir, "index.csv")
+        with open(index_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["work_id", "entry_id", "title", "status"])
+            writer.writerow(["abc123", "E0001", "Title 1", "completed"])
+
+        update_index_csv(
+            temp_output_dir,
+            {"work_id": "abc123", "entry_id": "E0001", "status": "failed"},
+        )
+
+        df = pd.read_csv(index_path, dtype=str, keep_default_na=False)
+        assert len(df) == 1
+        assert df.iloc[0]["work_id"] == "abc123"
+        assert df.iloc[0]["status"] == "failed"

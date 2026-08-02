@@ -70,7 +70,11 @@ def _read_existing_rows(index_path: str) -> list[dict[str, str]]:
     # PermissionError (AV scanner, file open in Excel) or a decode error
     # replaced the entire ledger with the single row being written. Letting it
     # propagate makes update_index_csv skip the write and keep the file intact.
-    with open(index_path, encoding="utf-8", newline="") as f:
+    # utf-8-sig: a no-op for tool-written files, but an operator who inspects
+    # the ledger in Excel and saves it as "CSV UTF-8" prefixes a BOM; read as
+    # plain utf-8, DictReader's first fieldname became BOM + "work_id", the
+    # next rewrite blanked that column, and the upsert appended a duplicate.
+    with open(index_path, encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
 
 
