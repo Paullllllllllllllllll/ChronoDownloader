@@ -1,4 +1,4 @@
-# ChronoDownloader v1.24.0
+# ChronoDownloader v1.25.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1375,6 +1375,20 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.25.0** (3 August 2026) -- Third and final maintenance-sweep round:
+  targeted fixes in the territory the first two rounds covered least, no
+  new features. The Gallica connector confines its ark capture to the ark
+  name alphabet (prose, query strings, and dot-qualifiers no longer ride
+  into the manifest URL), carries every creator, and sets the landing-page
+  URL the works CSV link column expects. The rate limiter is reconfigured
+  in place on an in-process config change, keeping the pacing clock. The
+  data ledgers survive an Excel inspect-and-save cycle in any locale:
+  WAHR/FALSCH status cells classify correctly, CRLF works CSVs round-trip
+  as CRLF, and a BOM-prefixed index.csv no longer duplicates its rows;
+  wholly non-Latin titles get a stable digest slug instead of colliding
+  in one directory. Interactive accounting reports resume-skips and
+  partial direct-IIIF downloads honestly, and the manifest preview
+  reports exactly the renderings the download path would attempt.
 - **v1.24.0** (2 August 2026) -- Second-round maintenance sweep: deeper
   bug fixes, no new features. Title matching gains true token-set
   semantics, so a short-title query that is a token subset of the full
