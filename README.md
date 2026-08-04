@@ -1,4 +1,4 @@
-# ChronoDownloader v1.26.0
+# ChronoDownloader v1.27.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -537,6 +537,12 @@ optional in interactive).
 - `--[no-]prefer-pdf-over-images`
 - `--[no-]download-manifest-renderings`
 - `--max-renderings-per-manifest INT`
+- `--images-only` -- page images only, equivalent to
+  `--no-download-manifest-renderings --no-prefer-pdf-over-images`.
+  Either flag given explicitly still wins. Use this when a manifest
+  advertises a whole-work PDF (Internet Archive, Wellcome, the DFG
+  viewer) but the image set is what you want: with the shipped
+  defaults such a manifest otherwise yields one PDF and no pages
 - `--rendering-mime-whitelist MIMES` -- comma-separated, repeatable
 - `--[no-]overwrite-existing`
 - `--[no-]include-metadata`
@@ -849,7 +855,10 @@ To adjust for slow providers, increase `delay_ms` and
   - `resume_from_csv`: skip if `retrievable=True` in CSV
   - `reprocess_all`: always reprocess
 - `prefer_pdf_over_images`: skip page images when PDF/EPUB
-  available
+  available. With the shipped `true`, a manifest advertising a
+  whole-work PDF returns after the rendering and downloads no pages;
+  `--images-only` disables this and the rendering fetch together for
+  one run
 - `download_manifest_renderings`: download PDFs/EPUBs linked in
   IIIF manifests
 - `max_renderings_per_manifest`: maximum rendering files obtained
@@ -1381,6 +1390,15 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.27.0** (4 August 2026) -- A new `--images-only` flag makes page
+  images reachable in one step. With the shipped defaults a manifest that
+  advertises a whole-work PDF (Internet Archive, Wellcome, the DFG viewer)
+  returned one rendering and no pages, and recovering the image set meant
+  knowing that `--no-prefer-pdf-over-images` alone still pays for the PDF
+  transfer. The flag clears both `prefer_pdf_over_images` and
+  `download_manifest_renderings` for the run, and either given explicitly
+  still wins over it.
 
 - **v1.26.0** (4 August 2026) -- Credentials are no longer exposed on the
   TLS downgrade path. The shipped example and staging configurations set

@@ -254,6 +254,55 @@ class TestCliHelpers:
         assert merged["selection"]["download_strategy"] == "all"
         assert merged["selection"]["keep_non_selected_metadata"] is False
 
+    def test_images_only_clears_both_rendering_keys(self) -> None:
+        """--images-only must disable the rendering fetch and the PDF shortcut.
+
+        Clearing only ``prefer_pdf_over_images`` still downloads the manifest's
+        whole-work PDF before the pages, which is the transfer the flag exists
+        to avoid.
+        """
+        from main.cli.overrides import _apply_runtime_config_overrides
+
+        args = argparse.Namespace(
+            images_only=True,
+            prefer_pdf_over_images=None,
+            download_manifest_renderings=None,
+        )
+        config = {
+            "download": {
+                "prefer_pdf_over_images": True,
+                "download_manifest_renderings": True,
+            }
+        }
+
+        merged = _apply_runtime_config_overrides(args, config, MagicMock())
+
+        assert merged["download"]["prefer_pdf_over_images"] is False
+        assert merged["download"]["download_manifest_renderings"] is False
+
+    def test_explicit_rendering_flag_beats_images_only(self) -> None:
+        """An explicit --download-manifest-renderings overrides --images-only."""
+        from main.cli.overrides import _apply_runtime_config_overrides
+
+        args = argparse.Namespace(
+            images_only=True,
+            prefer_pdf_over_images=None,
+            download_manifest_renderings=True,
+        )
+
+        merged = _apply_runtime_config_overrides(args, {"download": {}}, MagicMock())
+
+        assert merged["download"]["download_manifest_renderings"] is True
+        assert merged["download"]["prefer_pdf_over_images"] is False
+
+    def test_images_only_flag_triggers_cli_mode(self) -> None:
+        """--images-only alone must route to CLI mode, not the interactive UI."""
+        from main.cli import create_cli_parser
+        from main.cli.overrides import _looks_like_cli_invocation
+
+        assert _looks_like_cli_invocation(["--images-only"]) is True
+        assert create_cli_parser().parse_args([]).images_only is False
+
     def test_min_title_score_flag_stamps_per_provider_thresholds(self) -> None:
         """--min-title-score must reach providers carrying their own threshold.
 

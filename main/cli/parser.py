@@ -368,6 +368,16 @@ Examples:
     )
 
     parser.add_argument(
+        "--images-only",
+        action="store_true",
+        default=False,
+        help="Page images only: disable manifest renderings and the "
+        "prefer-PDF-over-images shortcut for this run. Equivalent to "
+        "--no-download-manifest-renderings --no-prefer-pdf-over-images, "
+        "and overridden by either if given explicitly.",
+    )
+
+    parser.add_argument(
         "--rendering-mime-whitelist",
         action="append",
         default=None,

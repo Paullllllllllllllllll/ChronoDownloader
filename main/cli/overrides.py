@@ -90,6 +90,13 @@ def _apply_runtime_config_overrides(
 
     if resume_mode is not None:
         dl_cfg["resume_mode"] = resume_mode
+    # Applied before the individual flags so an explicit --prefer-pdf-over-images
+    # or --download-manifest-renderings still wins. Both keys must be cleared:
+    # disabling only the prefer-PDF shortcut still downloads the rendering, and
+    # a manifest advertising a whole-work PDF then costs the transfer anyway.
+    if getattr(args, "images_only", False):
+        dl_cfg["prefer_pdf_over_images"] = False
+        dl_cfg["download_manifest_renderings"] = False
     if prefer_pdf is not None:
         dl_cfg["prefer_pdf_over_images"] = bool(prefer_pdf)
     if manifest_renderings is not None:
@@ -284,6 +291,7 @@ def _looks_like_cli_invocation(argv: list[str]) -> bool:
         "--download-manifest-renderings",
         "--no-download-manifest-renderings",
         "--max-renderings-per-manifest",
+        "--images-only",
         "--rendering-mime-whitelist",
         "--overwrite-existing",
         "--no-overwrite-existing",
