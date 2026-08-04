@@ -88,7 +88,7 @@
         "backoff_multiplier": 1.5,
         "max_backoff_s": 60.0,
         "timeout_s": 30,
-        "ssl_error_policy": "retry_insecure_once"
+        "ssl_error_policy": "fail"
       }
     },
     "europeana": {
@@ -154,7 +154,7 @@
         "backoff_multiplier": 2.0,
         "max_backoff_s": 45.0,
         "timeout_s": 45,
-        "ssl_error_policy": "retry_insecure_once"
+        "ssl_error_policy": "fail"
       }
     },
     "slub": {

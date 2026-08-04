@@ -1,4 +1,4 @@
-# ChronoDownloader v1.25.0
+# ChronoDownloader v1.26.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -688,10 +688,17 @@ quota management. Each provider key maps to a settings object:
 - `verify_ssl`: verify the provider's TLS certificate (default
   `true`); applies to searches and downloads alike
 - `ssl_error_policy`: what happens when verification fails --
-  `fail` (default) gives up on the request, `retry_insecure_once`
-  retries it once with verification off, logging a warning.
-  `config.example.json` sets it for Polona and Anna's Archive, whose
-  certificates break periodically
+  `fail` (default everywhere, including `config.example.json`) gives
+  up on the request. `retry_insecure_once` is a deliberate per-provider
+  opt-in for hosts whose certificate chain breaks periodically (Polona
+  has form here): it retries the request once with verification off and
+  logs a warning. The downgrade is never honored for a request that
+  carries a credential -- an API key, token, signature or session value
+  in the query string, or an `Authorization`/`X-Api-Key` style header.
+  Such a request fails as if the policy were `fail`, with a warning
+  naming the provider, so that a secret is never replayed to an
+  unauthenticated peer. Anna's Archive passes its member key as a query
+  parameter, so its downloads are covered by that rule
 - `dns_retry`: retry a name-resolution failure with backoff instead
   of abandoning the host at once (default `false`); worth enabling
   only behind a flaky resolver, since a genuine NXDOMAIN will not
@@ -1374,6 +1381,17 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.26.0** (4 August 2026) -- Credentials are no longer exposed on the
+  TLS downgrade path. The shipped example and staging configurations set
+  `ssl_error_policy` back to `fail` for Polona and Anna's Archive, and the
+  `retry_insecure_once` policy is now refused outright for any request
+  carrying a credential, whether in the query string or in a header. This
+  matters for Anna's Archive, whose fast-download endpoint accepts the
+  member key only as a query parameter: a certificate failure would
+  previously have resent that key over an unverified connection. Local
+  configuration files are not rewritten, so any deployment that opted into
+  the permissive policy should set it back to `fail`.
 
 - **v1.25.0** (3 August 2026) -- Third and final maintenance-sweep round:
   targeted fixes in the territory the first two rounds covered least, no

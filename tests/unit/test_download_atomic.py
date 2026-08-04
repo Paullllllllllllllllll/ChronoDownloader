@@ -623,7 +623,10 @@ class TestDownloadFileTerminalFailures:
 
     @staticmethod
     def _run(
-        exc: Exception, folder: str, net: dict[str, Any] | None = None
+        exc: Exception,
+        folder: str,
+        net: dict[str, Any] | None = None,
+        url: str = "https://bad.example/book.pdf",
     ) -> tuple[MagicMock, MagicMock]:
         session = MagicMock()
         session.get.side_effect = exc
@@ -641,10 +644,7 @@ class TestDownloadFileTerminalFailures:
             patch.object(dl_mod, "get_network_config", return_value=config),
             patch("api.core.download.time.sleep"),
         ):
-            assert (
-                dl_mod.download_file("https://bad.example/book.pdf", folder, "book")
-                is None
-            )
+            assert dl_mod.download_file(url, folder, "book") is None
 
         return session, mock_cb
 
@@ -668,6 +668,19 @@ class TestDownloadFileTerminalFailures:
             net={"ssl_error_policy": "retry_insecure_once"},
         )
         assert session.get.call_count == 2
+        cb.record_failure.assert_called_once()
+
+    def test_credentialed_url_suppresses_the_insecure_retry(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """A keyed download URL must not be replayed over an unverified link."""
+        session, cb = self._run(
+            requests.exceptions.SSLError("certificate verify failed"),
+            str(tmp_path / "work"),
+            net={"ssl_error_policy": "retry_insecure_once"},
+            url="https://bad.example/fast_download?md5=abc&key=s3cr3t",
+        )
+        assert session.get.call_count == 1
         cb.record_failure.assert_called_once()
 
     @pytest.mark.parametrize(

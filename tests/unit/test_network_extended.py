@@ -18,6 +18,7 @@ from api.core.network import (
     is_connect_failure,
     make_json_request,
     make_request,
+    request_carries_credential,
 )
 
 # ============================================================================
@@ -471,6 +472,93 @@ class TestSslFailuresFeedTheBreaker:
     def test_exhausted_insecure_retry_records_failure(self) -> None:
         cb = self._run({"ssl_error_policy": "retry_insecure_once"})
         cb.record_failure.assert_called_once()
+
+
+class TestCredentialDetection:
+    """Name-based detection guarding the insecure-retry downgrade."""
+
+    def test_query_string_key_is_a_credential(self) -> None:
+        assert request_carries_credential("https://x.example/api?md5=abc&key=s3cr3t")
+
+    def test_separate_params_are_inspected(self) -> None:
+        assert request_carries_credential(
+            "https://x.example/api", {"md5": "abc", "api_key": "s3cr3t"}
+        )
+
+    def test_vendor_variants_are_caught(self) -> None:
+        for name in ("access_token", "clientSecret", "sig", "url-signature", "pwd"):
+            assert request_carries_credential("https://x.example/a", {name: "v"}), name
+
+    def test_authorization_and_api_key_headers_are_credentials(self) -> None:
+        assert request_carries_credential(
+            "https://x.example/a", None, {"Authorization": "Bearer t"}
+        )
+        assert request_carries_credential(
+            "https://x.example/a", None, {"X-Api-Key": "t"}
+        )
+
+    def test_plain_request_carries_no_credential(self) -> None:
+        assert not request_carries_credential(
+            "https://x.example/api?q=cookbook&page=2",
+            {"format": "json"},
+            {"Accept": "application/json", "User-Agent": "chrono"},
+        )
+
+    def test_empty_values_do_not_count(self) -> None:
+        assert not request_carries_credential(
+            "https://x.example/api", {"key": ""}, {"Authorization": ""}
+        )
+
+
+class TestInsecureRetryIsSuppressedForCredentialedRequests:
+    """``retry_insecure_once`` must never replay a secret unverified.
+
+    The policy trades verification for reach on providers with periodically
+    broken certificate chains. That trade is only acceptable for public
+    payloads: an API key in the query string would otherwise be resent over a
+    connection whose peer is unauthenticated.
+    """
+
+    @staticmethod
+    def _run(**kwargs: object) -> MagicMock:
+        mock_cb = MagicMock()
+        mock_cb.allow_request.return_value = True
+
+        session = MagicMock()
+        session.get.side_effect = requests.exceptions.SSLError(
+            "certificate verify failed: unable to get local issuer certificate"
+        )
+
+        with (
+            patch("api.core.network.get_session", return_value=session),
+            patch("api.core.network.get_circuit_breaker", return_value=mock_cb),
+            patch(
+                "api.core.network.get_network_config",
+                return_value={
+                    "max_attempts": 3,
+                    "base_backoff_s": 0.0,
+                    "ssl_error_policy": "retry_insecure_once",
+                },
+            ),
+            patch("api.core.network.time.sleep"),
+        ):
+            assert make_request("https://bad-cert.example/api", **kwargs) is None
+
+        return session
+
+    def test_credentialed_request_is_not_retried_insecurely(self) -> None:
+        session = self._run(params={"md5": "abc", "key": "s3cr3t"})
+        assert session.get.call_count == 1
+        assert session.get.call_args.kwargs["verify"] is True
+
+    def test_credentialed_header_is_not_retried_insecurely(self) -> None:
+        session = self._run(headers={"Authorization": "Bearer t"})
+        assert session.get.call_count == 1
+
+    def test_uncredentialed_request_still_retries_once(self) -> None:
+        session = self._run(params={"q": "cookbook"})
+        assert session.get.call_count == 2
+        assert session.get.call_args.kwargs["verify"] is False
 
 
 class TestInvalidUrlIsNotRetried:

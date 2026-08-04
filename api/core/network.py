@@ -10,6 +10,7 @@ import contextlib
 import json
 import logging
 import random
+import re
 import threading
 import time
 from collections.abc import Iterator
@@ -18,7 +19,7 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
 from typing import Any, cast, get_args
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import requests
 import urllib3
@@ -261,6 +262,107 @@ def record_client_error(
         cb.record_failure(provider or "unknown")
     else:
         cb.record_success()
+
+
+# Credential detection for the insecure-retry downgrade. Names are normalized
+# to lowercase alphanumerics, so "API-Key", "api_key" and "apiKey" all collapse
+# to "apikey". Exact names cover the common cases; the suffixes catch vendor
+# variants ("access_key", "private_token", "client_secret", "url_signature").
+_CREDENTIAL_PARAM_NAMES = frozenset(
+    {
+        "key",
+        "apikey",
+        "token",
+        "accesstoken",
+        "refreshtoken",
+        "authtoken",
+        "idtoken",
+        "secret",
+        "clientsecret",
+        "password",
+        "passwd",
+        "pwd",
+        "auth",
+        "authorization",
+        "credential",
+        "credentials",
+        "sig",
+        "signature",
+        "sessionid",
+    }
+)
+
+_CREDENTIAL_NAME_SUFFIXES = (
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "signature",
+    "credential",
+)
+
+_CREDENTIAL_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "proxyauthorization",
+        "cookie",
+        "wwwauthenticate",
+    }
+)
+
+
+def _is_credential_name(name: str) -> bool:
+    """Report whether a parameter or header name looks like a secret."""
+    normalized = re.sub(r"[^a-z0-9]", "", name.lower())
+    if normalized in _CREDENTIAL_PARAM_NAMES:
+        return True
+    return any(normalized.endswith(s) for s in _CREDENTIAL_NAME_SUFFIXES)
+
+
+def request_carries_credential(
+    url: str,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, Any] | None = None,
+) -> bool:
+    """Report whether an outgoing request carries a secret.
+
+    The ``retry_insecure_once`` SSL policy exists so that a provider with a
+    periodically broken certificate chain stays reachable. That trade is only
+    defensible for public payloads: replaying a request that carries an API
+    key, bearer token or session cookie over an unverified connection hands
+    the credential to whoever produced the bad certificate. Callers use this
+    to suppress the downgrade and fail as if the policy were ``fail``.
+
+    Detection is deliberately generic (name-based, provider-agnostic) and
+    errs toward reporting True, since the only cost of a false positive is
+    one insecure retry not taken.
+
+    Args:
+        url: Request URL, whose query string is inspected
+        params: Query parameters passed separately to the HTTP layer
+        headers: Request headers as finally merged for the call
+
+    Returns:
+        True when any query parameter or header carries a credential value
+    """
+    query_items: list[tuple[str, str]] = list(
+        parse_qsl(urlparse(url).query, keep_blank_values=False)
+    )
+    if params:
+        query_items.extend(
+            (str(k), str(v)) for k, v in params.items() if v not in (None, "")
+        )
+
+    if any(_is_credential_name(name) and value for name, value in query_items):
+        return True
+
+    for name, value in (headers or {}).items():
+        if not value:
+            continue
+        normalized = re.sub(r"[^a-z0-9]", "", str(name).lower())
+        if normalized in _CREDENTIAL_HEADER_NAMES or _is_credential_name(str(name)):
+            return True
+    return False
 
 
 # Per-provider circuit breakers
@@ -1341,14 +1443,23 @@ def make_request(
                     return None
 
                 if ssl_policy == "retry_insecure_once" and verify:
-                    logger.warning(
-                        "SSL verify failed for %s; retrying once with verify=False "
-                        "due to policy.",
-                        url,
-                    )
-                    verify = False
-                    insecure_retry_used = True
-                    continue
+                    if request_carries_credential(url, params, req_headers):
+                        logger.warning(
+                            "SSL verify failed for %s; insecure retry suppressed "
+                            "for provider %s because the request carries a "
+                            "credential. Failing as if ssl_error_policy=fail.",
+                            url,
+                            provider or "unknown",
+                        )
+                    else:
+                        logger.warning(
+                            "SSL verify failed for %s; retrying once with "
+                            "verify=False due to policy.",
+                            url,
+                        )
+                        verify = False
+                        insecure_retry_used = True
+                        continue
 
                 logger.warning(
                     "SSL certificate verification error for %s: %s; not retrying",

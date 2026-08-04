@@ -50,6 +50,7 @@ from .network import (
     get_rate_limiter,
     get_session,
     record_client_error,
+    request_carries_credential,
 )
 
 logger = logging.getLogger(__name__)
@@ -781,14 +782,24 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             # Mirror make_request: retry once with verify=False when policy
             # allows, consuming this attempt; abort on any further SSL error.
             if ssl_policy == "retry_insecure_once" and verify:
-                logger.warning(
-                    "SSL verify failed for %s; retrying once with verify=False "
-                    "due to policy.",
-                    url,
-                )
-                verify = False
-                insecure_retry_used = True
-                continue
+                if request_carries_credential(url, None, req_headers):
+                    # Never replay a signed or keyed URL over an unverified
+                    # connection; fail as if the policy were "fail".
+                    logger.warning(
+                        "SSL verify failed for %s; insecure retry suppressed for "
+                        "provider %s because the request carries a credential.",
+                        url,
+                        provider or "unknown",
+                    )
+                else:
+                    logger.warning(
+                        "SSL verify failed for %s; retrying once with verify=False "
+                        "due to policy.",
+                        url,
+                    )
+                    verify = False
+                    insecure_retry_used = True
+                    continue
             logger.error("SSL error downloading %s: %s", url, e)
             # A handshake this client can never complete is a provider-level
             # outage, so it feeds the breaker like any other terminal transport

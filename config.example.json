@@ -117,8 +117,8 @@
         "backoff_multiplier": 1.5,
         "max_backoff_s": 60.0,
         "timeout_s": 30,
-        "ssl_error_policy": "retry_insecure_once",
-        "_note": "SSL policy needed: polona.pl has certificate verification issues (Mar 2026)"
+        "ssl_error_policy": "fail",
+        "_note": "polona.pl has had certificate verification issues (Mar 2026); 'retry_insecure_once' is available but ships off, and is never honored for credentialed requests"
       }
     },
     "europeana": {
@@ -200,8 +200,8 @@
         "backoff_multiplier": 2.0,
         "max_backoff_s": 45.0,
         "timeout_s": 45,
-        "ssl_error_policy": "retry_insecure_once",
-        "_note": "Rate limiting delays (applies to all requests, separate from quota). SSL policy allows retry without verification due to frequent certificate issues."
+        "ssl_error_policy": "fail",
+        "_note": "Rate limiting delays (applies to all requests, separate from quota). SSL policy stays 'fail': this provider's API takes the member key as a query parameter, so an insecure retry would resend it unverified."
       }
     },
     "slub": {

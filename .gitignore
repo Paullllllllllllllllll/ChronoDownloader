@@ -66,3 +66,6 @@ api_keys.json
 
 # Local backup archives (bundles, snapshots; kept locally, not versioned)
 backup/
+
+# Local environment files (never versioned)
+.env*
