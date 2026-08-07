@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -520,7 +521,7 @@ class TestInsecureRetryIsSuppressedForCredentialedRequests:
     """
 
     @staticmethod
-    def _run(**kwargs: object) -> MagicMock:
+    def _run(**kwargs: Any) -> MagicMock:
         mock_cb = MagicMock()
         mock_cb.allow_request.return_value = True
 

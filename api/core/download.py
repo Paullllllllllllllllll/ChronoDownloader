@@ -5,6 +5,13 @@ and the IIIF strategies. Handles rate limiting, exponential backoff, budget
 enforcement, content-type validation, magic-byte checks, HTML login-page
 detection, and standardized naming.
 
+The saved extension follows the payload, not the URL: the response
+`Content-Type` decides it, and when the server declares nothing usable (a bare
+`application/octet-stream` from a CGI endpoint whose URL suffix names the
+script) the leading bytes are sniffed instead. The extension in turn decides
+whether a file counts as retrievable content in `objects/` or as an unrecognized
+byte stream filed under `metadata/`.
+
 Also provides `save_json` for metadata persistence under each work's
 `metadata/` subdirectory.
 """
@@ -80,17 +87,114 @@ def _ensure_dir(path: str) -> None:
         _CREATED_DIRS.add(path)
 
 
+# Ordered: the first entry whose MIME fragment appears in the response's
+# Content-Type wins, so a more specific type must precede a broader one
+# ("application/epub+zip" before "application/zip").
 _CONTENT_TYPE_EXT_MAP = {
     "application/pdf": ".pdf",
+    "application/x-pdf": ".pdf",
     "application/epub+zip": ".epub",
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
     "image/png": ".png",
     "image/jp2": ".jp2",
+    "image/jpx": ".jp2",
+    "image/jpeg2000": ".jp2",
+    "image/tiff": ".tif",
+    "image/tif": ".tif",
+    "application/zip": ".zip",
     "text/plain": ".txt",
     "text/html": ".html",
     "application/json": ".json",
+    "application/xml": ".xml",
+    "text/xml": ".xml",
 }
+
+# Reverse direction, used to record the resolved type of a payload whose
+# extension was determined from the response rather than from its URL.
+_EXT_MEDIA_TYPE_MAP = {
+    ".pdf": "application/pdf",
+    ".epub": "application/epub+zip",
+    ".zip": "application/zip",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".jp2": "image/jp2",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".txt": "text/plain",
+    ".html": "text/html",
+    ".json": "application/json",
+    ".xml": "application/xml",
+}
+
+# Content types that name a byte stream rather than a format. A server
+# answering a whole-document endpoint with one of these has settled nothing
+# about the payload, so the type has to come from the bytes themselves.
+_GENERIC_CONTENT_TYPES = frozenset(
+    {
+        "application/octet-stream",
+        "binary/octet-stream",
+        "application/binary",
+        "application/download",
+        "application/force-download",
+        "application/x-download",
+        "application/unknown",
+    }
+)
+
+# Leading-byte signatures for the payload types this tool retrieves. Checked
+# in order, so a longer signature must precede any shorter one it starts with.
+_MAGIC_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"%PDF-", ".pdf"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x00\x00\x00\x0cjP  \r\n\x87\n", ".jp2"),
+    (b"\xff\x4f\xff\x51", ".jp2"),
+    (b"II*\x00", ".tif"),
+    (b"MM\x00*", ".tif"),
+    (b"II+\x00", ".tif"),
+    (b"MM\x00+", ".tif"),
+)
+
+# An EPUB is a zip whose first entry is an uncompressed "mimetype" member
+# holding the media type, which therefore sits in the first bytes of the file.
+_EPUB_MIMETYPE_WINDOW = 128
+
+# Extensions that name a payload format. A URL suffix outside this set -- a CGI
+# endpoint such as ``.fcgi``, a servlet path, a bare identifier -- says nothing
+# about what the response body is, so it cannot settle the extension on its own.
+_PAYLOAD_EXTENSIONS = frozenset(
+    {
+        ".pdf",
+        ".epub",
+        ".zip",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".jp2",
+        ".tif",
+        ".tiff",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".djvu",
+        ".txt",
+        ".htm",
+        ".html",
+        ".json",
+        ".xml",
+        ".csv",
+    }
+)
+
+# Document types a previous run may have resolved from a response whose URL
+# gave no usable suffix. Consulted by the resume/skip check so an endpoint URL
+# is not fetched again for a file that is already on disk under its real
+# extension. Deliberately excludes image extensions: those are named with a
+# page counter shared with the work's page images, so probing them would let a
+# whole-document endpoint be skipped because page one exists.
+_RESOLVABLE_DOCUMENT_EXTENSIONS = (".pdf", ".epub", ".zip")
 
 _IMAGE_EXTENSIONS = {
     ".jpg",
@@ -138,10 +242,57 @@ def _parse_content_length(cl_header: str | None) -> int | None:
 
 def _infer_extension_from_content_type(content_type: str) -> str:
     ct_lower = content_type.lower()
+    # A generic byte-stream type must not match a format: "application/binary"
+    # contains no mapped fragment today, but the guard keeps future additions
+    # (and vendor-prefixed variants) from resolving a format that was never
+    # declared.
+    if ct_lower.split(";", 1)[0].strip() in _GENERIC_CONTENT_TYPES:
+        return ""
     for mime, ext in _CONTENT_TYPE_EXT_MAP.items():
         if mime in ct_lower:
             return ext
     return ""
+
+
+def sniff_extension(head: bytes) -> str:
+    """Return the extension implied by a payload's leading bytes.
+
+    The fallback for a response that declares no usable type: a whole-document
+    endpoint (UB Heidelberg's ``.fcgi``, and comparable CGI or servlet paths at
+    other libraries) serves a complete PDF under a URL whose suffix names the
+    script, so the URL cannot be trusted for the extension. Keyed purely off
+    the payload, hence provider-agnostic.
+
+    Args:
+        head: Leading bytes of the downloaded file.
+
+    Returns:
+        A dotted extension, or ``""`` when the bytes match no known signature.
+    """
+    if not head:
+        return ""
+    for magic, ext in _MAGIC_SIGNATURES:
+        if head.startswith(magic):
+            return ext
+    if head.startswith(b"PK\x03\x04"):
+        if b"application/epub+zip" in head[:_EPUB_MIMETYPE_WINDOW]:
+            return ".epub"
+        return ".zip"
+    return ""
+
+
+def media_type_for_extension(ext: str) -> str | None:
+    """Return the media type an extension stands for, or ``None`` if unknown."""
+    return _EXT_MEDIA_TYPE_MAP.get(ext.lower())
+
+
+def _budget_bucket(ext: str) -> str:
+    """Classify a payload extension into its download-budget bucket."""
+    if ext in (".pdf", ".epub", ".zip"):
+        return "pdfs"
+    if ext in (".json", ".xml", ".html", ".txt"):
+        return "metadata"
+    return "images"
 
 
 def _should_reject_html_response(
@@ -344,6 +495,30 @@ def _try_skip_existing(
     if not predicted_ext:
         return None, True
 
+    candidate_exts = [predicted_ext]
+    if predicted_ext not in _PAYLOAD_EXTENSIONS:
+        # The suffix names an endpoint rather than a format, so the file on disk
+        # carries whichever extension a previous run resolved from the response.
+        # Probe those before spending the body again -- while still recognizing
+        # a file saved under the endpoint suffix itself by a pre-resolution run.
+        candidate_exts.extend(_RESOLVABLE_DOCUMENT_EXTENSIONS)
+
+    for ext in candidate_exts:
+        hit = _existing_download_path(folder_path, filename, provider, ext)
+        if hit is not None:
+            return hit
+
+    return None, True
+
+
+def _existing_download_path(
+    folder_path: str, filename: str, provider: str | None, predicted_ext: str
+) -> tuple[str, bool] | None:
+    """Return an already-present file for one candidate extension, or ``None``.
+
+    Consumes a naming sequence number only on a hit, so probing several
+    extensions leaves no gap in the numbering.
+    """
     dl_cfg = get_download_config()
     allowed_exts = dl_cfg.get("allowed_object_extensions", [])
     save_disallowed = dl_cfg.get("save_disallowed_to_metadata", True)
@@ -351,7 +526,7 @@ def _try_skip_existing(
         folder_path, predicted_ext, allowed_exts, save_disallowed
     )
     if target_dir is None:
-        return None, True
+        return None
 
     stem = get_current_name_stem() or to_snake_case(filename) or "object"
     prov_slug = get_provider_slug(get_current_provider(), provider)
@@ -373,7 +548,7 @@ def _try_skip_existing(
         logger.info("File already exists (early check), skipping: %s", predicted_path)
         return predicted_path, counts_as_success
 
-    return None, True
+    return None
 
 
 def download_file(url: str, folder_path: str, filename: str) -> str | None:
@@ -461,13 +636,21 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         # Prefer the server's declared Content-Type over the URL suffix: a URL
         # ending in ``.pdf`` may actually serve an HTML error page, whereas the
         # Content-Type reflects the real payload.
+        header_ext = _infer_extension_from_content_type(content_type)
         inferred_ext = (
-            _infer_extension_from_content_type(content_type)
+            header_ext
             or Path(parsed.path).suffix
             or Path(cd_name or "").suffix
             or Path(filename or "").suffix
             or ".bin"
         ).lower()
+        # Neither the header nor any suffix named a format: the URL points at an
+        # endpoint (a CGI script, a servlet) and the extension in hand describes
+        # the endpoint, not the body. Resolve it from the leading bytes once the
+        # body has been written.
+        resolve_from_payload = (
+            not header_ext and inferred_ext not in _PAYLOAD_EXTENSIONS
+        )
 
         stem = get_current_name_stem() or to_snake_case(filename) or "object"
         prov_slug = get_provider_slug(get_current_provider(), provider)
@@ -485,7 +668,8 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         if log_msg:
             logger.info(log_msg)
 
-        _ensure_dir(target_dir)
+        if not resolve_from_payload:
+            _ensure_dir(target_dir)
 
         name_key = _counter_key(inferred_ext, stem, prov_slug)
         safe_name = _build_standardized_filename(inferred_ext, stem, prov_slug)
@@ -503,12 +687,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         # Classify the payload into its budget bucket by extension so PDF and
         # metadata limits are actually enforced (previously everything was
         # booked as "images").
-        if inferred_ext in (".pdf", ".epub"):
-            budget_type = "pdfs"
-        elif inferred_ext in (".json", ".xml", ".html", ".txt"):
-            budget_type = "metadata"
-        else:
-            budget_type = "images"
+        budget_type = _budget_bucket(inferred_ext)
 
         content_len_int = content_len or 0
         if content_len_int and not _BUDGET.allow_bytes(
@@ -533,7 +712,15 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         # config dict rebuild and GB/MB conversions no longer run per chunk.
         budget_limits = _BUDGET.resolve_limits(budget_type, work_id)
 
-        part_path = filepath + ".part"
+        # While the payload type is still provisional the target directory is a
+        # guess, so stream into the work folder root instead: creating the
+        # guessed directory would leave an empty metadata/ behind for every
+        # document an endpoint URL serves.
+        part_path = (
+            os.path.join(folder_path, os.path.basename(filepath) + ".part")
+            if resolve_from_payload
+            else filepath + ".part"
+        )
         truncated = False
         bytes_written = 0
 
@@ -652,6 +839,76 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         head_bytes = bytes(head)
         head_complete = bytes_written == len(head_bytes)
 
+        if resolve_from_payload:
+            resolved_ext = sniff_extension(head_bytes)
+            if resolved_ext and resolved_ext != inferred_ext:
+                logger.info(
+                    "Resolved payload of %s as %s from its leading bytes "
+                    "(declared Content-Type %r, URL suffix %r)",
+                    url,
+                    resolved_ext,
+                    content_type or "",
+                    inferred_ext,
+                )
+                # Re-book the file under its real type: the extension decides
+                # the target directory, the naming counter and the budget
+                # bucket alike, so all three are redone rather than patched.
+                # A PDF served by a CGI endpoint therefore lands in objects/
+                # under a .pdf name instead of in metadata/ as a .fcgi.
+                release_counter(name_key)
+                _BUDGET.refund(budget_type, work_id, bytes_written)
+                written_part = part_path
+
+                inferred_ext = resolved_ext
+                target_dir, log_msg, counts_as_success = _determine_target_directory(
+                    folder_path, inferred_ext, allowed_exts, save_disallowed
+                )
+                if target_dir is None:
+                    logger.info(log_msg)
+                    _safe_remove(written_part)
+                    return None
+                if log_msg:
+                    logger.info(log_msg)
+                _ensure_dir(target_dir)
+
+                name_key = _counter_key(inferred_ext, stem, prov_slug)
+                filepath = os.path.join(
+                    target_dir,
+                    _build_standardized_filename(inferred_ext, stem, prov_slug),
+                )
+                part_path = filepath + ".part"
+                budget_type = _budget_bucket(inferred_ext)
+
+                if not _BUDGET.add_bytes(
+                    provider, work_id, bytes_written, content_type=budget_type
+                ):
+                    logger.warning(
+                        "Download budget (%s) would be exceeded by %s (%d bytes); "
+                        "discarding.",
+                        budget_type,
+                        url,
+                        bytes_written,
+                    )
+                    release_counter(name_key)
+                    _safe_remove(written_part)
+                    return None
+
+                if not overwrite_existing() and os.path.exists(filepath):
+                    logger.info("File already exists, skipping: %s", filepath)
+                    _BUDGET.refund(budget_type, work_id, bytes_written)
+                    release_counter(name_key)
+                    _safe_remove(written_part)
+                    return filepath if counts_as_success else None
+
+                try:
+                    replace_with_retry(part_path, written_part)
+                except OSError as e:
+                    logger.error(
+                        "Failed to move %s to %s: %s", written_part, part_path, e
+                    )
+                    _discard_partial()
+                    return None
+
         is_valid, error_msg = _validate_file_magic_bytes(
             part_path, inferred_ext, head=head_bytes, complete=head_complete
         )
@@ -668,6 +925,10 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 logger.warning("%s; discarding: %s", error_msg, url)
                 _discard_partial()
                 return None
+
+        # The directory is created here rather than before streaming, so a
+        # provisional extension never leaves an empty directory behind.
+        _ensure_dir(target_dir)
 
         try:
             # A fully downloaded, fully validated multi-megabyte PDF is exactly
@@ -937,4 +1198,9 @@ def save_json(data: Any, folder_path: str, filename: str) -> str | None:
         return None
 
 
-__all__ = ["download_file", "save_json"]
+__all__ = [
+    "download_file",
+    "media_type_for_extension",
+    "save_json",
+    "sniff_extension",
+]

@@ -1,4 +1,4 @@
-# ChronoDownloader v1.27.0
+# ChronoDownloader v1.28.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -871,7 +871,8 @@ To adjust for slow providers, increase `delay_ms` and
 - `include_metadata`: save metadata JSON files
 - `allowed_object_extensions`: file extensions that count as
   retrievable content and land in `objects/`; an empty list admits
-  everything
+  everything. Matched against the extension resolved from the response
+  or the payload bytes (see Output Structure), not against the URL
 - `save_disallowed_to_metadata`: what to do with a file whose
   extension is not allowed (default `true`): `true` files it under
   `metadata/` without counting it as a successful download, `false`
@@ -1073,6 +1074,18 @@ downloaded_works/
 (`_image_001.jpg`). Non-image files get numeric suffixes when
 multiple exist (`_2.pdf`).
 
+**Extensions follow the payload, not the URL.** The response
+`Content-Type` decides the extension; when a server declares nothing
+usable (a bare `application/octet-stream`, or no type at all) and the
+URL suffix names an endpoint rather than a format -- a CGI script such
+as UB Heidelberg's `*.fcgi`, a servlet path -- the leading bytes are
+sniffed instead (PDF, EPUB and other zip containers, PNG, JPEG, TIFF,
+JP2). A whole-document PDF served by such an endpoint is therefore
+saved as `.pdf` in `objects/`, where the work's source documents
+belong, instead of under the endpoint's own suffix in `metadata/`.
+Only a payload that matches no known signature falls back to the URL
+suffix, and hence to the `allowed_object_extensions` routing below.
+
 ### Index File
 
 `index.csv` is a thread-safe ledger with one row per work, keyed by
@@ -1115,6 +1128,15 @@ Each work directory contains a `work.json` with input parameters,
 current status, all search candidates with fuzzy match scores,
 selection decision and reasoning, timestamps, and download
 summary.
+
+Manifest renderings add a `renderings` list, one entry per file
+obtained: the source `url`, the manifest-declared `declared_format`,
+the rendering `label`, the `saved_as` path relative to the work
+directory, and the `resolved_media_type` the payload turned out to
+be. A rendering saved under an extension resolved from the response
+no longer carries its origin in its filename, so this is where the
+provenance lives. Entries are keyed by URL and upserted, so a re-run
+neither duplicates nor drops them.
 
 ## Advanced Usage
 
@@ -1390,6 +1412,24 @@ a single baseline commit at v1.0.0 on 25 April 2026; version numbers before
 v1.0.0 do not exist.
 
 ## Changelog
+
+- **v1.28.0** (7 August 2026) -- Downloaded files are named after their
+  payload rather than their URL. A whole-document rendering served from a
+  CGI endpoint (UB Heidelberg answers `*.fcgi` with a complete PDF, and
+  other libraries have comparable endpoints) was saved under the script's
+  own suffix and, since that suffix is not an allowed object extension,
+  filed under `metadata/` -- so extension-based tooling downstream read
+  hundreds of megabytes of source PDF as something else entirely. The
+  extension now comes from the response `Content-Type`, falling back to
+  the leading bytes (PDF, EPUB and other zip containers, PNG, JPEG,
+  TIFF, JP2) whenever the server declares nothing usable and the URL
+  suffix names an endpoint rather than a format; such a document
+  consequently lands in `objects/` with the rest of the work's sources.
+  The source URL, declared format and resolved media type are recorded
+  under `renderings` in `work.json`, so nothing is lost to the rename.
+  Files already on disk are still recognized by the resume check --
+  under the endpoint suffix as before, and under the resolved extension
+  on later runs -- so no work is fetched twice.
 
 - **v1.27.0** (4 August 2026) -- A new `--images-only` flag makes page
   images reachable in one step. With the shipped defaults a manifest that

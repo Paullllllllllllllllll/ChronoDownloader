@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -666,3 +667,265 @@ class TestExistingFileSkipRouting:
                 "https://example.org/book.pdf", folder, "book"
             )
             assert second == first
+
+
+# ============================================================================
+# sniff_extension — payload type from the leading bytes
+# ============================================================================
+
+
+class TestSniffExtension:
+    """Magic-byte recognition for every payload type the tool retrieves."""
+
+    def test_recognizes_documents_and_images(self) -> None:
+        from api.core.download import sniff_extension
+
+        assert sniff_extension(b"%PDF-1.7\n%\xe2\xe3") == ".pdf"
+        assert sniff_extension(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8) == ".png"
+        assert sniff_extension(b"\xff\xd8\xff\xe0JFIF") == ".jpg"
+        assert sniff_extension(b"II*\x00\x08\x00") == ".tif"
+        assert sniff_extension(b"MM\x00*\x00\x00") == ".tif"
+        assert sniff_extension(b"\x00\x00\x00\x0cjP  \r\n\x87\n") == ".jp2"
+        assert sniff_extension(b"\xff\x4f\xff\x51\x00") == ".jp2"
+
+    def test_distinguishes_epub_from_plain_zip(self) -> None:
+        """Both are zips; only the EPUB names its media type in the first entry."""
+        from api.core.download import sniff_extension
+
+        epub = (
+            b"PK\x03\x04\x14\x00\x00\x00\x00\x00"
+            + b"\x00" * 16
+            + b"mimetypeapplication/epub+zip"
+        )
+        assert sniff_extension(epub) == ".epub"
+        assert sniff_extension(b"PK\x03\x04\x14\x00\x00\x00" + b"\x00" * 24) == ".zip"
+
+    def test_returns_empty_for_unknown_and_empty_payloads(self) -> None:
+        from api.core.download import sniff_extension
+
+        assert sniff_extension(b"") == ""
+        assert sniff_extension(b"not a recognizable payload at all") == ""
+
+
+# ============================================================================
+# Extension resolution and placement for endpoint-shaped URLs
+# ============================================================================
+
+_PLACEMENT_DL_CFG = {
+    "allowed_object_extensions": [".pdf", ".epub", ".zip", ".jpg", ".png"],
+    "save_disallowed_to_metadata": True,
+}
+
+# UB Heidelberg serves a whole-document PDF from a CGI endpoint; the shape,
+# not the host, is what matters here -- any provider's script endpoint behaves
+# the same way.
+_ENDPOINT_URL = "https://example.org/diglitData/pdf/cpg234.fcgi"
+
+_PDF_PAYLOAD = b"%PDF-1.7\n" + b"x" * 64
+
+
+def _dh_download(
+    url: str, folder: str, headers: dict[str, str], payload: bytes
+) -> tuple[str | None, MagicMock]:
+    """Run one mocked download and return its result plus the session mock."""
+    session = _dh_make_session(_dh_make_response(headers, payload))
+    dl_mod._BUDGET._exhausted = False
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch("api.core.download.get_download_config", return_value=_PLACEMENT_DL_CFG),
+    ):
+        return dl_mod.download_file(url, folder, "rendering_01"), session
+
+
+class TestPayloadTypeResolution:
+    """A document served from an endpoint URL must be saved under the payload's
+    own extension and filed with the work's objects, not as an unrecognized byte
+    stream in metadata/. Pre-fix the extension came from the URL path, so UB
+    Heidelberg's whole-document PDF landed in metadata/ as a ``.fcgi`` file and
+    every extension-based tool downstream misread it.
+    """
+
+    def test_content_type_header_decides_extension(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        folder = str(tmp_path / "work")
+        saved, _ = _dh_download(
+            _ENDPOINT_URL, folder, {"Content-Type": "application/pdf"}, _PDF_PAYLOAD
+        )
+        assert saved is not None
+        assert saved.endswith(".pdf")
+        assert os.path.dirname(saved) == os.path.join(folder, "objects")
+
+    def test_magic_bytes_resolve_a_generic_content_type(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        folder = str(tmp_path / "work")
+        saved, _ = _dh_download(
+            _ENDPOINT_URL,
+            folder,
+            {"Content-Type": "application/octet-stream"},
+            _PDF_PAYLOAD,
+        )
+        assert saved is not None
+        assert saved.endswith(".pdf")
+        assert os.path.dirname(saved) == os.path.join(folder, "objects")
+        assert not os.path.isdir(os.path.join(folder, "metadata"))
+
+    def test_magic_bytes_resolve_a_missing_content_type(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        folder = str(tmp_path / "work")
+        epub = (
+            b"PK\x03\x04\x14\x00\x00\x00\x00\x00"
+            + b"\x00" * 16
+            + b"mimetypeapplication/epub+zip"
+            + b"y" * 32
+        )
+        saved, _ = _dh_download(_ENDPOINT_URL, folder, {}, epub)
+        assert saved is not None
+        assert saved.endswith(".epub")
+        assert os.path.dirname(saved) == os.path.join(folder, "objects")
+
+    def test_declared_content_type_wins_over_the_payload_guess(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Sniffing is a fallback, not an override: a declared type is honored
+        (and the existing magic-byte validator still guards it)."""
+        folder = str(tmp_path / "work")
+        saved, _ = _dh_download(
+            _ENDPOINT_URL, folder, {"Content-Type": "image/png"}, _PDF_PAYLOAD
+        )
+        assert saved is not None
+        assert saved.endswith(".png")
+
+    def test_url_suffix_still_wins_when_it_names_a_format(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """An ``application/octet-stream`` PDF at a ``.pdf`` URL keeps the URL's
+        extension; only endpoint-shaped suffixes are second-guessed."""
+        folder = str(tmp_path / "work")
+        saved, _ = _dh_download(
+            "https://example.org/books/cpg234.pdf",
+            folder,
+            {"Content-Type": "application/octet-stream"},
+            _PDF_PAYLOAD,
+        )
+        assert saved is not None
+        assert saved.endswith(".pdf")
+
+    def test_unresolvable_payload_keeps_the_previous_behavior(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """When neither the header nor the bytes settle the type, the URL suffix
+        stands and the file is filed under metadata/ as before."""
+        folder = str(tmp_path / "work")
+        saved, _ = _dh_download(
+            _ENDPOINT_URL,
+            folder,
+            {"Content-Type": "application/octet-stream"},
+            b"\x01\x02\x03 nothing recognizable " + b"z" * 32,
+        )
+        assert saved is None
+        metadata_dir = os.path.join(folder, "metadata")
+        assert os.listdir(metadata_dir) == ["rendering_01_unknown.fcgi"]
+
+    def test_rerun_does_not_refetch_a_resolved_file(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Resume: the skip check must find the file under the extension a
+        previous run resolved, not only under the endpoint suffix."""
+        folder = str(tmp_path / "work")
+        first, _ = _dh_download(
+            _ENDPOINT_URL,
+            folder,
+            {"Content-Type": "application/octet-stream"},
+            _PDF_PAYLOAD,
+        )
+        assert first is not None
+
+        reset_counters()
+        second, session = _dh_download(
+            _ENDPOINT_URL,
+            folder,
+            {"Content-Type": "application/octet-stream"},
+            _PDF_PAYLOAD,
+        )
+        assert second == first
+        session.get.assert_not_called()
+        assert len(os.listdir(os.path.join(folder, "objects"))) == 1
+
+    def test_legacy_endpoint_suffixed_file_is_still_recognized(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Backward compatibility: a file saved by an older version under the
+        endpoint suffix in metadata/ must not be downloaded again."""
+        folder = str(tmp_path / "work")
+        metadata_dir = os.path.join(folder, "metadata")
+        os.makedirs(metadata_dir, exist_ok=True)
+        legacy = os.path.join(metadata_dir, "rendering_01_unknown.fcgi")
+        with open(legacy, "wb") as f:
+            f.write(_PDF_PAYLOAD)
+
+        saved, session = _dh_download(
+            _ENDPOINT_URL,
+            folder,
+            {"Content-Type": "application/octet-stream"},
+            _PDF_PAYLOAD,
+        )
+        # Routed to metadata/, so not a successful object download -- exactly as
+        # the pre-existing disallowed-extension contract requires.
+        assert saved is None
+        session.get.assert_not_called()
+        assert os.path.exists(legacy)
+
+
+class TestRenderingPlacement:
+    """End to end for the reported defect: a manifest rendering served by a CGI
+    endpoint is a whole-document derivative, so it belongs with the work's
+    objects under its payload extension -- not in metadata/ as a ``.fcgi``.
+    """
+
+    def test_endpoint_rendering_lands_in_objects_as_a_pdf(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        from api.iiif._renderings import download_iiif_renderings
+
+        folder = str(tmp_path / "work")
+        os.makedirs(folder, exist_ok=True)
+        manifest = {
+            "rendering": {
+                "@id": _ENDPOINT_URL,
+                "format": "application/pdf",
+                "label": "Download as PDF",
+            }
+        }
+        session = _dh_make_session(
+            _dh_make_response(
+                {"Content-Type": "application/octet-stream"}, _PDF_PAYLOAD
+            )
+        )
+
+        dl_mod._BUDGET._exhausted = False
+        with (
+            patch.object(dl_mod, "get_session", return_value=session),
+            patch(
+                "api.core.download.get_download_config",
+                return_value=_PLACEMENT_DL_CFG,
+            ),
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+        ):
+            assert download_iiif_renderings(manifest, folder) == 1
+
+        objects = os.listdir(os.path.join(folder, "objects"))
+        assert len(objects) == 1
+        assert objects[0].endswith(".pdf")
+        assert not os.path.isdir(os.path.join(folder, "metadata"))
+
+        with open(os.path.join(folder, "work.json"), encoding="utf-8") as f:
+            recorded = json.load(f)["renderings"]
+        assert recorded[0]["url"] == _ENDPOINT_URL
+        assert recorded[0]["resolved_media_type"] == "application/pdf"
+        assert recorded[0]["saved_as"] == f"objects/{objects[0]}"

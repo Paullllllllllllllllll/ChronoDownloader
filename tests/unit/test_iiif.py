@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -1594,3 +1596,77 @@ class TestMalformedRenderingEntries:
             assert download_iiif_renderings(manifest, "/out") == 1
 
         assert mock_dl.call_args_list[0].args[0] == "https://example.org/book.pdf"
+
+
+class TestRenderingProvenance:
+    """A rendering saved under an extension resolved from the response no longer
+    carries its origin in its filename, so the URL, the manifest-declared
+    format, the resolved media type and the saved path are recorded under
+    ``renderings`` in the work's ``work.json``.
+    """
+
+    _MANIFEST = {
+        "rendering": {
+            "@id": "https://example.org/diglitData/pdf/cpg234.fcgi",
+            "format": "application/pdf",
+            "label": "Download as PDF",
+        }
+    }
+
+    @staticmethod
+    def _work_dir(tmp_path: Any) -> str:
+        work_dir = tmp_path / "work"
+        (work_dir / "objects").mkdir(parents=True)
+        (work_dir / "work.json").write_text(
+            json.dumps({"status": "pending"}), encoding="utf-8"
+        )
+        return str(work_dir)
+
+    def _run(self, work_dir: str, saved_name: str = "cpg234_unknown.pdf") -> int:
+        saved = os.path.join(work_dir, "objects", saved_name)
+        with (
+            patch(
+                "api.iiif._renderings.get_download_config",
+                return_value={"max_renderings_per_manifest": 1},
+            ),
+            patch("api.iiif._renderings.download_file", return_value=saved),
+        ):
+            return download_iiif_renderings(self._MANIFEST, work_dir)
+
+    @staticmethod
+    def _renderings(work_dir: str) -> list[dict[str, Any]]:
+        with open(os.path.join(work_dir, "work.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        recorded: list[dict[str, Any]] = meta["renderings"]
+        return recorded
+
+    def test_records_url_and_resolved_type(self, tmp_path: Any) -> None:
+        work_dir = self._work_dir(tmp_path)
+        assert self._run(work_dir) == 1
+
+        recorded = self._renderings(work_dir)
+        assert len(recorded) == 1
+        assert recorded[0] == {
+            "url": "https://example.org/diglitData/pdf/cpg234.fcgi",
+            "declared_format": "application/pdf",
+            "label": "Download as PDF",
+            "saved_as": "objects/cpg234_unknown.pdf",
+            "resolved_media_type": "application/pdf",
+        }
+
+    def test_preserves_the_rest_of_work_json(self, tmp_path: Any) -> None:
+        work_dir = self._work_dir(tmp_path)
+        self._run(work_dir)
+        with open(os.path.join(work_dir, "work.json"), encoding="utf-8") as f:
+            assert json.load(f)["status"] == "pending"
+
+    def test_rerun_upserts_instead_of_duplicating(self, tmp_path: Any) -> None:
+        work_dir = self._work_dir(tmp_path)
+        self._run(work_dir)
+        self._run(work_dir)
+        assert len(self._renderings(work_dir)) == 1
+
+    def test_missing_work_directory_is_not_an_error(self) -> None:
+        """Heavily mocked callers pass a directory that does not exist; the
+        download result must not depend on the provenance write."""
+        assert self._run("/nonexistent_work_dir") == 1

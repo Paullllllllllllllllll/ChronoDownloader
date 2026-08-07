@@ -5,15 +5,24 @@ Downloads alternate-format files referenced in a IIIF manifest's top-level
 by `config.download.download_manifest_renderings`,
 `config.download.rendering_mime_whitelist`, and
 `config.download.max_renderings_per_manifest`.
+
+A rendering is a whole-document derivative, so it lands in the work's
+`objects/` directory under the extension of its actual payload (see
+`api.core.download`), and its source URL and resolved media type are recorded
+under `renderings` in the work's `work.json`.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
+from ..core.atomic import atomic_write_json
 from ..core.config import DEFAULT_MAX_RENDERINGS_PER_MANIFEST, get_download_config
-from ..core.download import download_file
+from ..core.download import download_file, media_type_for_extension
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +200,69 @@ def select_renderings(
     return selected
 
 
+def _provenance_record(
+    rendering: dict[str, Any], saved_path: str, folder_path: str
+) -> dict[str, Any]:
+    """Describe one downloaded rendering for the work's metadata."""
+    ext = Path(saved_path).suffix.lower()
+    try:
+        relative = os.path.relpath(saved_path, folder_path).replace(os.sep, "/")
+    except ValueError:
+        relative = os.path.basename(saved_path)
+    return {
+        "url": rendering["url"],
+        "declared_format": rendering.get("format") or None,
+        "label": rendering.get("label"),
+        "saved_as": relative,
+        "resolved_media_type": media_type_for_extension(ext),
+    }
+
+
+def _record_rendering_provenance(
+    folder_path: str, records: list[dict[str, Any]]
+) -> None:
+    """Merge rendering provenance into the work's ``work.json``.
+
+    The saved filename follows the payload type rather than the URL, so a
+    rendering fetched from a CGI endpoint no longer carries its origin in its
+    name. Recording the source URL, the manifest-declared format, the resolved
+    media type and the saved path keeps that provenance. Existing entries are
+    upserted by URL, so a re-run neither duplicates nor loses them.
+
+    Best-effort, and only for a work directory that exists: a metadata write
+    must never fail a download that already succeeded.
+    """
+    if not folder_path or not os.path.isdir(folder_path):
+        return
+
+    work_json_path = os.path.join(folder_path, "work.json")
+    try:
+        meta: dict[str, Any] = {}
+        if os.path.exists(work_json_path):
+            with open(work_json_path, encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                meta = loaded
+
+        existing = meta.get("renderings")
+        merged: dict[str, dict[str, Any]] = {}
+        if isinstance(existing, list):
+            for entry in existing:
+                if isinstance(entry, dict) and entry.get("url"):
+                    merged[str(entry["url"])] = entry
+        for record in records:
+            merged[str(record["url"])] = record
+
+        meta["renderings"] = list(merged.values())
+        atomic_write_json(work_json_path, meta)
+    except Exception:
+        logger.warning(
+            "Failed to record rendering provenance in %s",
+            work_json_path,
+            exc_info=True,
+        )
+
+
 def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     """Download files referenced in IIIF manifest-level 'rendering' entries.
 
@@ -224,9 +296,15 @@ def download_iiif_renderings(manifest: dict[str, Any], folder_path: str) -> int:
     # downloading every page image instead of the one available PDF. The list
     # is manifest-supplied, so cap the attempts as well.
     count = 0
+    records: list[dict[str, Any]] = []
     for r in selected[:_MAX_RENDERING_ATTEMPTS]:
         if count >= limit:
             break
-        if download_file(r["url"], folder_path, f"rendering_{count + 1:02d}"):
+        saved = download_file(r["url"], folder_path, f"rendering_{count + 1:02d}")
+        if saved:
             count += 1
+            records.append(_provenance_record(r, saved, folder_path))
+
+    if records:
+        _record_rendering_provenance(folder_path, records)
     return count
