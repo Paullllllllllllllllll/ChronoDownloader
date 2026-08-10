@@ -490,6 +490,18 @@ class TestCredentialDetection:
         for name in ("access_token", "clientSecret", "sig", "url-signature", "pwd"):
             assert request_carries_credential("https://x.example/a", {name: "v"}), name
 
+    def test_europeana_wskey_is_a_credential(self) -> None:
+        # Regression: "wskey" matches no generic suffix and slipped past the
+        # v1.26.0 guard, so Europeana requests were replayed insecurely.
+        assert request_carries_credential("https://x.example/m?wskey=s3cr3t")
+        assert request_carries_credential("https://x.example/m", {"wskey": "s3cr3t"})
+
+    def test_ddb_oauth_consumer_key_is_a_credential(self) -> None:
+        # Regression: DDB's "oauth_consumer_key" also matched nothing.
+        assert request_carries_credential(
+            "https://x.example/a", {"oauth_consumer_key": "s3cr3t"}
+        )
+
     def test_authorization_and_api_key_headers_are_credentials(self) -> None:
         assert request_carries_credential(
             "https://x.example/a", None, {"Authorization": "Bearer t"}
@@ -509,6 +521,31 @@ class TestCredentialDetection:
         assert not request_carries_credential(
             "https://x.example/api", {"key": ""}, {"Authorization": ""}
         )
+
+
+class TestRedactUrl:
+    """Credential query values must not reach the log in cleartext."""
+
+    def test_wskey_value_is_masked(self) -> None:
+        from api.core.network import redact_url
+
+        redacted = redact_url(
+            "https://iiif.europeana.eu/presentation/1/manifest?wskey=SECRET&fmt=3"
+        )
+        assert "SECRET" not in redacted
+        assert "fmt=3" in redacted
+
+    def test_plain_url_is_returned_unchanged(self) -> None:
+        from api.core.network import redact_url
+
+        url = "https://x.example/api?q=cookbook&page=2"
+        assert redact_url(url) == url
+
+    def test_url_without_query_is_returned_unchanged(self) -> None:
+        from api.core.network import redact_url
+
+        url = "https://x.example/iiif/manifest.json"
+        assert redact_url(url) == url
 
 
 class TestInsecureRetryIsSuppressedForCredentialedRequests:

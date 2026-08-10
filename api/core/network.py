@@ -19,7 +19,7 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
 from typing import Any, cast, get_args
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 import urllib3
@@ -289,6 +289,9 @@ _CREDENTIAL_PARAM_NAMES = frozenset(
         "sig",
         "signature",
         "sessionid",
+        # Europeana authenticates every API and manifest request with "wskey";
+        # it matches no generic suffix, so it must be named outright.
+        "wskey",
     }
 )
 
@@ -299,6 +302,9 @@ _CREDENTIAL_NAME_SUFFIXES = (
     "password",
     "signature",
     "credential",
+    # DDB's "oauth_consumer_key" normalizes to "oauthconsumerkey"; the suffix
+    # also covers other OAuth-1-style vendor spellings.
+    "consumerkey",
 )
 
 _CREDENTIAL_HEADER_NAMES = frozenset(
@@ -363,6 +369,33 @@ def request_carries_credential(
         if normalized in _CREDENTIAL_HEADER_NAMES or _is_credential_name(str(name)):
             return True
     return False
+
+
+def redact_url(url: str) -> str:
+    """Return ``url`` with credential-looking query values masked for logging.
+
+    Providers such as Europeana bake the API key into the request URL itself
+    (``...?wskey=...``), so every retry or failure line that prints the full
+    URL would write the key to the run log in cleartext. Detection reuses
+    ``_is_credential_name``; non-credential URLs come back unchanged (and
+    unre-encoded, so ordinary log lines stay byte-identical to the request).
+    """
+    try:
+        parsed = urlparse(url)
+        if not parsed.query:
+            return url
+        items = parse_qsl(parsed.query, keep_blank_values=True)
+        if not any(_is_credential_name(name) for name, _ in items):
+            return url
+        masked = [
+            (name, "***" if _is_credential_name(name) else value)
+            for name, value in items
+        ]
+        return urlunparse(parsed._replace(query=urlencode(masked)))
+    except Exception:
+        # A URL too malformed to parse cannot leak a parseable key either;
+        # logging must never fail because redaction did.
+        return url
 
 
 # Per-provider circuit breakers
@@ -1203,6 +1236,9 @@ def make_request(
     provider = get_provider_for_url(url)
     session = get_session(provider)
     net = get_network_config(provider)
+    # Log lines print the redacted form only: the URL may carry the API key
+    # in its query string (see redact_url).
+    log_url = redact_url(url)
 
     # Check circuit breaker before making any requests
     cb = get_circuit_breaker(provider)
@@ -1212,7 +1248,7 @@ def make_request(
             "Circuit breaker OPEN for %s; skipping request (retry in %.0fs): %s",
             provider or "unknown",
             remaining,
-            url,
+            log_url,
         )
         return None
 
@@ -1291,7 +1327,7 @@ def make_request(
 
                 logger.warning(
                     "429 Too Many Requests for %s; sleeping %.1fs (attempt %d/%d)",
-                    url,
+                    log_url,
                     sleep_s,
                     attempt,
                     max_attempts,
@@ -1311,7 +1347,7 @@ def make_request(
                 logger.warning(
                     "%s for %s; sleeping %.1fs (attempt %d/%d)",
                     resp.status_code,
-                    url,
+                    log_url,
                     sleep_s,
                     attempt,
                     max_attempts,
@@ -1327,7 +1363,9 @@ def make_request(
             if resp.status_code in NON_RETRYABLE_STATUSES:
                 record_client_error(cb, resp.status_code, provider or "unknown")
                 logger.warning(
-                    "Non-retryable HTTP %s for %s; not retrying", resp.status_code, url
+                    "Non-retryable HTTP %s for %s; not retrying",
+                    resp.status_code,
+                    log_url,
                 )
                 return None
 
@@ -1343,7 +1381,7 @@ def make_request(
                 try:
                     return cast(dict[Any, Any], resp.json())
                 except json.JSONDecodeError as e:
-                    logger.error("JSON decode error for %s: %s", url, e)
+                    logger.error("JSON decode error for %s: %s", log_url, e)
                     return None
 
             if any(t in content_type for t in ("text/", "xml", "html")):
@@ -1362,14 +1400,14 @@ def make_request(
                 )
                 logger.warning(
                     "Timeout for %s; sleeping %.1fs (attempt %d/%d)",
-                    url,
+                    log_url,
                     sleep_s,
                     attempt,
                     attempt_cap,
                 )
                 time.sleep(sleep_s)
                 continue
-            logger.error("Request timed out: %s", url)
+            logger.error("Request timed out: %s", log_url)
             if cb:
                 cb.record_failure(provider or "unknown")
             return None
@@ -1381,7 +1419,7 @@ def make_request(
             # is not the one at fault: skip both the backoff budget and the
             # breaker so one bad item's metadata does not poison the rest.
             if isinstance(e, INVALID_URL_ERRORS):
-                logger.error("Invalid URL %s: %s; not retrying", url, e)
+                logger.error("Invalid URL %s: %s; not retrying", log_url, e)
                 return None
 
             # Handle DNS/Name resolution errors
@@ -1402,7 +1440,7 @@ def make_request(
                     logger.warning(
                         "Name resolution error for %s: %s; dns_retry=true, sleeping "
                         "%.1fs (attempt %d/%d)",
-                        url,
+                        log_url,
                         e,
                         sleep_s,
                         attempt,
@@ -1410,7 +1448,9 @@ def make_request(
                     )
                     time.sleep(sleep_s)
                     continue
-                logger.warning("Name resolution error for %s: %s; not retrying", url, e)
+                logger.warning(
+                    "Name resolution error for %s: %s; not retrying", log_url, e
+                )
                 # A host that does not resolve is a provider-level outage, not
                 # a bad URL: feed the breaker so the rest of the run stops
                 # re-dialling a dead hostname once per work.
@@ -1431,7 +1471,7 @@ def make_request(
                     logger.warning(
                         "SSL error (insecure retry already used) for %s: %s; "
                         "not retrying",
-                        url,
+                        log_url,
                         e,
                     )
                     # Like the DNS branch above: a handshake this client can
@@ -1448,14 +1488,14 @@ def make_request(
                             "SSL verify failed for %s; insecure retry suppressed "
                             "for provider %s because the request carries a "
                             "credential. Failing as if ssl_error_policy=fail.",
-                            url,
+                            log_url,
                             provider or "unknown",
                         )
                     else:
                         logger.warning(
                             "SSL verify failed for %s; retrying once with "
                             "verify=False due to policy.",
-                            url,
+                            log_url,
                         )
                         verify = False
                         insecure_retry_used = True
@@ -1463,7 +1503,7 @@ def make_request(
 
                 logger.warning(
                     "SSL certificate verification error for %s: %s; not retrying",
-                    url,
+                    log_url,
                     e,
                 )
                 if cb:
@@ -1480,7 +1520,7 @@ def make_request(
                 )
                 logger.warning(
                     "Request error for %s: %s; sleeping %.1fs (attempt %d/%d)",
-                    url,
+                    log_url,
                     e,
                     sleep_s,
                     attempt,
@@ -1489,7 +1529,7 @@ def make_request(
                 time.sleep(sleep_s)
                 continue
 
-            logger.error("Request failed for %s: %s", url, e)
+            logger.error("Request failed for %s: %s", log_url, e)
             if cb:
                 cb.record_failure(provider or "unknown")
             return None
@@ -1499,7 +1539,7 @@ def make_request(
     if cb and (hit_rate_limit or hit_server_error):
         cb.record_failure(provider or "unknown")
 
-    logger.error("Giving up after %d attempts for %s", max_attempts, url)
+    logger.error("Giving up after %d attempts for %s", max_attempts, log_url)
     return None
 
 
