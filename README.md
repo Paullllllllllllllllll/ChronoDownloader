@@ -1,4 +1,4 @@
-# ChronoDownloader v1.29.1
+# ChronoDownloader v1.30.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1416,6 +1416,13 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.30.0** (10 August 2026) -- The shared IIIF strategy
+  `download_iiif_manifest_and_images` gains keyword-only `manifest` and
+  `manifest_filename` parameters, and the Gallica, MDZ, Polona, and DDB
+  connectors now delegate their duplicated manifest-renderings-images
+  blocks to it (Europeana, DPLA, and LOC keep provider-specific fallback
+  chains); the production-dead `try_pdf_first_then_images` strategy is
+  removed along with its export and tests.
 - **v1.29.1** (10 August 2026) -- The test suite is pinned to the tracked
   example configuration via `CHRONO_CONFIG_PATH`, so tests no longer load a
   developer's local `config.json`; a real `deferred.state_file` setting
