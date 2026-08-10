@@ -349,6 +349,14 @@ class DownloadScheduler:
         with self._lock:
             self._pending_count += 1
 
+        # Notify before submitting: a short task could otherwise finish and
+        # emit its on_complete line before this on_submit line was printed.
+        if self._on_submit:
+            try:
+                self._on_submit(task)
+            except Exception as e:
+                logger.warning("on_submit callback error: %s", e)
+
         try:
             future = self._executor.submit(self._run_task, task, download_fn)
         except Exception:
@@ -358,12 +366,6 @@ class DownloadScheduler:
 
         with self._lock:
             self._futures[future] = task
-
-        if self._on_submit:
-            try:
-                self._on_submit(task)
-            except Exception as e:
-                logger.warning("on_submit callback error: %s", e)
 
         logger.debug(
             "Submitted download task for '%s' from %s", task.title, task.provider_key
@@ -542,6 +544,7 @@ class DownloadScheduler:
         self._shutdown_event.set()
 
         if self._executor:
+            timed_out = False
             pending = self.pending_count
             if pending > 0:
                 logger.info(
@@ -560,6 +563,7 @@ class DownloadScheduler:
                         timeout,
                         self.pending_count,
                     )
+                    timed_out = True
                     self._executor.shutdown(wait=False, cancel_futures=True)
                     # Cancelled queued futures never enter _run_task, so their
                     # pending count would otherwise leak; reclaim it here,
@@ -578,15 +582,27 @@ class DownloadScheduler:
             with self._lock:
                 self._futures.clear()
             self._executor = None
-            if get_active_semaphore_manager() is self._semaphores:
+            # Only unregister on a clean shutdown: after a timeout the
+            # in-flight workers are still downloading, and clearing the active
+            # manager would let the pipeline's fallback path run them without
+            # the per-provider concurrency caps. Their threads hold the last
+            # reference, so the manager is collected once they finish.
+            if not timed_out and get_active_semaphore_manager() is self._semaphores:
                 _set_active_semaphore_manager(None)
+
+            # Snapshot the counters under the lock, as every other reader does;
+            # a worker finishing during shutdown otherwise raced this read.
+            with self._lock:
+                completed = self._completed_count
+                succeeded = self._success_count
+                failed = self._failure_count
 
             logger.info(
                 "Download scheduler shut down. Stats: %d completed, %d succeeded, "
                 "%d failed",
-                self._completed_count,
-                self._success_count,
-                self._failure_count,
+                completed,
+                succeeded,
+                failed,
             )
 
     def get_stats(self) -> dict[str, int]:

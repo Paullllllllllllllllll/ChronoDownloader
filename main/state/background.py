@@ -391,13 +391,16 @@ class BackgroundRetryScheduler:
 
                 return RETRY_SUCCEEDED
             else:
-                # Download failed but not due to quota
+                # Download failed but not due to quota. The failure counts
+                # towards get_stats() whichever way mark_retrying goes: the
+                # run reports RETRY_FAILED either way, and leaving the stat
+                # untouched on a retryable failure made the two surfaces
+                # disagree. Only the callback stays gated on final failure.
                 can_retry = self._queue.mark_retrying(item.id) if self._queue else False
-                if not can_retry:
-                    with self._stats_lock:
-                        self._stats["retries_failed"] += 1
-                    if self._on_retry_failure:
-                        self._on_retry_failure(item, "Max retries exceeded")
+                with self._stats_lock:
+                    self._stats["retries_failed"] += 1
+                if not can_retry and self._on_retry_failure:
+                    self._on_retry_failure(item, "Max retries exceeded")
                 return RETRY_FAILED
 
         except QuotaDeferredException as qde:
@@ -406,7 +409,13 @@ class BackgroundRetryScheduler:
                 self._stats["retries_redeferred"] += 1
 
             if self._queue:
-                self._queue.mark_retrying(
+                # Push the reset time forward WITHOUT consuming retry budget,
+                # mirroring the local quota postpone path above. mark_retrying
+                # would burn a retry per re-deferral and, once max_retries was
+                # reached, flip the item to "failed" while this function still
+                # reported it postponed -- is_ready_for_retry only picks up
+                # pending/retrying items, so it was never retried again.
+                self._queue.update_reset_time(
                     item.id, qde.reset_time or self._estimate_reset_time(provider_key)
                 )
             logger.info(
@@ -417,11 +426,12 @@ class BackgroundRetryScheduler:
         except Exception as e:
             logger.exception("Error retrying deferred download '%s': %s", item.title, e)
             can_retry = self._queue.mark_retrying(item.id) if self._queue else False
-            if not can_retry:
-                with self._stats_lock:
-                    self._stats["retries_failed"] += 1
-                if self._on_retry_failure:
-                    self._on_retry_failure(item, str(e))
+            # Counted unconditionally for the same reason as the non-quota
+            # failure branch above; the callback stays gated on final failure.
+            with self._stats_lock:
+                self._stats["retries_failed"] += 1
+            if not can_retry and self._on_retry_failure:
+                self._on_retry_failure(item, str(e))
             return RETRY_FAILED
 
     def _reconstruct_search_result(self, item: DeferredItem) -> SearchResult | None:

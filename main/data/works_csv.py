@@ -233,6 +233,14 @@ def _backup_csv(csv_path: str) -> str:
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = f"{csv_path}.backup_{timestamp}"
+    # The stamp only resolves to the second, so two backups taken in the same
+    # second collided and copy2 silently overwrote the earlier one. Fall back
+    # to a numbered suffix rather than destroying a snapshot.
+    if os.path.exists(backup_path):
+        counter = 2
+        while os.path.exists(f"{backup_path}_{counter}"):
+            counter += 1
+        backup_path = f"{backup_path}_{counter}"
     shutil.copy2(csv_path, backup_path)
     return backup_path
 
@@ -320,6 +328,28 @@ def _sniff_lineterminator(csv_path: str) -> str:
     return "\r\n" if first_line.endswith(b"\r\n") else "\n"
 
 
+def _resolve_row_index(df: pd.DataFrame, entry_id: str) -> Any | None:
+    """Return the index label of the row carrying ``entry_id``, else None.
+
+    Hand-maintained sampling frames do contain repeated entry_ids, and a
+    boolean-mask write fanned a single download's status, link, provider and
+    timestamp out over every duplicate -- marking editions completed that were
+    never fetched. Only the first match is written; the collision is logged so
+    the ledger owner can de-duplicate the source.
+    """
+    matches = df.index[df[ENTRY_ID_COL].astype(str) == str(entry_id)]
+    if len(matches) == 0:
+        logger.warning("Entry ID %s not found in CSV", entry_id)
+        return None
+    if len(matches) > 1:
+        logger.warning(
+            "Entry ID %s appears %d times in CSV; updating only the first row.",
+            entry_id,
+            len(matches),
+        )
+    return matches[0]
+
+
 def _save_csv_and_update_cache(df: pd.DataFrame, csv_path: str) -> None:
     _save_csv(df, csv_path, _csv_terminator.get(csv_path, "\n"))
     _csv_cache[csv_path] = (df, _csv_stat(csv_path))
@@ -349,9 +379,8 @@ def mark_success(
             df = _load_csv_for_update(csv_path)
 
             # Find the row
-            mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
-            if not mask.any():
-                logger.warning("Entry ID %s not found in CSV", entry_id)
+            row = _resolve_row_index(df, entry_id)
+            if row is None:
                 return False
 
             # Ensure columns have compatible dtype for mixed values. The
@@ -364,19 +393,19 @@ def mark_success(
                 df[LINK_COL] = df[LINK_COL].astype(object)
 
             # Update status and link
-            df.loc[mask, STATUS_COL] = True
-            df.loc[mask, LINK_COL] = item_url
+            df.loc[row, STATUS_COL] = True
+            df.loc[row, LINK_COL] = item_url
 
             # Add provider if column exists or create it
             if provider:
                 if PROVIDER_COL not in df.columns:
                     df[PROVIDER_COL] = pd.NA
-                df.loc[mask, PROVIDER_COL] = provider
+                df.loc[row, PROVIDER_COL] = provider
 
             # Add timestamp
             if TIMESTAMP_COL not in df.columns:
                 df[TIMESTAMP_COL] = pd.NA
-            df.loc[mask, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
+            df.loc[row, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
 
             _save_csv_and_update_cache(df, csv_path)
             logger.debug("Marked entry %s as success", entry_id)
@@ -414,9 +443,8 @@ def mark_failed(
             df = _load_csv_for_update(csv_path)
 
             # Find the row
-            mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
-            if not mask.any():
-                logger.warning("Entry ID %s not found in CSV", entry_id)
+            row = _resolve_row_index(df, entry_id)
+            if row is None:
                 return False
 
             # Ensure column has compatible dtype for mixed values, skipping the
@@ -425,12 +453,12 @@ def mark_failed(
                 df[STATUS_COL] = df[STATUS_COL].astype(object)
 
             # Update status
-            df.loc[mask, STATUS_COL] = False
+            df.loc[row, STATUS_COL] = False
 
             # Add timestamp
             if TIMESTAMP_COL not in df.columns:
                 df[TIMESTAMP_COL] = pd.NA
-            df.loc[mask, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
+            df.loc[row, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
 
             _save_csv_and_update_cache(df, csv_path)
 
@@ -473,9 +501,8 @@ def mark_deferred(
             df = _load_csv_for_update(csv_path)
 
             # Find the row
-            mask = df[ENTRY_ID_COL].astype(str) == str(entry_id)
-            if not mask.any():
-                logger.warning("Entry ID %s not found in CSV", entry_id)
+            row = _resolve_row_index(df, entry_id)
+            if row is None:
                 return False
 
             # Ensure column can hold the string status value, skipping the cast
@@ -483,11 +510,11 @@ def mark_deferred(
             if STATUS_COL in df.columns and df[STATUS_COL].dtype != object:
                 df[STATUS_COL] = df[STATUS_COL].astype(object)
 
-            df.loc[mask, STATUS_COL] = "deferred"
+            df.loc[row, STATUS_COL] = "deferred"
 
             if TIMESTAMP_COL not in df.columns:
                 df[TIMESTAMP_COL] = pd.NA
-            df.loc[mask, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
+            df.loc[row, TIMESTAMP_COL] = datetime.now(UTC).isoformat()
 
             _save_csv_and_update_cache(df, csv_path)
             logger.debug("Marked entry %s as deferred", entry_id)

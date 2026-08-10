@@ -81,9 +81,21 @@ def _resolve_quota_limits(provider_key: str) -> tuple[int, int]:
             get_provider_setting(provider_key, "quota_reset_wait_hours", 24),
         )
 
+    resolved_hours = _coerce_int(reset_hours, 24, provider_key, "reset_hours")
+    if resolved_hours < 1:
+        # A window of zero (or negative) hours makes _check_and_reset_period
+        # fire on every can_download call, so downloads_used is wiped before
+        # it can ever reach daily_limit and the quota is never enforced.
+        logger.warning(
+            "Non-positive reset_hours for provider %s (%r); clamping to 1.",
+            provider_key,
+            reset_hours,
+        )
+        resolved_hours = 1
+
     return (
         _coerce_int(daily_limit, 10, provider_key, "daily_limit"),
-        _coerce_int(reset_hours, 24, provider_key, "reset_hours"),
+        resolved_hours,
     )
 
 

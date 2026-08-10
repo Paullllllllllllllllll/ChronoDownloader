@@ -394,6 +394,21 @@ class InteractiveWorkflow:
         ConsoleUI.print_success(f"Configured {len(urls)} IIIF manifest(s) for download")
         return True
 
+    @staticmethod
+    def _append_collection(csv_file: Path, collections: list[tuple[str, str]]) -> None:
+        """Add ``csv_file`` to ``collections``, skipping unreadable files.
+
+        An unparseable CSV used to be dropped without a trace, so a typo in a
+        single file surfaced as the bare "No predefined collections found."
+        message. The file is still skipped, but now it is named.
+        """
+        try:
+            df = pd.read_csv(csv_file, encoding="utf-8")
+        except Exception as e:
+            logger.warning("Skipping unreadable collection CSV %s: %s", csv_file, e)
+            return
+        collections.append((str(csv_file), f"{csv_file.stem} ({len(df)} works)"))
+
     def configure_collection_mode(self) -> bool:
         """Configure predefined collection mode.
 
@@ -402,29 +417,17 @@ class InteractiveWorkflow:
         """
         # Look for predefined collections (CSV files with special names or in a
         # collections folder)
-        collections = []
+        collections: list[tuple[str, str]] = []
 
         # Check root directory for sample files
         for csv_file in Path(".").glob("*.csv"):
-            name = csv_file.stem
-            try:
-                df = pd.read_csv(csv_file, encoding="utf-8")
-                count = len(df)
-                collections.append((str(csv_file), f"{name} ({count} works)"))
-            except Exception:
-                continue
+            self._append_collection(csv_file, collections)
 
         # Check for collections directory
         collections_dir = Path("collections")
         if collections_dir.exists():
             for csv_file in collections_dir.glob("*.csv"):
-                name = csv_file.stem
-                try:
-                    df = pd.read_csv(csv_file, encoding="utf-8")
-                    count = len(df)
-                    collections.append((str(csv_file), f"{name} ({count} works)"))
-                except Exception:
-                    continue
+                self._append_collection(csv_file, collections)
 
         if not collections:
             ConsoleUI.print_warning("No predefined collections found.")
@@ -452,7 +455,15 @@ class InteractiveWorkflow:
         general = get_general_config()
         default_output = general.get("default_output_dir", "downloaded_works")
 
-        output_dir = ConsoleUI.prompt_input("Output directory", default=default_output)
+        # "b" is the wizard's back token everywhere else; without honoring it
+        # here the documented back-chain dead-ended at this step, because the
+        # only way back out of "options" leads through "output".
+        output_dir = ConsoleUI.prompt_input(
+            "Output directory ([b] to go back)", default=default_output
+        )
+
+        if output_dir.strip().lower() == "b":
+            return False
 
         if not output_dir:
             output_dir = default_output

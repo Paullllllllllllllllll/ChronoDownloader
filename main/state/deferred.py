@@ -350,10 +350,22 @@ class DeferredQueue:
                     logger.debug(
                         "Item already in queue: %s from %s", title, provider_name
                     )
-                    # Update reset time if newer
+                    # Update reset time if newer. A failed save is propagated
+                    # like everywhere else in this class: the caller must not
+                    # treat an unpersisted change as deferred, so the in-memory
+                    # field is rolled back and None returned.
                     if reset_time:
+                        previous = existing.reset_time
                         existing.reset_time = reset_time.isoformat()
-                        self._save_queue()
+                        if not self._save_queue():
+                            existing.reset_time = previous
+                            logger.error(
+                                "Could not persist the updated reset time for "
+                                "'%s'; the queued entry keeps its earlier "
+                                "reset time.",
+                                title,
+                            )
+                            return None
                     return existing
 
             item = DeferredItem(

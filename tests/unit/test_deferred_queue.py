@@ -452,6 +452,41 @@ class TestDeferredQueueOperations:
         assert item2.id == item1.id
         assert len(queue) == 1
 
+    def test_dedupe_path_propagates_save_failure(self, queue: Any) -> None:
+        """A failed save on the dedupe path is reported, not swallowed (BUG-6).
+
+        Every other add path rolls back and returns None when the queue cannot
+        be persisted; the dedupe branch discarded the result and left the
+        in-memory reset time diverged from the file on disk.
+        """
+        item = queue.add(
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+        )
+        original_reset = item.reset_time
+
+        queue._save_queue = lambda: False
+        result = queue.add(
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="test",
+            provider_name="Test",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+            reset_time=datetime.now(UTC) + timedelta(hours=6),
+        )
+
+        assert result is None
+        assert queue.get(item.id).reset_time == original_reset
+
     def test_add_with_reset_time(self, queue: Any) -> None:
         """add stores reset_time correctly."""
         reset = datetime.now(UTC) + timedelta(hours=6)

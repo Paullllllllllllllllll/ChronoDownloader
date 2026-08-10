@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -355,6 +356,33 @@ class TestMarkSuccess:
         with open(csv_path, "rb") as f:
             data = f.read()
         assert b"\r\n" not in data
+
+    def test_duplicate_entry_id_updates_only_first_row(
+        self, temp_dir: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A duplicate entry_id must not fan the write out (BUG-2).
+
+        The boolean-mask write marked every row sharing the id completed and
+        gave them all the same link, so an edition that was never fetched was
+        recorded as downloaded.
+        """
+        csv_path = os.path.join(temp_dir, "dupes.csv")
+        with open(csv_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(
+                "entry_id,short_title,retrievable,link\n"
+                "W1,Le Viandier 1490,,\n"
+                "W1,Le Viandier 1530,,\n"
+            )
+
+        with caplog.at_level(logging.WARNING):
+            assert mark_success(csv_path, "W1", "https://example.com/item") is True
+
+        df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+        assert df.loc[0, STATUS_COL] == "True"
+        assert df.loc[0, LINK_COL] == "https://example.com/item"
+        assert df.loc[1, STATUS_COL] == ""
+        assert df.loc[1, LINK_COL] == ""
+        assert any("W1" in record.getMessage() for record in caplog.records)
 
 
 class TestMarkFailed:

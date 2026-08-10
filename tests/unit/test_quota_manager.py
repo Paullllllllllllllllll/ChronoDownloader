@@ -331,6 +331,27 @@ class TestQuotaManagerOperations:
         assert remaining == 0
         assert manager._quotas["test"].exhausted_at is not None
 
+    def test_non_positive_reset_hours_is_clamped(
+        self, manager: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """reset_hours of 0 must not disable the limit entirely (BUG-3).
+
+        A zero-hour window made _check_and_reset_period fire on every
+        can_download call, so downloads_used was wiped before it could reach
+        daily_limit and the provider downloaded without bound.
+        """
+        with _quota_config({"test_provider": (2, 0)}), caplog.at_level(logging.WARNING):
+            assert manager.can_download("test_provider")[0] is True
+            manager.record_download("test_provider")
+            assert manager.can_download("test_provider")[0] is True
+            manager.record_download("test_provider")
+            can, wait = manager.can_download("test_provider")
+
+        assert can is False
+        assert wait is not None
+        assert manager._quotas["test_provider"].reset_hours == 1
+        assert any("reset_hours" in record.getMessage() for record in caplog.records)
+
     def test_config_change_refreshes_persisted_limits(self, manager: Any) -> None:
         """Counters are state; limits are configuration.
 

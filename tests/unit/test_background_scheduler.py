@@ -311,6 +311,62 @@ class TestRetryItem:
         s._retry_item(item)
         on_success.assert_called_once_with(item)
 
+    def test_repeated_quota_deferral_never_burns_retry_budget(self) -> None:
+        """A re-deferral only moves the reset time; it is not a retry (BUG-1).
+
+        The server-side path used to call mark_retrying, so after max_retries
+        re-deferrals the item silently flipped to "failed" while _retry_item
+        still reported it postponed -- is_ready_for_retry then never picked it
+        up again and cleanup pruned it.
+        """
+        from main.state.deferred import DeferredQueue
+
+        s = BackgroundRetryScheduler()
+        queue = DeferredQueue()
+        s._queue = queue
+        s._quota_manager = MagicMock()
+        s._quota_manager.has_quota.return_value = False
+        s._provider_download_fns = {
+            "ia": MagicMock(side_effect=QuotaDeferredException("ia"))
+        }
+
+        item = queue.add(
+            title="Test",
+            creator=None,
+            entry_id="E001",
+            provider_key="ia",
+            provider_name="Internet Archive",
+            source_id="src",
+            work_dir="/w",
+            base_output_dir="/o",
+        )
+        assert item is not None
+
+        for _ in range(queue._max_retries + 2):
+            assert s._retry_item(item) == RETRY_POSTPONED
+            assert item.status in ("pending", "retrying")
+            assert item.retry_count == 0
+
+    def test_transient_failure_counts_towards_get_stats(self) -> None:
+        """A retryable failure is a failed retry on both surfaces (BUG-5).
+
+        get_stats() used to ignore the failure whenever mark_retrying left
+        budget, contradicting the RETRY_FAILED the run recorded.
+        """
+        s = BackgroundRetryScheduler()
+        s._queue = MagicMock()
+        s._queue.mark_retrying.return_value = True
+        s._quota_manager = MagicMock()
+        s._quota_manager.can_download.return_value = (True, 0)
+        s._provider_download_fns = {"ia": MagicMock(return_value=False)}
+        on_failure = MagicMock()
+        s._on_retry_failure = on_failure
+
+        assert s._retry_item(_mock_item()) == RETRY_FAILED
+        assert s.get_stats()["retries_failed"] == 1
+        # The callback stays reserved for the final, non-retryable failure.
+        on_failure.assert_not_called()
+
 
 # ============================================================================
 # retry_ready_now accounting

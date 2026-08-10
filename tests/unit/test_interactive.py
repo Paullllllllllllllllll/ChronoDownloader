@@ -448,6 +448,62 @@ class TestRunWorkflow:
         assert workflow.start_time >= before
         assert workflow.start_time <= after
 
+    def test_back_from_output_returns_to_mode_specific_step(self) -> None:
+        """[b] at the output step reaches the mode-specific step (BUG-4).
+
+        configure_output had no False return path, so once the wizard was past
+        mode selection the documented back-chain dead-ended: "back" from
+        options landed on output, which immediately advanced to options again.
+        """
+        with patch.object(ConsoleUI, "enable_ansi"):
+            workflow = InteractiveWorkflow()
+        workflow.config.mode = "single"
+
+        # configure_single_mode is visited once on the way down and a second
+        # time on the way back from output; from there the wizard unwinds to
+        # the config step and quits, so the chain terminates observably.
+        single_mode = patch.object(
+            workflow, "configure_single_mode", side_effect=[True, False]
+        )
+        with (
+            patch.object(workflow, "display_welcome"),
+            patch.object(workflow, "configure_config_file", side_effect=[True, False]),
+            patch.object(workflow, "display_provider_status"),
+            patch.object(workflow, "configure_mode", side_effect=[True, False]),
+            single_mode as single_mock,
+            patch.object(workflow, "configure_output", return_value=False),
+        ):
+            assert workflow.run_workflow() is None
+            assert single_mock.call_count == 2
+
+    def test_configure_output_returns_false_on_back_token(self) -> None:
+        """The output prompt honors the wizard's "b" back token."""
+        with patch.object(ConsoleUI, "enable_ansi"):
+            workflow = InteractiveWorkflow()
+
+        with patch.object(ConsoleUI, "prompt_input", return_value="b"):
+            assert workflow.configure_output() is False
+
+    def test_unreadable_collection_csv_is_logged(
+        self, tmp_path: Path, caplog: Any
+    ) -> None:
+        """A collection CSV that will not parse is named, not silently dropped."""
+        with patch.object(ConsoleUI, "enable_ansi"):
+            workflow = InteractiveWorkflow()
+
+        broken = tmp_path / "broken.csv"
+        broken.write_text('a,b\n"unterminated,1\n', encoding="utf-8")
+        collections: list[tuple[str, str]] = []
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("main.ui.interactive.pd.read_csv", side_effect=ValueError("bad")),
+        ):
+            workflow._append_collection(broken, collections)
+
+        assert collections == []
+        assert any("broken.csv" in record.getMessage() for record in caplog.records)
+
 
 # ============================================================================
 # Integration Tests
