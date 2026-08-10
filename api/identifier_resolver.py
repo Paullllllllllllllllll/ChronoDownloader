@@ -131,6 +131,11 @@ def build_manifest_url(provider_key: str, identifier: str) -> list[str]:
         # full ark identifier (accepted by IDENTIFIER_PATTERNS) would
         # otherwise be doubled into ".../iiif/ark:/12148/ark:/12148/...".
         identifier = re.sub(r"^ark:/12148/", "", identifier)
+    if provider_key == "europeana":
+        # Europeana record ids canonically start with a slash
+        # ("/9200379/BibliographicResource_..."); the template carries its own
+        # separators, so the raw form would double them.
+        identifier = identifier.strip("/")
     template = MANIFEST_TEMPLATES.get(provider_key)
     if template is None:
         raise KeyError(

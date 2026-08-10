@@ -288,7 +288,9 @@ def download_google_books_work(
 
     save_json(volume_data, output_folder, f"google_{volume_id}_metadata")
 
-    access_info = volume_data.get("accessInfo", {})
+    # "or {}": the API answers with an explicit null for volumes without
+    # access metadata, and .get(key, {}) does not shield against that.
+    access_info = volume_data.get("accessInfo") or {}
     prefer = _gb_prefer_format()
     allow_drm = _gb_allow_drm()
     max_files = _gb_max_files()
@@ -346,7 +348,9 @@ def download_google_books_work(
     # content, so it does not mark the work as successfully retrieved.
     if not any_ok:
         logger.info("Google Books: Falling back to cover images for %s", volume_id)
-        image_links = volume_data.get("volumeInfo", {}).get("imageLinks", {})
+        # "or {}" both times: the API answers with explicit nulls for volumes
+        # without metadata, and .get(key, {}) does not shield against those.
+        image_links = (volume_data.get("volumeInfo") or {}).get("imageLinks") or {}
         cover_candidates = []
         # Preferred metadata image sizes - only keep the best quality ones
         for key_name in ["extraLarge", "large", "medium"]:

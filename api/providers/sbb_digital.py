@@ -184,6 +184,12 @@ def _collect_mets_urls(mets_xml: str) -> tuple[list[str], list[str]]:
             ):
                 images_by_group.setdefault(use, []).append(href)
 
+    # PDFs are collected across every fileGrp, so a METS that lists the same
+    # PDF in several groups (per-page group plus a whole-work DOWNLOAD group)
+    # would download identical bytes repeatedly; de-duplicate by href while
+    # preserving document order.
+    pdf_urls = list(dict.fromkeys(pdf_urls))
+
     for use in _IMAGE_FILEGRP_PRIORITY:
         if images_by_group.get(use):
             return pdf_urls, images_by_group[use]

@@ -110,7 +110,11 @@ def search_mdz(
             title_text = a.get_text(strip=True) or ""
             raw = {
                 "title": title_text,
-                "creator": creator or None,
+                # Never substitute the query's creator: the HTML result list
+                # carries no author, and echoing the searched-for name back
+                # would score a perfect 100 against itself and let this
+                # candidate outrank providers reporting a real, possibly
+                # non-matching author.
                 "id": obj_id,
                 "item_url": f"https://www.digitale-sammlungen.de/view/{obj_id}",
             }

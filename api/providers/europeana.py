@@ -185,8 +185,10 @@ def search_europeana(
 def download_europeana_work(
     item_data: SearchResult | dict[str, Any], output_folder: str
 ) -> bool:
-    # Save search metadata
-    item_id = resolve_item_id(item_data) or resolve_item_field(
+    # Save search metadata. The title fallback serves the metadata filename
+    # only; manifest URL construction below needs the real record id.
+    raw_id = resolve_item_id(item_data)
+    item_id = raw_id or resolve_item_field(
         item_data, "title", attr="title", default="unknown_item"
     )
     raw_data = item_data.raw if isinstance(item_data, SearchResult) else item_data
@@ -196,9 +198,10 @@ def download_europeana_work(
         item_data, "iiif_manifest", attr="iiif_manifest"
     )
 
-    # If missing, construct Europeana Manifest API URL
-    if not iiif_manifest_url:
-        built = _build_manifest_url_from_id(item_id, prefer_v3=True)
+    # If missing, construct the Europeana Manifest API URL — but only from a
+    # real record id: a title would be split on "/" into a nonsense URL.
+    if not iiif_manifest_url and raw_id:
+        built = _build_manifest_url_from_id(raw_id, prefer_v3=True)
         iiif_manifest_url = built
 
     if not iiif_manifest_url:

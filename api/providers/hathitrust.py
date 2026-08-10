@@ -129,11 +129,15 @@ def search_hathitrust(
 
         for rec_id, rec in recs.items():
             try:
+                # Never substitute the query title for an untitled bib
+                # record: it would score a perfect 100 against itself and
+                # sail through min_title_score. An empty title scores 0 and
+                # is filtered like any other untitled record.
                 titles = rec.get("titles") or rec.get("title") or []
                 if isinstance(titles, list):
-                    title_text = titles[0] if titles else (title or "")
+                    title_text = titles[0] if titles else ""
                 else:
-                    title_text = titles or (title or "")
+                    title_text = titles or ""
                 authors = rec.get("authors") or rec.get("mainAuthor") or []
                 if isinstance(authors, str):
                     authors = [authors]

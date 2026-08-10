@@ -450,3 +450,114 @@ def test_all_results_are_search_results() -> None:
         results = search_internet_archive("y")
 
     assert all(isinstance(r, SearchResult) for r in results)
+
+
+# ============================================================================
+# Query echo suppression and null-envelope guards
+# ============================================================================
+
+
+class TestQueryEchoSuppression:
+    """A record must never inherit the query's own title or creator.
+
+    Echoing the searched-for string back as record metadata scores a perfect
+    100 against itself, so an arbitrary work outranks candidates whose
+    provider reported real (possibly non-matching) metadata.
+    """
+
+    MDZ_HTML = '<html><body><a href="/view/bsb10123456">Ein Koch-Buch</a></body></html>'
+
+    def test_mdz_html_fallback_carries_no_creator(self) -> None:
+        with patch(
+            "api.providers.mdz.make_request", side_effect=[{"docs": []}, self.MDZ_HTML]
+        ):
+            from api.providers.mdz import search_mdz
+
+            results = search_mdz("Koch-Buch", creator="Rumpolt", max_results=5)
+
+        assert results
+        assert all(not r.creators for r in results)
+
+    def test_hathitrust_untitled_bib_record_gets_empty_title(self) -> None:
+        data = {
+            "records": {"123": {"publishDates": ["1651"]}},
+            "items": [{"fromRecord": "123", "htid": "x1"}],
+        }
+        with patch("api.providers.hathitrust.make_request", return_value=data):
+            from api.providers.hathitrust import search_hathitrust
+
+            results = search_hathitrust("Le Cuisinier oclc:12345")
+
+        assert results
+        assert not results[0].title
+
+
+class TestSbbMetsPdfDeduplication:
+    """A PDF listed in several fileGrps must be downloaded once, not per group."""
+
+    METS = """<mets:mets xmlns:mets="http://www.loc.gov/METS/"
+                         xmlns:xlink="http://www.w3.org/1999/xlink">
+      <mets:fileSec>
+        <mets:fileGrp USE="DEFAULT">
+          <mets:file MIMETYPE="application/pdf">
+            <mets:FLocat xlink:href="https://sbb.example/doc.pdf"/>
+          </mets:file>
+        </mets:fileGrp>
+        <mets:fileGrp USE="DOWNLOAD">
+          <mets:file MIMETYPE="application/pdf">
+            <mets:FLocat xlink:href="https://sbb.example/doc.pdf"/>
+          </mets:file>
+        </mets:fileGrp>
+      </mets:fileSec>
+    </mets:mets>"""
+
+    def test_duplicate_pdf_href_is_collected_once(self) -> None:
+        from api.providers.sbb_digital import _collect_mets_urls
+
+        pdf_urls, _ = _collect_mets_urls(self.METS)
+
+        assert pdf_urls == ["https://sbb.example/doc.pdf"]
+
+
+class TestDownloadEnvelopeGuards:
+    """Non-dict and null envelope members must degrade, not raise."""
+
+    def test_loc_string_item_and_resources_do_not_raise(self, temp_dir: str) -> None:
+        from api.providers.loc import download_loc_work
+
+        sr = SearchResult(
+            provider="Library of Congress",
+            title="Test",
+            source_id="abc123",
+            provider_key="loc",
+            item_url="https://www.loc.gov/item/abc123/",
+            raw={"id": "abc123", "item_url": "https://www.loc.gov/item/abc123/"},
+        )
+        envelope = {"item": "https://www.loc.gov/item/abc123/", "resources": "none"}
+        with patch("api.providers.loc.make_request", return_value=envelope):
+            assert download_loc_work(sr, temp_dir) is False
+
+    def test_europeana_title_is_never_built_into_a_manifest_url(
+        self, temp_dir: str
+    ) -> None:
+        from api.providers.europeana import download_europeana_work
+
+        with patch(
+            "api.providers.europeana.make_request", return_value=None
+        ) as mock_req:
+            ok = download_europeana_work({"title": "Le Cuisinier / Royal"}, temp_dir)
+
+        assert ok is False
+        assert mock_req.call_count == 0
+
+    def test_google_books_null_volume_and_access_info_do_not_raise(
+        self, temp_dir: str
+    ) -> None:
+        from api.providers.google_books import download_google_books_work
+
+        volume = {"id": "vol1", "volumeInfo": None, "accessInfo": None}
+        with (
+            patch("api.providers.google_books.make_request", return_value=volume),
+            patch("api.providers.google_books.download_file", return_value=None),
+        ):
+            assert download_google_books_work({"id": "vol1"}, temp_dir) is False

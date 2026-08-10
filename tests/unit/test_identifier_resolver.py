@@ -97,6 +97,16 @@ class TestBuildManifestUrl:
             "https://iiif.europeana.eu/presentation/9200396/BibliographicResource_3000135551475/manifest"
         ]
 
+    def test_europeana_canonical_leading_slash_does_not_double(self) -> None:
+        # Europeana record ids canonically start with "/"; the template
+        # carries its own separators.
+        urls = build_manifest_url(
+            "europeana", "/9200396/BibliographicResource_3000135551475"
+        )
+        assert urls == [
+            "https://iiif.europeana.eu/presentation/9200396/BibliographicResource_3000135551475/manifest"
+        ]
+
     def test_native_provider_raises_value_error(self) -> None:
         for pkey in NATIVE_DOWNLOAD_PROVIDERS:
             with pytest.raises(ValueError, match="native download"):

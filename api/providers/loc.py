@@ -168,13 +168,15 @@ def download_loc_work(
     save_json(item_full_json, output_folder, f"loc_{item_id}_item_details")
     renders = 0
     iiif_manifest_url = iiif_manifest_hint
-    if (
-        not iiif_manifest_url
-        and item_full_json.get("item")
-        and item_full_json["item"].get("resources")
-    ):
-        for res in item_full_json["item"]["resources"]:
-            if res.get("iiif_manifest"):
+    # LoC item envelopes vary: "item" may be a URL string rather than a dict,
+    # and "resources" entries are not always dicts, so both are guarded the
+    # same way as the top-level "resources" loop below.
+    item_obj = item_full_json.get("item")
+    if not isinstance(item_obj, dict):
+        item_obj = {}
+    if not iiif_manifest_url and item_obj.get("resources"):
+        for res in item_obj["resources"]:
+            if isinstance(res, dict) and res.get("iiif_manifest"):
                 iiif_manifest_url = res.get("iiif_manifest")
                 break
     if not iiif_manifest_url and item_full_json.get("resources"):
@@ -224,8 +226,8 @@ def download_loc_work(
 
     # Fallback: try downloading a single representative image
     image_url = None
-    if item_full_json.get("item") and item_full_json["item"].get("image_url"):
-        raw_image_url = item_full_json["item"]["image_url"]
+    if item_obj.get("image_url"):
+        raw_image_url = item_obj["image_url"]
         # LoC most commonly returns a list of URLs ordered by increasing
         # resolution; take the last (highest-resolution) entry.
         if isinstance(raw_image_url, list):
