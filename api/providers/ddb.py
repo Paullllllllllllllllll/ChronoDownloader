@@ -13,14 +13,10 @@ import os
 import re
 from typing import Any
 
-from ..core.config import get_api_key_envvar, prefer_pdf_over_images
+from ..core.config import get_api_key_envvar
 from ..core.download import download_file, save_json
 from ..core.network import make_request
-from ..iiif import (
-    download_iiif_renderings,
-    download_page_images,
-    extract_image_service_bases,
-)
+from ..iiif import download_iiif_manifest_and_images
 from ..model import (
     SearchResult,
     convert_to_searchresult,
@@ -266,26 +262,11 @@ def download_ddb_work(
         )
         return False
 
-    # Save manifest
-    save_json(manifest, output_folder, f"ddb_{item_id}_iiif_manifest")
-
-    # Prefer manifest-level renderings (PDF/EPUB) when available
-    renders = 0
-    try:
-        renders = download_iiif_renderings(manifest, output_folder)
-        if renders > 0 and prefer_pdf_over_images():
-            logger.info(
-                "DDB: downloaded %d rendering(s); skipping image downloads per config.",
-                renders,
-            )
-            return True
-    except Exception:
-        logger.exception(
-            "DDB: error while downloading manifest renderings for %s", item_id
-        )
-
-    # Extract IIIF image service bases from v2 or v3 and download per-canvas images
-    image_service_bases = extract_image_service_bases(manifest)
-    ok_any = download_page_images(image_service_bases, output_folder, "ddb", item_id)
-
-    return ok_any or renders > 0
+    return download_iiif_manifest_and_images(
+        str(manifest_url),
+        output_folder,
+        "ddb",
+        item_id,
+        manifest=manifest,
+        manifest_filename=f"ddb_{item_id}_iiif_manifest",
+    )

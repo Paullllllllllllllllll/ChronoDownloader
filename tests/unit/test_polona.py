@@ -448,12 +448,12 @@ class TestDownloadPolonaWork:
     ) -> None:
         with (
             patch(
-                "api.providers.polona.make_request", return_value=MANIFEST
+                "api.iiif._strategies.make_request", return_value=MANIFEST
             ) as mock_request,
-            patch("api.providers.polona.save_json", return_value=None),
-            patch("api.providers.polona.download_iiif_renderings", return_value=0),
+            patch("api.iiif._strategies.save_json", return_value=None),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=0),
             patch(
-                "api.providers.polona.download_page_images", return_value=True
+                "api.iiif._strategies.download_page_images", return_value=True
             ) as mock_images,
         ):
             assert download_polona_work({"id": CZERNIECKI_ID}, temp_output_dir)
@@ -473,5 +473,5 @@ class TestDownloadPolonaWork:
         mock_request.assert_not_called()
 
     def test_unreachable_manifest_fails_cleanly(self, temp_output_dir: str) -> None:
-        with patch("api.providers.polona.make_request", return_value=None):
+        with patch("api.iiif._strategies.make_request", return_value=None):
             assert download_polona_work({"id": CZERNIECKI_ID}, temp_output_dir) is False

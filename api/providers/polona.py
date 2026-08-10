@@ -12,14 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..core.config import prefer_pdf_over_images
-from ..core.download import save_json
 from ..core.network import make_request
-from ..iiif import (
-    download_iiif_renderings,
-    download_page_images,
-    extract_image_service_bases,
-)
+from ..iiif import download_iiif_manifest_and_images
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
@@ -154,32 +148,6 @@ def download_polona_work(
         return False
 
     manifest_url = IIIF_MANIFEST_URL.format(item_id=item_id)
-    logger.info("Fetching Polona IIIF manifest: %s", manifest_url)
-    manifest = make_request(manifest_url)
-    if not isinstance(manifest, dict):
-        return False
-
-    # Save manifest
-    save_json(manifest, output_folder, f"polona_{item_id}_manifest")
-
-    # Prefer manifest-level PDF/EPUB renderings when available
-    renders = 0
-    try:
-        renders = download_iiif_renderings(manifest, output_folder)
-        if renders > 0 and prefer_pdf_over_images():
-            logger.info(
-                "Polona: downloaded %d rendering(s); skipping image downloads "
-                "per config.",
-                renders,
-            )
-            return True
-    except Exception:
-        logger.exception(
-            "Polona: error while downloading manifest renderings for %s", item_id
-        )
-
-    # Extract IIIF Image API service bases and download per-canvas images
-    service_bases: list[str] = extract_image_service_bases(manifest)
-    ok_any = download_page_images(service_bases, output_folder, "polona", item_id)
-
-    return ok_any or renders > 0
+    return download_iiif_manifest_and_images(
+        manifest_url, output_folder, "polona", item_id
+    )

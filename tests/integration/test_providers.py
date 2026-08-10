@@ -1607,11 +1607,11 @@ class TestDownloadFunctions:
         """BUG-1: a manifest with no renderings and no image services is not success."""
         manifest = {"@id": "m"}
         with (
-            patch("api.providers.bnf_gallica.make_request", return_value=manifest),
-            patch("api.providers.bnf_gallica.save_json", return_value=None),
-            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=0),
+            patch("api.iiif._strategies.make_request", return_value=manifest),
+            patch("api.iiif._strategies.save_json", return_value=None),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=0),
             patch(
-                "api.providers.bnf_gallica.extract_image_service_bases",
+                "api.iiif._strategies.extract_image_service_bases",
                 return_value=[],
             ),
         ):
@@ -1627,16 +1627,14 @@ class TestDownloadFunctions:
         """A downloaded rendering with no image services still counts as success."""
         manifest = {"@id": "m"}
         with (
-            patch("api.providers.bnf_gallica.make_request", return_value=manifest),
-            patch("api.providers.bnf_gallica.save_json", return_value=None),
-            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=1),
+            patch("api.iiif._strategies.make_request", return_value=manifest),
+            patch("api.iiif._strategies.save_json", return_value=None),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=1),
             patch(
-                "api.providers.bnf_gallica.extract_image_service_bases",
+                "api.iiif._strategies.extract_image_service_bases",
                 return_value=[],
             ),
-            patch(
-                "api.providers.bnf_gallica.prefer_pdf_over_images", return_value=False
-            ),
+            patch("api.iiif._strategies.prefer_pdf_over_images", return_value=False),
         ):
             from api.providers.bnf_gallica import download_gallica_work
 
@@ -1655,16 +1653,14 @@ class TestDownloadFunctions:
         """
         manifest = {"@id": "m"}
         with (
-            patch("api.providers.bnf_gallica.make_request", return_value=manifest),
-            patch("api.providers.bnf_gallica.save_json", return_value=None),
-            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=1),
+            patch("api.iiif._strategies.make_request", return_value=manifest),
+            patch("api.iiif._strategies.save_json", return_value=None),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=1),
             patch(
-                "api.providers.bnf_gallica.extract_image_service_bases",
+                "api.iiif._strategies.extract_image_service_bases",
                 return_value=["https://svc/1", "https://svc/2"],
             ),
-            patch(
-                "api.providers.bnf_gallica.prefer_pdf_over_images", return_value=False
-            ),
+            patch("api.iiif._strategies.prefer_pdf_over_images", return_value=False),
             patch("api.iiif._strategies.budget_exhausted", return_value=False),
             patch(
                 "api.iiif._strategies.download_one_from_service",
@@ -1847,15 +1843,15 @@ class TestPageImageLoopConsolidation:
         self, temp_output_dir: str
     ) -> None:
         with (
-            patch("api.providers.bnf_gallica.make_request", return_value=self.MANIFEST),
-            patch("api.providers.bnf_gallica.save_json", return_value=None),
-            patch("api.providers.bnf_gallica.download_iiif_renderings", return_value=0),
+            patch("api.iiif._strategies.make_request", return_value=self.MANIFEST),
+            patch("api.iiif._strategies.save_json", return_value=None),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=0),
             patch(
-                "api.providers.bnf_gallica.extract_image_service_bases",
+                "api.iiif._strategies.extract_image_service_bases",
                 return_value=self.SERVICES,
             ),
             patch(
-                "api.providers.bnf_gallica.download_page_images", return_value=True
+                "api.iiif._strategies.download_page_images", return_value=True
             ) as mock_pages,
         ):
             from api.providers.bnf_gallica import download_gallica_work
@@ -1869,15 +1865,15 @@ class TestPageImageLoopConsolidation:
         self, temp_output_dir: str
     ) -> None:
         with (
-            patch("api.providers.polona.make_request", return_value=self.MANIFEST),
-            patch("api.providers.polona.save_json", return_value=None),
-            patch("api.providers.polona.download_iiif_renderings", return_value=0),
+            patch("api.iiif._strategies.make_request", return_value=self.MANIFEST),
+            patch("api.iiif._strategies.save_json", return_value=None),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=0),
             patch(
-                "api.providers.polona.extract_image_service_bases",
+                "api.iiif._strategies.extract_image_service_bases",
                 return_value=self.SERVICES,
             ),
             patch(
-                "api.providers.polona.download_page_images", return_value=True
+                "api.iiif._strategies.download_page_images", return_value=True
             ) as mock_pages,
         ):
             from api.providers.polona import download_polona_work
@@ -1896,13 +1892,14 @@ class TestPageImageLoopConsolidation:
                 side_effect=[item_meta, self.MANIFEST],
             ),
             patch("api.providers.ddb.save_json", return_value=None),
-            patch("api.providers.ddb.download_iiif_renderings", return_value=0),
+            patch("api.iiif._strategies.save_json", return_value=None),
+            patch("api.iiif._strategies.download_iiif_renderings", return_value=0),
             patch(
-                "api.providers.ddb.extract_image_service_bases",
+                "api.iiif._strategies.extract_image_service_bases",
                 return_value=self.SERVICES,
             ),
             patch(
-                "api.providers.ddb.download_page_images", return_value=True
+                "api.iiif._strategies.download_page_images", return_value=True
             ) as mock_pages,
         ):
             from api.providers.ddb import download_ddb_work

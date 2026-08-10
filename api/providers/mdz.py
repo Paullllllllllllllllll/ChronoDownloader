@@ -9,14 +9,8 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from ..core.config import prefer_pdf_over_images
-from ..core.download import save_json
 from ..core.network import make_request
-from ..iiif import (
-    download_iiif_renderings,
-    download_page_images,
-    extract_image_service_bases,
-)
+from ..iiif import download_iiif_manifest_and_images
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 
 logger = logging.getLogger(__name__)
@@ -142,45 +136,20 @@ def download_mdz_work(
         logger.warning("No MDZ object id found in item data.")
         return False
 
-    manifest_url_v2 = IIIF_MANIFEST_URL.format(object_id=object_id)
-    logger.info("Fetching MDZ IIIF manifest v2: %s", manifest_url_v2)
-    manifest = make_request(manifest_url_v2)
+    # MDZ needs a version fallback the shared helper does not know about:
+    # fetch v2 first, then v3, and hand the pre-fetched manifest over.
+    manifest_url = IIIF_MANIFEST_URL.format(object_id=object_id)
+    logger.info("Fetching MDZ IIIF manifest v2: %s", manifest_url)
+    manifest = make_request(manifest_url)
     if not isinstance(manifest, dict):
         # Try IIIF v3 manifest
-        manifest_url_v3 = IIIF_MANIFEST_V3_URL.format(object_id=object_id)
-        logger.info("Fetching MDZ IIIF manifest v3: %s", manifest_url_v3)
-        manifest = make_request(manifest_url_v3)
+        manifest_url = IIIF_MANIFEST_V3_URL.format(object_id=object_id)
+        logger.info("Fetching MDZ IIIF manifest v3: %s", manifest_url)
+        manifest = make_request(manifest_url)
 
     if not isinstance(manifest, dict):
         return False
 
-    # Always save the manifest for reproducibility
-    save_json(manifest, output_folder, f"mdz_{object_id}_manifest")
-
-    # Try to download manifest-level PDF/EPUB renderings first
-    renderings_downloaded = 0
-    try:
-        renderings_downloaded = download_iiif_renderings(manifest, output_folder)
-        if renderings_downloaded > 0 and prefer_pdf_over_images():
-            logger.info(
-                "MDZ: downloaded %d manifest rendering(s); skipping image "
-                "downloads per config.",
-                renderings_downloaded,
-            )
-            return True
-    except Exception:
-        logger.exception(
-            "MDZ: error while downloading manifest renderings for %s", object_id
-        )
-
-    # Extract per-canvas Image API service base URLs and download
-    image_service_bases = extract_image_service_bases(manifest)
-
-    if not image_service_bases:
-        logger.info("No IIIF image services found in MDZ manifest for %s", object_id)
-        return renderings_downloaded > 0
-
-    return (
-        download_page_images(image_service_bases, output_folder, "mdz", object_id)
-        or renderings_downloaded > 0
+    return download_iiif_manifest_and_images(
+        manifest_url, output_folder, "mdz", object_id, manifest=manifest
     )

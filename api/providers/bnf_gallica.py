@@ -14,14 +14,8 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from ..core.config import prefer_pdf_over_images
-from ..core.download import save_json
 from ..core.network import make_request
-from ..iiif import (
-    download_iiif_renderings,
-    download_page_images,
-    extract_image_service_bases,
-)
+from ..iiif import download_iiif_manifest_and_images
 from ..model import SearchResult, convert_to_searchresult, resolve_item_id
 from ..query_helpers import escape_sru_literal
 
@@ -148,34 +142,6 @@ def download_gallica_work(
         logger.warning("No ark_id found in item data.")
         return False
     manifest_url = IIIF_MANIFEST_BASE_URL.format(ark_id=ark_id)
-    logger.info("Fetching Gallica IIIF manifest: %s", manifest_url)
-    manifest = make_request(manifest_url)
-    if not isinstance(manifest, dict):
-        return False
-
-    # Save manifest for reproducibility
-    save_json(manifest, output_folder, f"gallica_{ark_id}_manifest")
-
-    # Prefer manifest-level PDF/EPUB renderings when available
-    renders = 0
-    try:
-        renders = download_iiif_renderings(manifest, output_folder)
-        if renders > 0 and prefer_pdf_over_images():
-            logger.info(
-                "Gallica: downloaded %d rendering(s); skipping image downloads "
-                "per config.",
-                renders,
-            )
-            return True
-    except Exception:
-        logger.exception(
-            "Gallica: error while downloading manifest renderings for %s", ark_id
-        )
-
-    # Extract image service bases from IIIF v2 or v3 and download page images
-    image_service_bases = extract_image_service_bases(manifest)
-    success_any = download_page_images(
-        image_service_bases, output_folder, "gallica", ark_id
+    return download_iiif_manifest_and_images(
+        manifest_url, output_folder, "gallica", ark_id
     )
-
-    return success_any or renders > 0

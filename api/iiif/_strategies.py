@@ -8,6 +8,7 @@ back to page images; try PDFs first with IIIF fallback.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from ..core.budget import budget_exhausted
 from ..core.config import get_max_pages, prefer_pdf_over_images
@@ -308,6 +309,9 @@ def download_iiif_manifest_and_images(
     provider_key: str,
     item_id: str,
     skip_images_if_rendering: bool = True,
+    *,
+    manifest: dict[str, Any] | None = None,
+    manifest_filename: str | None = None,
 ) -> bool:
     """Download IIIF manifest, renderings, and page images.
 
@@ -317,18 +321,31 @@ def download_iiif_manifest_and_images(
         provider_key: Provider identifier (e.g., 'gallica', 'loc')
         item_id: Item identifier for filename prefixes
         skip_images_if_rendering: If True and renderings downloaded, skip images
+        manifest: Pre-fetched manifest document. When given, ``manifest_url``
+            is not fetched; connectors with custom fetch logic (version
+            fallbacks, keyed URLs) fetch the manifest themselves and hand
+            it over.
+        manifest_filename: Stem for the saved manifest copy. Defaults to
+            ``{provider_key}_{item_id}_manifest``.
 
     Returns:
         True if any content was downloaded
     """
-    logger.info("Fetching IIIF manifest: %s", manifest_url)
-    manifest = make_request(manifest_url)
+    fetched: Any = manifest
+    if fetched is None:
+        logger.info("Fetching IIIF manifest: %s", manifest_url)
+        fetched = make_request(manifest_url)
 
-    if not isinstance(manifest, dict):
+    if not isinstance(fetched, dict):
         logger.warning("Failed to fetch IIIF manifest from %s", manifest_url)
         return False
+    manifest = fetched
 
-    save_json(manifest, output_folder, f"{provider_key}_{item_id}_manifest")
+    save_json(
+        manifest,
+        output_folder,
+        manifest_filename or f"{provider_key}_{item_id}_manifest",
+    )
 
     any_downloaded = False
 
