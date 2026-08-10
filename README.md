@@ -1,4 +1,4 @@
-# ChronoDownloader v1.28.0
+# ChronoDownloader v1.29.0
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -782,7 +782,9 @@ the operator's decision, not a default: the extra is not installed by
 
 - `quota.enabled`: enable quota tracking
 - `quota.daily_limit`: maximum downloads per reset period
-- `quota.reset_hours`: hours until quota resets
+- `quota.reset_hours`: hours until quota resets (minimum 1; lower
+  values are clamped, since a zero-hour window would reset the
+  counter on every check and never enforce the limit)
 - `quota.wait_for_reset`: if `true`, defer downloads when quota
   is exhausted; if `false`, fall back to alternative method
 
@@ -1070,9 +1072,10 @@ downloaded_works/
       <entry_id>_<work_name>_<provider>_image_001.jpg
 ```
 
-**File naming**: strict `snake_case`. Images have 3-digit counters
-(`_image_001.jpg`). Non-image files get numeric suffixes when
-multiple exist (`_2.pdf`).
+**File naming**: strict `snake_case`. Page images carry their page
+number (`_image_001.jpg` is page 1); a page that fails permanently
+leaves a gap at its own number, which a resume run retries. Non-image
+files get numeric suffixes when multiple exist (`_2.pdf`).
 
 **Extensions follow the payload, not the URL.** The response
 `Content-Type` decides the extension; when a server declares nothing
@@ -1413,6 +1416,21 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.29.0** (10 August 2026) -- Maintenance sweep: page images take their
+  number from the page index the caller encodes, so a permanently failed page
+  leaves an honest gap that a resume run retries instead of shifting every
+  later page and masking the loss; the insecure-retry credential guard now
+  recognizes Europeana's `wskey` and DDB's `oauth_consumer_key`, and keyed
+  URLs are redacted in every log line; endpoint payloads are no longer
+  rejected unseen under `save_disallowed_to_metadata: false`; provider
+  connectors stop echoing the query's title or creator back as record
+  metadata (MDZ, HathiTrust), guard null and non-dict envelopes (LOC,
+  Google Books), de-duplicate METS PDFs (SBB), and build Europeana manifest
+  URLs only from real record ids; server-side quota re-deferrals no longer
+  burn retry budget or silently kill queued items; duplicate entry_ids in
+  the works CSV no longer receive fanned-out status writes; `reset_hours`
+  is clamped to a minimum of 1; the interactive wizard's back-chain reaches
+  the output step; plus small dead-surface refactors.
 - **v1.28.0** (7 August 2026) -- Downloaded files are named after their
   payload rather than their URL. A whole-document rendering served from a
   CGI endpoint (UB Heidelberg answers `*.fcgi` with a complete PDF, and
