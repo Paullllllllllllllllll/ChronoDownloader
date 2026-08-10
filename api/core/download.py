@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -57,6 +58,7 @@ from .network import (
     get_rate_limiter,
     get_session,
     record_client_error,
+    redact_url,
     request_carries_credential,
 )
 
@@ -431,15 +433,53 @@ def _counter_key(
     return (stem, prov_slug, type_key)
 
 
+# A caller that walks a work page by page encodes the page number in the
+# filename it hands down ("mdz_bsb123_p00005.jpg"). That number identifies the
+# page; the order in which downloads happen to succeed does not. The three
+# spellings cover every page loop in the codebase: "_pNNNNN" (IIIF strategies,
+# Internet Archive, British Library, SBB), "_page_NNNN" (Google Books), and
+# "_imgNNNN" (Wellcome).
+_PAGE_INDEX_RE = re.compile(r"_(?:p|page_|img)(\d+)$")
+
+
+def _page_index_for_name(ext: str, filename: str) -> int | None:
+    """Return the page number the caller encoded in ``filename``, or ``None``.
+
+    Only consulted while a work-level naming stem is set: without one the stem
+    is derived from the filename itself, so each page already gets a distinct
+    name and the shared success-order counter does no harm. With one, every
+    page of the work shares a single counter, and a page that fails
+    permanently used to hand its number to the next page -- shifting every
+    file after it and letting a resume run mistake the shifted file for the
+    missing one. Restricted to image payloads, the only kind named with a page
+    sequence.
+    """
+    if not get_current_name_stem():
+        return None
+    if ext.lower() not in _IMAGE_EXTENSIONS:
+        return None
+    match = _PAGE_INDEX_RE.search(Path(filename or "").stem)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
 def _build_standardized_filename(
     ext: str,
     stem: str,
     prov_slug: str,
     max_stem_len: int = 50,
+    page_index: int | None = None,
 ) -> str:
+    """Build the standardized on-disk name for one payload.
+
+    When ``page_index`` is given it *is* the sequence number and the shared
+    per-work counter is left untouched, so a page that never arrives leaves a
+    gap at its own number instead of renumbering everything behind it.
+    """
     key = _counter_key(ext, stem, prov_slug, max_stem_len)
     stem, prov_slug, type_key = key
-    seq = increment_counter(key)
+    seq = page_index if page_index is not None else increment_counter(key)
 
     if type_key == "image":
         safe_base = f"{stem}_{prov_slug}_image_{seq:03d}"
@@ -517,7 +557,11 @@ def _existing_download_path(
     """Return an already-present file for one candidate extension, or ``None``.
 
     Consumes a naming sequence number only on a hit, so probing several
-    extensions leaves no gap in the numbering.
+    extensions leaves no gap in the numbering. A page-indexed image name takes
+    its number from the caller's filename exactly as the download path does,
+    so the probe predicts the very path that download would write; predicting
+    it from the counter instead made a resume run find the shifted neighbour
+    of a page that was never downloaded.
     """
     dl_cfg = get_download_config()
     allowed_exts = dl_cfg.get("allowed_object_extensions", [])
@@ -533,7 +577,8 @@ def _existing_download_path(
 
     key = _counter_key(predicted_ext, stem, prov_slug)
     stem, prov_slug, type_key = key
-    seq = peek_counter(key)
+    page_index = _page_index_for_name(predicted_ext, filename)
+    seq = page_index if page_index is not None else peek_counter(key)
 
     if type_key == "image":
         safe_base = f"{stem}_{prov_slug}_image_{seq:03d}"
@@ -544,7 +589,10 @@ def _existing_download_path(
     predicted_path = os.path.join(target_dir, predicted_name)
 
     if os.path.exists(predicted_path):
-        increment_counter(key)
+        # A page-indexed name never drew on the counter, so there is nothing
+        # to spend here either.
+        if page_index is None:
+            increment_counter(key)
         logger.info("File already exists (early check), skipping: %s", predicted_path)
         return predicted_path, counts_as_success
 
@@ -564,6 +612,10 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     """
     _ensure_dir(folder_path)
 
+    # Log lines print the redacted form only: the URL may carry the API key
+    # in its query string (see redact_url).
+    log_url = redact_url(url)
+
     provider = get_provider_for_url(url)
     session = get_session(provider)
 
@@ -577,7 +629,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     # makes no request, so it must not consume the breaker's single half-open
     # probe slot.
     if _BUDGET.exhausted():
-        logger.warning("Download budget exhausted; skipping %s", url)
+        logger.warning("Download budget exhausted; skipping %s", log_url)
         return None
 
     # Consult the per-provider circuit breaker before downloading, mirroring
@@ -589,7 +641,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             "Circuit breaker OPEN for %s; skipping download (retry in %.0fs): %s",
             provider or "unknown",
             cb.time_until_retry(),
-            url,
+            log_url,
         )
         return None
 
@@ -625,7 +677,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         if should_reject:
             log_suffix = " (insecure retry)" if is_insecure_retry else ""
             logger.warning(
-                "Rejecting download%s: %s: %s", log_suffix, reject_reason, url
+                "Rejecting download%s: %s: %s", log_suffix, reject_reason, log_url
             )
             return None
 
@@ -662,6 +714,16 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         target_dir, log_msg, counts_as_success = _determine_target_directory(
             folder_path, inferred_ext, allowed_exts, save_disallowed
         )
+        # The extension in hand names the endpoint, not the payload, so a
+        # rejection based on it would throw away an allowed PDF before a single
+        # byte was seen. Route provisionally and revisit once the bytes settle
+        # the type; the log message would be about the wrong extension, so it
+        # is withheld until the decision is real.
+        deferred_rejection = target_dir is None and resolve_from_payload
+        if deferred_rejection:
+            target_dir = os.path.join(folder_path, "metadata")
+            counts_as_success = False
+            log_msg = ""
         if target_dir is None:
             logger.info(log_msg)
             return None
@@ -671,17 +733,28 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         if not resolve_from_payload:
             _ensure_dir(target_dir)
 
+        # A page-indexed image takes its number from the caller's filename and
+        # leaves the shared counter alone; everything else keeps the
+        # success-order counter and hands its number back on every discard.
+        page_index = _page_index_for_name(inferred_ext, filename)
         name_key = _counter_key(inferred_ext, stem, prov_slug)
-        safe_name = _build_standardized_filename(inferred_ext, stem, prov_slug)
+        safe_name = _build_standardized_filename(
+            inferred_ext, stem, prov_slug, page_index=page_index
+        )
         filepath = os.path.join(target_dir, safe_name)
+
+        def _release_name() -> None:
+            """Give back the reserved sequence number, if one was taken."""
+            if page_index is None:
+                release_counter(name_key)
 
         if not overwrite_existing() and os.path.exists(filepath):
             logger.info("File already exists, skipping: %s", filepath)
             return filepath if counts_as_success else None
 
         if not _BUDGET.allow_new_file(provider, work_id):
-            logger.warning("Download budget stop-policy tripped; skipping %s", url)
-            release_counter(name_key)
+            logger.warning("Download budget stop-policy tripped; skipping %s", log_url)
+            _release_name()
             return None
 
         # Classify the payload into its budget bucket by extension so PDF and
@@ -695,10 +768,10 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
         ):
             logger.warning(
                 "Download budget (bytes) would be exceeded by %s (%d bytes); skipping.",
-                url,
+                log_url,
                 content_len_int,
             )
-            release_counter(name_key)
+            _release_name()
             return None
 
         # Stream into a temporary <name>.part file and only promote it to the
@@ -731,11 +804,13 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             _build_standardized_filename above is handed back on all of them.
             Spending it would leave a permanent hole in the page numbering:
             the next page lands at image_002 with nothing at image_001, and a
-            downstream consumer reads the gap as a missing page.
+            downstream consumer reads the gap as a missing page. A page-indexed
+            name reserved nothing, so there _release_name is a no-op and the
+            gap it leaves is the honest record of a page that never arrived.
             """
             _safe_remove(part_path)
             _BUDGET.refund(budget_type, work_id, bytes_written)
-            release_counter(name_key)
+            _release_name()
 
         # Buffer the leading bytes so the post-write validators need not reopen
         # the just-written file (which triggers a Defender re-scan on Windows).
@@ -776,7 +851,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             logger.warning(
                 "Error while streaming %s to %s: %s; discarding partial file "
                 "and retrying.",
-                url,
+                log_url,
                 part_path,
                 e,
             )
@@ -786,7 +861,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             # A disk-side failure will not be cured by another attempt.
             logger.error(
                 "Error while streaming %s to %s: %s; discarding partial file.",
-                url,
+                log_url,
                 part_path,
                 e,
             )
@@ -807,7 +882,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
 
         # Reject zero-byte downloads outright.
         if bytes_written == 0:
-            logger.warning("Downloaded 0 bytes for %s; discarding.", url)
+            logger.warning("Downloaded 0 bytes for %s; discarding.", log_url)
             _discard_partial()
             return None
 
@@ -829,7 +904,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             logger.error(
                 "Incomplete download for %s: wrote %d of %d declared bytes; "
                 "discarding.",
-                url,
+                log_url,
                 bytes_written,
                 content_len,
             )
@@ -845,7 +920,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 logger.info(
                     "Resolved payload of %s as %s from its leading bytes "
                     "(declared Content-Type %r, URL suffix %r)",
-                    url,
+                    log_url,
                     resolved_ext,
                     content_type or "",
                     inferred_ext,
@@ -855,7 +930,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 # bucket alike, so all three are redone rather than patched.
                 # A PDF served by a CGI endpoint therefore lands in objects/
                 # under a .pdf name instead of in metadata/ as a .fcgi.
-                release_counter(name_key)
+                _release_name()
                 _BUDGET.refund(budget_type, work_id, bytes_written)
                 written_part = part_path
 
@@ -871,10 +946,13 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     logger.info(log_msg)
                 _ensure_dir(target_dir)
 
+                page_index = _page_index_for_name(inferred_ext, filename)
                 name_key = _counter_key(inferred_ext, stem, prov_slug)
                 filepath = os.path.join(
                     target_dir,
-                    _build_standardized_filename(inferred_ext, stem, prov_slug),
+                    _build_standardized_filename(
+                        inferred_ext, stem, prov_slug, page_index=page_index
+                    ),
                 )
                 part_path = filepath + ".part"
                 budget_type = _budget_bucket(inferred_ext)
@@ -886,17 +964,17 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                         "Download budget (%s) would be exceeded by %s (%d bytes); "
                         "discarding.",
                         budget_type,
-                        url,
+                        log_url,
                         bytes_written,
                     )
-                    release_counter(name_key)
+                    _release_name()
                     _safe_remove(written_part)
                     return None
 
                 if not overwrite_existing() and os.path.exists(filepath):
                     logger.info("File already exists, skipping: %s", filepath)
                     _BUDGET.refund(budget_type, work_id, bytes_written)
-                    release_counter(name_key)
+                    _release_name()
                     _safe_remove(written_part)
                     return filepath if counts_as_success else None
 
@@ -908,12 +986,23 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     )
                     _discard_partial()
                     return None
+            elif deferred_rejection:
+                # The bytes settled nothing either, so the endpoint suffix is
+                # the best type this payload will ever have -- and it was
+                # already outside the allowed list. Apply the rejection that
+                # was held back before streaming.
+                logger.info(
+                    "Extension %s not in allowed list; skipping download",
+                    inferred_ext,
+                )
+                _discard_partial()
+                return None
 
         is_valid, error_msg = _validate_file_magic_bytes(
             part_path, inferred_ext, head=head_bytes, complete=head_complete
         )
         if not is_valid:
-            logger.warning("%s; discarding: %s", error_msg, url)
+            logger.warning("%s; discarding: %s", error_msg, log_url)
             _discard_partial()
             return None
 
@@ -922,15 +1011,18 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 part_path, url, provider, head=head_bytes, complete=head_complete
             )
             if not is_valid:
-                logger.warning("%s; discarding: %s", error_msg, url)
+                logger.warning("%s; discarding: %s", error_msg, log_url)
                 _discard_partial()
                 return None
 
-        # The directory is created here rather than before streaming, so a
-        # provisional extension never leaves an empty directory behind.
-        _ensure_dir(target_dir)
-
         try:
+            # The directory is created here rather than before streaming, so a
+            # provisional extension never leaves an empty directory behind. It
+            # sits inside the same guard as the promotion below: a makedirs
+            # that fails (a read-only volume, a path-length limit) otherwise
+            # escaped with the .part file, its booked bytes and its sequence
+            # number all still outstanding.
+            _ensure_dir(target_dir)
             # A fully downloaded, fully validated multi-megabyte PDF is exactly
             # what Defender opens to scan on close, and a bare os.replace threw
             # it away on the first transient lock. Same bounded retry the state
@@ -942,7 +1034,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             return None
 
         log_suffix = " (insecure)" if is_insecure_retry else ""
-        logger.info("Downloaded %s -> %s%s", url, filepath, log_suffix)
+        logger.info("Downloaded %s -> %s%s", log_url, filepath, log_suffix)
         _BUDGET.add_file(provider, work_id)
 
         if not counts_as_success:
@@ -994,7 +1086,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     )
                     logger.warning(
                         "429 Too Many Requests for %s; sleeping %.1fs (attempt %d/%d)",
-                        url,
+                        log_url,
                         sleep_s,
                         attempt,
                         max_attempts,
@@ -1010,7 +1102,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     logger.warning(
                         "%s for %s; sleeping %.1fs (attempt %d/%d)",
                         response.status_code,
-                        url,
+                        log_url,
                         sleep_s,
                         attempt,
                         max_attempts,
@@ -1028,7 +1120,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     logger.error(
                         "Non-retryable HTTP %s for %s; aborting download",
                         response.status_code,
-                        url,
+                        log_url,
                     )
                     return None
 
@@ -1049,19 +1141,19 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                     logger.warning(
                         "SSL verify failed for %s; insecure retry suppressed for "
                         "provider %s because the request carries a credential.",
-                        url,
+                        log_url,
                         provider or "unknown",
                     )
                 else:
                     logger.warning(
                         "SSL verify failed for %s; retrying once with verify=False "
                         "due to policy.",
-                        url,
+                        log_url,
                     )
                     verify = False
                     insecure_retry_used = True
                     continue
-            logger.error("SSL error downloading %s: %s", url, e)
+            logger.error("SSL error downloading %s: %s", log_url, e)
             # A handshake this client can never complete is a provider-level
             # outage, so it feeds the breaker like any other terminal transport
             # failure; otherwise a provider failing 100% of the time on
@@ -1075,7 +1167,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
             # is not the one at fault: skip both the backoff budget and the
             # breaker so one bad item's metadata does not poison the rest.
             if isinstance(e, INVALID_URL_ERRORS):
-                logger.error("Invalid URL %s: %s; not retrying", url, e)
+                logger.error("Invalid URL %s: %s; not retrying", log_url, e)
                 return None
 
             # Transient network failures (timeouts, connection resets) are
@@ -1088,7 +1180,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 sleep_s = _calculate_backoff(attempt, None)
                 logger.warning(
                     "Request error for %s: %s; sleeping %.1fs (attempt %d/%d)",
-                    url,
+                    log_url,
                     e,
                     sleep_s,
                     attempt,
@@ -1096,7 +1188,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
                 )
                 time.sleep(sleep_s)
                 continue
-            logger.error("Error downloading %s: %s", url, e)
+            logger.error("Error downloading %s: %s", log_url, e)
             if cb:
                 cb.record_failure(provider or "unknown")
             return None
@@ -1108,7 +1200,7 @@ def download_file(url: str, folder_path: str, filename: str) -> str | None:
     logger.error(
         "Giving up after %d attempts for %s",
         max_attempts,
-        url,
+        log_url,
     )
     if cb:
         cb.record_failure(provider or "unknown")

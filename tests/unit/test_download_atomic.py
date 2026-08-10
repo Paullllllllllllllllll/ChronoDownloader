@@ -699,3 +699,339 @@ class TestDownloadFileTerminalFailures:
         session, cb = self._run(exc, str(tmp_path / "work"))
         assert session.get.call_count == 1
         cb.record_failure.assert_not_called()
+
+
+# ============================================================================
+# Page-indexed naming -- a failed page leaves a gap, not a renumbering
+# ============================================================================
+
+
+def _as_cm(response: MagicMock) -> MagicMock:
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=response)
+    cm.__exit__ = MagicMock(return_value=False)
+    return cm
+
+
+def _make_404() -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 404
+    resp.headers = {}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def _jpeg(n: int = 512) -> bytes:
+    return b"\xff\xd8\xff\xe0" + b"x" * n
+
+
+def _jpeg_response() -> MagicMock:
+    payload = _jpeg()
+
+    def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload
+
+    return _make_response({"Content-Type": "image/jpeg"}, good_iter)
+
+
+def _metadata_files(folder: str) -> list[str]:
+    metadata = os.path.join(folder, "metadata")
+    if not os.path.isdir(metadata):
+        return []
+    return sorted(os.listdir(metadata))
+
+
+class TestPageIndexedNaming:
+    """A work's page images are named from the caller's page index.
+
+    Every page of a search-driven work shares one naming counter, so the
+    number a permanently failed page gave back was taken by the NEXT page:
+    page 3 landed at image_002 and every file behind it shifted. A resume run
+    then found the shifted file where the missing page was predicted and
+    called the work complete with a page absent.
+    """
+
+    def _pages(self, folder: str, session: MagicMock, count: int = 3) -> list[str]:
+        from api.core.context import set_current_name_stem, set_current_provider
+
+        set_current_name_stem("my_work")
+        set_current_provider("mdz")
+
+        results: list[str] = []
+        dl_mod._BUDGET._exhausted = False
+        with (
+            patch.object(dl_mod, "get_session", return_value=session),
+            patch("api.core.download.time.sleep"),
+        ):
+            for idx in range(1, count + 1):
+                out = dl_mod.download_file(
+                    f"https://example.org/img{idx}.jpg",
+                    folder,
+                    f"mdz_bsb123_p{idx:05d}.jpg",
+                )
+                results.append(out or "")
+        return results
+
+    def test_failed_page_leaves_a_gap_instead_of_shifting(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Page 2 fails permanently: pages 1 and 3 keep their own numbers."""
+        folder = str(tmp_path / "work")
+        session = MagicMock()
+        session.get.side_effect = [
+            _as_cm(_jpeg_response()),
+            _as_cm(_make_404()),
+            _as_cm(_jpeg_response()),
+        ]
+
+        results = self._pages(folder, session)
+
+        assert results[1] == ""
+        assert _objects_files(folder) == [
+            "my_work_mdz_image_001.jpg",
+            "my_work_mdz_image_003.jpg",
+        ]
+
+    def test_resume_retries_only_the_missing_page(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """With 001 and 003 on disk, a resume run fetches page 2 alone."""
+        folder = str(tmp_path / "work")
+        objects = os.path.join(folder, "objects")
+        os.makedirs(objects, exist_ok=True)
+        for name in ("my_work_mdz_image_001.jpg", "my_work_mdz_image_003.jpg"):
+            with open(os.path.join(objects, name), "wb") as f:
+                f.write(_jpeg())
+
+        session = MagicMock()
+        session.get.side_effect = [_as_cm(_jpeg_response())]
+
+        results = self._pages(folder, session)
+
+        assert session.get.call_count == 1
+        assert session.get.call_args_list[0].args[0] == "https://example.org/img2.jpg"
+        assert all(results)
+        assert _objects_files(folder) == [
+            "my_work_mdz_image_001.jpg",
+            "my_work_mdz_image_002.jpg",
+            "my_work_mdz_image_003.jpg",
+        ]
+
+    def test_resume_keeps_numbering_when_the_retry_fails_again(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """A page that fails twice must not pull page 3 into its slot.
+
+        This is where the counter-based prediction came apart: page 2's failed
+        retry gave its number back, so the skip probe for page 3 predicted
+        image_002, missed the file it already had, and downloaded page 3 a
+        second time under page 2's name.
+        """
+        folder = str(tmp_path / "work")
+        objects = os.path.join(folder, "objects")
+        os.makedirs(objects, exist_ok=True)
+        for name in ("my_work_mdz_image_001.jpg", "my_work_mdz_image_003.jpg"):
+            with open(os.path.join(objects, name), "wb") as f:
+                f.write(_jpeg())
+
+        session = MagicMock()
+        session.get.side_effect = [_as_cm(_make_404())]
+
+        results = self._pages(folder, session)
+
+        assert session.get.call_count == 1
+        assert session.get.call_args_list[0].args[0] == "https://example.org/img2.jpg"
+        assert results[1] == ""
+        assert _objects_files(folder) == [
+            "my_work_mdz_image_001.jpg",
+            "my_work_mdz_image_003.jpg",
+        ]
+
+    def test_non_indexed_names_keep_the_success_order_counter(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """A filename carrying no page index is numbered exactly as before.
+
+        The first download is discarded as a short read, so its number must
+        still be handed back and the two files that do arrive must be 001 and
+        002 -- the counter behavior the indexed path deliberately bypasses.
+        """
+        from api.core.context import set_current_name_stem, set_current_provider
+
+        payload = _jpeg()
+
+        def short_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+            yield payload[:16]
+
+        session = MagicMock()
+        session.get.side_effect = [
+            _as_cm(
+                _make_response(
+                    {
+                        "Content-Type": "image/jpeg",
+                        "Content-Length": str(len(payload)),
+                    },
+                    short_iter,
+                )
+            ),
+            _as_cm(_jpeg_response()),
+            _as_cm(_jpeg_response()),
+        ]
+        folder = str(tmp_path / "work")
+
+        set_current_name_stem("my_work")
+        set_current_provider("mdz")
+        dl_mod._BUDGET._exhausted = False
+        with patch.object(dl_mod, "get_session", return_value=session):
+            assert dl_mod.download_file("https://e.org/a.jpg", folder, "a") is None
+            assert dl_mod.download_file("https://e.org/b.jpg", folder, "b")
+            assert dl_mod.download_file("https://e.org/c.jpg", folder, "c")
+
+        assert _objects_files(folder) == [
+            "my_work_mdz_image_001.jpg",
+            "my_work_mdz_image_002.jpg",
+        ]
+
+
+# ============================================================================
+# Endpoint URLs -- the allowed-extension decision waits for the payload
+# ============================================================================
+
+
+class TestDeferredExtensionDecision:
+    """A ``.fcgi`` suffix names the script, so it cannot reject the download.
+
+    With ``save_disallowed_to_metadata`` off, the pre-stream check rejected
+    the endpoint suffix outright and returned before a byte was read, so the
+    payload sniffing never ran and the PDF the endpoint serves was lost.
+    """
+
+    CFG = {
+        "allowed_object_extensions": [".pdf"],
+        "save_disallowed_to_metadata": False,
+    }
+    URL = "https://example.org/cgi/diglitData.fcgi?id=42"
+
+    def _download(self, folder: str, payload: bytes) -> str | None:
+        def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+            yield payload
+
+        resp = _make_response({"Content-Type": "application/octet-stream"}, good_iter)
+        session = _make_session(resp)
+
+        dl_mod._BUDGET._exhausted = False
+        with (
+            patch.object(dl_mod, "get_session", return_value=session),
+            patch("api.core.download.get_download_config", return_value=self.CFG),
+        ):
+            return dl_mod.download_file(self.URL, folder, "book")
+
+    def test_pdf_payload_is_kept_as_an_object(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        folder = str(tmp_path / "work")
+        result = self._download(folder, b"%PDF-1.4\n" + b"x" * 512)
+
+        assert result is not None
+        assert result.endswith(".pdf")
+        assert os.path.dirname(result) == os.path.join(folder, "objects")
+        assert _objects_files(folder) == ["book_unknown.pdf"]
+        assert _metadata_files(folder) == []
+
+    def test_unresolvable_payload_is_rejected_after_streaming(
+        self, tmp_path: Any, mock_config: dict[str, Any]
+    ) -> None:
+        """Junk bytes settle nothing, so the held-back rejection applies."""
+        folder = str(tmp_path / "work")
+        before_images = dl_mod._BUDGET.total_images_bytes
+        before_pdfs = dl_mod._BUDGET.total_pdfs_bytes
+
+        result = self._download(folder, b"not a recognizable payload at all")
+
+        assert result is None
+        assert _objects_files(folder) == []
+        assert _metadata_files(folder) == []
+        # Nothing at the work root either: the .part file streamed there while
+        # the payload type was still provisional.
+        assert [p for p in os.listdir(folder) if p.endswith(".part")] == []
+        assert dl_mod._BUDGET.total_images_bytes == before_images
+        assert dl_mod._BUDGET.total_pdfs_bytes == before_pdfs
+
+
+# ============================================================================
+# Finalize-time makedirs failure
+# ============================================================================
+
+
+def test_ensure_dir_failure_at_finalize_discards_cleanly(
+    tmp_path: Any, mock_config: dict[str, Any]
+) -> None:
+    """An OSError creating objects/ at finalize must not leak the .part file.
+
+    The directory creation sat outside the guard around the promotion, so the
+    error escaped with the partial file on disk, its bytes still booked and
+    its sequence number still spent.
+    """
+    payload = b"%PDF-1.4\n" + b"x" * 1024
+
+    def good_iter(chunk_size: int = 8192) -> Iterator[bytes]:
+        yield payload
+
+    resp = _make_response({"Content-Type": "application/pdf"}, good_iter)
+    session = _make_session(resp)
+    folder = str(tmp_path / "work")
+    real_ensure_dir = dl_mod._ensure_dir
+
+    def flaky_ensure_dir(path: str) -> None:
+        # The finalize-time call is the one that runs once the .part file
+        # exists; the earlier calls must still succeed so the stream has
+        # somewhere to go.
+        objects = os.path.join(folder, "objects")
+        if os.path.isdir(objects) and any(
+            p.endswith(".part") for p in os.listdir(objects)
+        ):
+            raise OSError("cannot create directory")
+        real_ensure_dir(path)
+
+    key = (to_snake_case("book"), get_provider_slug(None, None) or "unknown", "pdf")
+
+    dl_mod._BUDGET._exhausted = False
+    before = dl_mod._BUDGET.total_pdfs_bytes
+    with (
+        patch.object(dl_mod, "get_session", return_value=session),
+        patch.object(dl_mod, "_ensure_dir", side_effect=flaky_ensure_dir),
+    ):
+        result = dl_mod.download_file("https://example.org/book.pdf", folder, "book")
+
+    assert result is None
+    assert _objects_files(folder) == []
+    assert dl_mod._BUDGET.total_pdfs_bytes == before
+    assert peek_counter(key) == 1
+
+
+class TestPageIndexSpellings:
+    """Every page loop's filename convention must be recognized as indexed."""
+
+    def test_all_three_spellings_yield_the_index(self) -> None:
+        from api.core.context import clear_current_name_stem, set_current_name_stem
+
+        set_current_name_stem("my_work")
+        try:
+            assert dl_mod._page_index_for_name(".jpg", "ia_id_p00007.jpg") == 7
+            assert dl_mod._page_index_for_name(".jpg", "google_v_page_0012.jpg") == 12
+            assert dl_mod._page_index_for_name(".jpg", "wellcome_w_img0003.jpg") == 3
+        finally:
+            clear_current_name_stem()
+
+    def test_non_page_names_stay_on_the_counter(self) -> None:
+        from api.core.context import clear_current_name_stem, set_current_name_stem
+
+        set_current_name_stem("my_work")
+        try:
+            assert dl_mod._page_index_for_name(".jpg", "ia_id_thumbnail.jpg") is None
+            assert dl_mod._page_index_for_name(".jpg", "ia_id_cover.jpg") is None
+            assert dl_mod._page_index_for_name(".jpg", "google_v_file_1.jpg") is None
+            # Non-image payloads are never page-indexed.
+            assert dl_mod._page_index_for_name(".pdf", "x_p00001.pdf") is None
+        finally:
+            clear_current_name_stem()
