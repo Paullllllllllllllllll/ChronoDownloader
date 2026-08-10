@@ -1,4 +1,4 @@
-# ChronoDownloader v1.29.0
+# ChronoDownloader v1.29.1
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1416,6 +1416,11 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.29.1** (10 August 2026) -- The test suite is pinned to the tracked
+  example configuration via `CHRONO_CONFIG_PATH`, so tests no longer load a
+  developer's local `config.json`; a real `deferred.state_file` setting
+  there had routed state writes from tests into the actual state file and
+  polluted it with test entries.
 - **v1.29.0** (10 August 2026) -- Maintenance sweep: page images take their
   number from the page index the caller encodes, so a permanently failed page
   leaves an honest gap that a resume run retries instead of shifting every

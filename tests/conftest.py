@@ -18,6 +18,18 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+# Pin the suite to the tracked example config. Loading the developer's real
+# config.json would make test outcomes depend on local settings and -- via
+# deferred.state_file, which the example config deliberately omits -- route
+# state writes from any test that instantiates the real StateManager or
+# DeferredQueue into the developer's actual state file. A clean clone has no
+# config.json and already runs against the example; this makes every
+# environment behave like one. reset_config_cache saves and restores this
+# value around each test, so tests that override the variable stay isolated.
+os.environ["CHRONO_CONFIG_PATH"] = str(
+    Path(__file__).resolve().parent.parent / "config.example.json"
+)
+
 # ============================================================================
 # Path and Directory Fixtures
 # ============================================================================
