@@ -2,7 +2,7 @@
 
 Shared orchestration patterns used by multiple providers: download page images
 in a loop with budget checks; fetch a manifest, save it, try renderings, fall
-back to page images; try PDFs first with IIIF fallback.
+back to page images.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ __all__ = [
     "download_page_images",
     "download_direct_image_urls",
     "download_iiif_manifest_and_images",
-    "try_pdf_first_then_images",
 ]
 
 
@@ -390,67 +389,5 @@ def download_iiif_manifest_and_images(
             direct_urls, output_folder, provider_key, item_id
         ):
             any_downloaded = True
-
-    return any_downloaded
-
-
-def try_pdf_first_then_images(
-    pdf_urls: list[str],
-    manifest_url: str | None,
-    output_folder: str,
-    provider_key: str,
-    item_id: str,
-) -> bool:
-    """Try downloading PDFs first, then fall back to IIIF images if needed.
-
-    Args:
-        pdf_urls: List of PDF URLs to try
-        manifest_url: Optional IIIF manifest URL for image fallback
-        output_folder: Target directory
-        provider_key: Provider identifier
-        item_id: Item identifier
-
-    Returns:
-        True if any content was downloaded
-    """
-    any_downloaded = False
-
-    for url in pdf_urls:
-        if not url:
-            continue
-        try:
-            if download_file(url, output_folder, f"{provider_key}_{item_id}_content"):
-                any_downloaded = True
-                if prefer_pdf_over_images():
-                    logger.info(
-                        "%s: downloaded PDF; skipping images per config.",
-                        provider_key.upper(),
-                    )
-                    return True
-        except Exception:
-            logger.exception(
-                "%s: error downloading PDF from %s",
-                provider_key.upper(),
-                url,
-            )
-
-    # No prefer-PDF cutoff needed here: a successful PDF under
-    # prefer_pdf_over_images() already returned True inside the loop above.
-    if manifest_url:
-        try:
-            if download_iiif_manifest_and_images(
-                manifest_url,
-                output_folder,
-                provider_key,
-                item_id,
-                skip_images_if_rendering=False,
-            ):
-                any_downloaded = True
-        except Exception:
-            logger.exception(
-                "%s: error downloading IIIF images for %s",
-                provider_key.upper(),
-                item_id,
-            )
 
     return any_downloaded

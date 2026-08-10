@@ -45,7 +45,6 @@ def test_api_iiif_package_surface() -> None:
             "download_page_images",
             "download_direct_image_urls",
             "download_iiif_manifest_and_images",
-            "try_pdf_first_then_images",
             "download_iiif_renderings",
             "is_iiif_manifest_url",
             "detect_provider_from_url",
