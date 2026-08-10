@@ -80,7 +80,8 @@ def search_loc(
                 if isinstance(res, dict) and res.get("iiif_manifest"):
                     return cast(str, res.get("iiif_manifest"))
         elif isinstance(resources, dict):
-            return cast(str | None, resources.get("iiif_manifest") or iiif_manifest)
+            # No fallback needed: a truthy iiif_manifest returned above.
+            return cast(str | None, resources.get("iiif_manifest"))
         return None
 
     def _item_to_search_result(item: dict[str, Any]) -> SearchResult:

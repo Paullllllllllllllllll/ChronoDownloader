@@ -294,12 +294,6 @@ class DownloadScheduler:
             return self._completed_count
 
     @property
-    def success_count(self) -> int:
-        """Number of tasks that completed successfully."""
-        with self._lock:
-            return self._success_count
-
-    @property
     def failure_count(self) -> int:
         """Number of tasks that failed."""
         with self._lock:

@@ -231,7 +231,6 @@ def score_candidate(
 
     return {
         "score": title,
-        "title_score": title,
         "creator_score": cs,
         "creator_bonus": creator_bonus,
         "boost": boost,

@@ -50,14 +50,6 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
     return out
 
 
-def _classify_status(value: Any) -> str:
-    """Classify a CSV status cell (delegates to the single shared classifier).
-
-    Returns ``"completed"``, ``"failed"``, ``"deferred"``, or ``"pending"``.
-    """
-    return _parse_status(value)
-
-
 def _apply_runtime_config_overrides(
     args: argparse.Namespace,
     config: dict[str, Any],
@@ -221,7 +213,7 @@ def _filter_pending_rows(
             # IndexingError for frames with a non-default index.
             else pd.Series(pd.NA, index=works_df.index)
         )
-        status_labels = status_series.apply(_classify_status)
+        status_labels = status_series.apply(_parse_status)
         if pending_mode == "new":
             pending_df = works_df[status_labels == "pending"].copy()
         else:  # pending_mode == "failed"
@@ -237,7 +229,9 @@ def _filter_pending_rows(
         ].copy()
 
     limit = getattr(args, "limit", None)
-    if limit is not None and limit >= 0:
+    # No >= 0 check needed: the parser's _non_negative_int already rejects
+    # negative values before they can reach this point.
+    if limit is not None:
         pending_df = pending_df.head(limit).copy()
 
     return pending_df

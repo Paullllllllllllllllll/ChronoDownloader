@@ -263,7 +263,7 @@ class TestScoreCandidateYearTerm:
         assert scores["year_penalty"] == 0.0
         assert scores["candidate_year"] is None
         assert scores["total"] == pytest.approx(
-            scores["title_score"] + scores["creator_bonus"] + scores["boost"]
+            scores["score"] + scores["creator_bonus"] + scores["boost"]
         )
 
     def test_no_config_read_without_a_query_year(self) -> None:
@@ -282,7 +282,7 @@ class TestScoreCandidateYearTerm:
         assert scores["year_penalty"] == MAX_YEAR_PENALTY
         assert scores["candidate_year"] == 2019
         assert scores["total"] == pytest.approx(
-            scores["title_score"]
+            scores["score"]
             + scores["creator_bonus"]
             + scores["boost"]
             - MAX_YEAR_PENALTY
@@ -298,7 +298,6 @@ class TestScoreCandidateYearTerm:
             _result(date="1651"), "Le Cuisinier francois", None, 0.2, 1651
         )
         assert penalized["score"] == clean["score"] == 100
-        assert penalized["title_score"] == clean["title_score"]
 
     def test_tolerance_comes_from_config(self) -> None:
         _set_tolerance(500)
@@ -387,7 +386,7 @@ class TestRankingIntegration:
         for sr in candidates:
             scores = sr.raw["__matching__"]
             assert scores["total"] == pytest.approx(
-                scores["title_score"] + scores["creator_bonus"] + scores["boost"]
+                scores["score"] + scores["creator_bonus"] + scores["boost"]
             )
 
     def test_gate_is_unchanged_by_the_penalty(self) -> None:
