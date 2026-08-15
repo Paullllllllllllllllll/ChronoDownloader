@@ -67,5 +67,8 @@ api_keys.json
 # Local backup archives (bundles, snapshots; kept locally, not versioned)
 backup/
 
+# Local scratch space (throwaway experiments; kept locally, not versioned)
+scratch/
+
 # Local environment files (never versioned)
 .env*

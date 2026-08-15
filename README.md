@@ -1,4 +1,4 @@
-# ChronoDownloader v1.30.0
+# ChronoDownloader v1.30.1
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1416,6 +1416,12 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.30.1** (15 August 2026) -- Repository hygiene. The local
+  scratch directory used for throwaway experiments was ignored only
+  through the untracked `.git/info/exclude`, so the rule did not travel
+  with a fresh clone; `scratch/` now lives in the tracked `.gitignore`
+  alongside the other local-only paths, and the duplicate exclude line
+  was dropped. No runtime behavior changes.
 - **v1.30.0** (10 August 2026) -- The shared IIIF strategy
   `download_iiif_manifest_and_images` gains keyword-only `manifest` and
   `manifest_filename` parameters, and the Gallica, MDZ, Polona, and DDB
