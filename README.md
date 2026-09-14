@@ -1,4 +1,4 @@
-# ChronoDownloader v1.30.1
+# ChronoDownloader v1.30.2
 
 A Python tool for discovering and downloading digitized historical
 sources from major digital libraries worldwide.
@@ -1416,6 +1416,9 @@ v1.0.0 do not exist.
 
 ## Changelog
 
+- **v1.30.2** (14 September 2026) -- Repository hygiene. The untracked
+  local `config_small.json` matched no ignore rule and could be staged by
+  an accidental `git add -A`; it is now ignored alongside `config.json`.
 - **v1.30.1** (15 August 2026) -- Repository hygiene. The local
   scratch directory used for throwaway experiments was ignored only
   through the untracked `.git/info/exclude`, so the rule did not travel
