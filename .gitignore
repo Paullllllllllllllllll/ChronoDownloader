@@ -24,6 +24,7 @@ dist/
 .windsurf
 .claude
 CLAUDE.md
+AGENTS.md
 
 # Caches
 .mypy_cache/
