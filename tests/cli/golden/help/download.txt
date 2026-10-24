@@ -1,0 +1,89 @@
+usage: chronodownloader download --input FILE [options]
+
+Search the providers for every work of a works CSV, judge the candidates and download the
+preferred copy into the output root. The store chronodownloader.sqlite in the output root records
+every work, so a rerun takes up where the last one stopped.
+
+options:
+  -h, --help            show this help message and exit
+
+works:
+  --input FILE          works CSV with entry_id and title
+  --entry-ids LIST      only these entry_id values; default: all rows
+  --limit N             at most N works after the filters; default: all
+  --only LIST           only works in these stored statuses; from new, complete, partial, failed,
+                        no_match, needs_review, deferred, blocked; default:
+                        new,partial,failed,deferred,blocked
+  --research            search and judge again; old candidates kept as history
+
+search and matching:
+  --matching {judge,fuzzy,hybrid}
+                        judge needs the OpenRouter key; fuzzy needs none; default: judge
+  --edition-policy {any_edition,same_edition,any_language}
+                        editions accepted without review; default: any_edition
+  --providers LIST      providers to search, in preference order; default: defaults.providers
+  --max-candidates N    candidates kept per provider; default: 5
+  --search-timeout SECONDS
+                        per-provider search timeout; 0 disables; default: 60
+
+download:
+  --format {images,pdf,both}
+                        what to download: pdf takes the item's PDF when it offers one, else its
+                        page images; images takes page images only; both takes both; default: pdf
+  --max-pages N         page limit per work, binding page images only; the smaller of this and the
+                        provider's max_pages applies; 0 = none; default: 0
+  --include-metadata, --no-include-metadata
+                        save the metadata files; default: on
+  --force               re-download complete works; take over unstored folders
+
+size limits:
+  --total-images-gb GB  run size limit of page images in GB; 0 = none; default:
+                        download_limits.total.images_gb
+  --total-pdfs-gb GB    run size limit of PDFs in GB; 0 = none; default:
+                        download_limits.total.pdfs_gb
+  --total-metadata-gb GB
+                        run size limit of metadata files in GB; 0 = none; default:
+                        download_limits.total.metadata_gb
+  --work-images-gb GB   per-work size limit of page images in GB; 0 = none; default:
+                        download_limits.per_work.images_gb
+  --work-pdfs-gb GB     per-work size limit of PDFs in GB; 0 = none; default:
+                        download_limits.per_work.pdfs_gb
+  --work-metadata-mb MB
+                        per-work size limit of metadata files in MB; 0 = none; default:
+                        download_limits.per_work.metadata_mb
+  --on-exceed {stop,skip}
+                        stop the run or skip the file at a limit; default:
+                        download_limits.on_exceed
+
+output:
+  --output DIR          output root holding chronodownloader.sqlite; default: downloaded_works
+
+run control:
+  --concurrency N       works processed in parallel; default: 3
+  --dry-run             plan without network requests or writes
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    no work failed; works left needs_review, deferred or blocked are
+       open, not failed, and counted in the summary; a dry run that planned
+  1    a work failed
+  2    usage or configuration error: an invalid option or settings file, a
+       missing works CSV, a store the tool refuses, or an unset judge key
+       under --matching judge or hybrid (--matching fuzzy needs none)
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.
+
+Examples:
+  Download the works of a CSV with the default judge:
+    chronodownloader download --input works.csv --output out
+  Without a judge key, from two providers, page images only:
+    chronodownloader download --input works.csv --matching fuzzy
+      --providers mdz,internet_archive --format images
+  Plan a run without network requests and print the summary as JSON:
+    chronodownloader download --input works.csv --dry-run --json

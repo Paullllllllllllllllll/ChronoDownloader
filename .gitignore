@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+*.egg-info/
+.eggs/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+
+# IDE / Editors
+.idea/
+.vscode/
+*.swp
+.windsurf
+.claude
+CLAUDE.md
+AGENTS.md
+/docs/
+
+# Caches
+.mypy_cache/
+.pytest_cache/
+.cache/
+.coverage
+.downloader_state.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project outputs and inputs
+/downloaded_works/
+index.csv
+sampled_books.csv
+
+# Logs (default log file logs/application.log)
+/logs/
+
+# Local configs (the example is chronodownloader/resources/settings.example.yaml)
+/config/settings.yaml
+/config.json
+/config_small.json
+*.local.json
+/scripts/sync_sampled_to_index.py
+/essential_monographies_1.csv
+/essential_monographies_1_config.json
+/essential_monographies_2.csv
+/essential_monographies_2_config.json
+/essential_monographies_3.csv
+/essential_monographies_3_config.json
+/.windsurf/workflows/test-chrono-downloader.md
+/essential_monographies_1_downloads/
+/essential_monographies_2_downloads/
+api_keys.json
+
+# Local backup archives (bundles, snapshots; kept locally, not versioned)
+backup/
+
+# Local scratch space (throwaway experiments; kept locally, not versioned)
+scratch/
+
+# Local environment files (never versioned)
+.env*

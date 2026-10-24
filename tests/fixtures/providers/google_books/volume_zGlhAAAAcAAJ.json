@@ -1,0 +1,64 @@
+{
+ "kind": "books#volume",
+ "id": "zGlhAAAAcAAJ",
+ "etag": "qP3Y88Vta9Y",
+ "selfLink": "https://www.googleapis.com/books/v1/volumes/zGlhAAAAcAAJ",
+ "volumeInfo": {
+  "title": "Handboekje voor koek- en banketbakkers, benevens konfituriers, als ook koks en keukenmeiden",
+  "subtitle": "behelzende: eene verzameling der laatste en beste voorschriften, tot het keurig bereiden van allerlei gebak en konfituren, gedroogde en ingelegde vruchten, verschillende soorten van ijs, likeuren en stroopen, enz. enz",
+  "publisher": "S. de Grebber",
+  "publishedDate": "1840",
+  "readingModes": {
+   "text": false,
+   "image": true
+  },
+  "pageCount": 80,
+  "printedPageCount": 84,
+  "dimensions": {
+   "height": "17.00 cm"
+  },
+  "printType": "BOOK",
+  "maturityRating": "NOT_MATURE",
+  "allowAnonLogging": false,
+  "contentVersion": "0.4.5.0.full.1",
+  "panelizationSummary": {
+   "containsEpubBubbles": false,
+   "containsImageBubbles": false
+  },
+  "imageLinks": {
+   "smallThumbnail": "http://books.google.com/books/content?id=zGlhAAAAcAAJ&printsec=frontcover&img=1&zoom=5&edge=curl&imgtk=REDACTED&source=gbs_api",
+   "thumbnail": "http://books.google.com/books/content?id=zGlhAAAAcAAJ&printsec=frontcover&img=1&zoom=1&edge=curl&imgtk=REDACTED&source=gbs_api",
+   "small": "http://books.google.com/books/content?id=zGlhAAAAcAAJ&printsec=frontcover&img=1&zoom=2&edge=curl&imgtk=REDACTED&source=gbs_api",
+   "medium": "http://books.google.com/books/content?id=zGlhAAAAcAAJ&printsec=frontcover&img=1&zoom=3&edge=curl&imgtk=REDACTED&source=gbs_api",
+   "large": "http://books.google.com/books/content?id=zGlhAAAAcAAJ&printsec=frontcover&img=1&zoom=4&edge=curl&imgtk=REDACTED&source=gbs_api"
+  },
+  "language": "nl",
+  "previewLink": "http://books.google.ch/books?id=zGlhAAAAcAAJ&hl=&source=gbs_api",
+  "infoLink": "https://play.google.com/store/books/details?id=zGlhAAAAcAAJ&source=gbs_api",
+  "canonicalVolumeLink": "https://play.google.com/store/books/details?id=zGlhAAAAcAAJ"
+ },
+ "saleInfo": {
+  "country": "CH",
+  "saleability": "FREE",
+  "isEbook": true,
+  "buyLink": "https://play.google.com/store/books/details?id=zGlhAAAAcAAJ&rdid=book-zGlhAAAAcAAJ&rdot=1&source=gbs_api"
+ },
+ "accessInfo": {
+  "country": "CH",
+  "viewability": "ALL_PAGES",
+  "embeddable": true,
+  "publicDomain": true,
+  "textToSpeechPermission": "ALLOWED",
+  "epub": {
+   "isAvailable": false,
+   "downloadLink": "http://books.google.ch/books/download/Handboekje_voor_koek_en_banketbakkers_be.epub?id=zGlhAAAAcAAJ&hl=&output=epub&source=gbs_api"
+  },
+  "pdf": {
+   "isAvailable": true,
+   "downloadLink": "http://books.google.ch/books/download/Handboekje_voor_koek_en_banketbakkers_be.pdf?id=zGlhAAAAcAAJ&hl=&output=pdf&sig=REDACTED&source=gbs_api"
+  },
+  "webReaderLink": "http://play.google.com/books/reader?id=zGlhAAAAcAAJ&hl=&source=gbs_api",
+  "accessViewStatus": "FULL_PUBLIC_DOMAIN",
+  "quoteSharingAllowed": false
+ }
+}

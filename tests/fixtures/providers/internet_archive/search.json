@@ -1,0 +1,27 @@
+{
+ "responseHeader": {
+  "status": 0,
+  "QTime": 59,
+  "params": {
+   "query": "title:&quot;Die S&uuml;ddeutsche K&uuml;che&quot; AND creator:&quot;Katharina Prato&quot; AND mediatype:texts",
+   "qin": "title:(&quot;Die S&uuml;ddeutsche K&uuml;che&quot;) AND creator:(&quot;Katharina Prato&quot;) AND mediatype:(texts)",
+   "fields": "identifier,title,creator,mediatype,year",
+   "wt": "json",
+   "rows": 3,
+   "start": 0
+  }
+ },
+ "response": {
+  "numFound": 1,
+  "start": 0,
+  "docs": [
+   {
+    "creator": "Scheiger, Katharina Prato, Edle von, 1818-1899",
+    "identifier": "bub_gb_fu0qAAAAYAAJ",
+    "mediatype": "texts",
+    "title": "Die süddeutsche küche auf ihrem gegenwärtigen standpunkte, mit berücksichtigung des thee's und einem anhange über das moderne servieren nach metrischem mass und gewicht berechnet für anfängerinnen sowie fürpraktische köchinnen",
+    "year": 1890
+   }
+  ]
+ }
+}

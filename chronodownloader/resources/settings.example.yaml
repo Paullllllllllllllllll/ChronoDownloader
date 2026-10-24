@@ -1,0 +1,211 @@
+# ChronoDownloader settings: machine values and optional run defaults.
+#
+# Copy this file to config/settings.yaml in the repository (gitignored) and
+# edit the copy, or pass another file with --settings FILE. Every key is
+# optional; a missing key keeps the value shown here. Unknown keys are errors.
+# Relative paths resolve against the current directory.
+
+# Environment-variable NAMES that hold each key (never the key itself).
+api_keys:
+  europeana: EUROPEANA_API_KEY
+  dpla: DPLA_API_KEY
+  ddb: DDB_API_KEY
+  google_books: GOOGLE_BOOKS_API_KEY
+  hathitrust: HATHI_API_KEY      # read but unused: HathiTrust is metadata-only
+  annas_archive: ANNAS_ARCHIVE_API_KEY  # optional member key for fast downloads
+  openrouter: OPENROUTER_API_KEY  # judge and page model; --matching fuzzy needs none
+
+# Decision model that judges candidates and pages (OpenRouter Decisions API).
+judge:
+  endpoint: https://openrouter.ai/api/alpha/decisions
+  model: typesafe/jev-1.14                 # text judgments: same_work and match
+  page_model: openai/gpt-6-luna-decisions  # page check of verify --pages, inspect
+  retry_after_minutes: 60                  # deferral after a persistent outage
+  thresholds:
+    same_work_accept: 0.9   # probability at or above: accept (judge, hybrid)
+    same_work_reject: 0.1   # probability at or below: reject; between: review
+    # text_* (text score total, 0 to 123.5; null: off) set on jev_eval: no
+    # text score excludes different works, no same-work pair rejected or dropped
+    text_accept: null       # at or above: accept (--matching fuzzy); null: review
+    text_reject: 30         # at or below: reject (--matching fuzzy)
+    text_prefilter: 30      # at or below: dropped unjudged (--matching hybrid)
+  network:                  # pacing, retries and timeout of the endpoint
+    delay_ms: 0
+    jitter_ms: 0
+    max_attempts: 3
+    base_backoff_s: 1.5
+    backoff_multiplier: 1.5
+    max_backoff_s: 60.0
+    timeout_s: 300
+    slots: 4                # concurrent requests on this machine
+
+# Machine-wide coordination of providers and the judge across agents; the
+# database is <state_dir>/coordination.sqlite.
+coordination:
+  default_slots: 2          # downloads per provider without its own slots
+  pacing_tolerance_ms: 250  # latest a sender may be after its reserved time
+  slot_ttl_s: 120           # a slot not renewed for this long expires
+  slot_renew_s: 30          # renewal interval of a held slot
+  busy_timeout_s: 30        # wait for a locked database before giving up
+
+# Per-provider network policy and extras. A provider or key missing here keeps
+# the value of the provider's built-in profile.
+providers:
+  internet_archive:
+    max_pages: 0                  # pages per work; 0 = no limit
+    slots: 2                      # concurrent downloads on this machine
+    network:
+      delay_ms: 300               # minimum pause between requests
+      jitter_ms: 150              # random extra pause up to this value
+      max_attempts: 8             # tries per request, the first included
+      base_backoff_s: 1.5         # first wait after a failed try
+      backoff_multiplier: 1.5     # growth of the wait per try
+      max_backoff_s: 60.0         # longest wait
+      timeout_s: 30               # request timeout
+      verify_ssl: true            # check the server certificate
+      ssl_error_policy: fail      # fail | retry_insecure_once (never with keys)
+      dns_retry: false            # retry a name that does not resolve
+      impersonate: null           # curl_cffi browser profile, e.g. chrome; '' none
+      headers: {}                 # extra request headers, name: value
+      circuit_breaker_enabled: true
+      circuit_breaker_threshold: 3       # consecutive failures that open it
+      circuit_breaker_cooldown_s: 300.0  # seconds before the next probe
+  mdz:
+    slots: 1
+    network: {delay_ms: 300, jitter_ms: 150, max_attempts: 25}
+  bnf_gallica:
+    slots: 1
+    network:
+      delay_ms: 8000
+      jitter_ms: 2000
+      max_attempts: 25
+      base_backoff_s: 3.0
+      backoff_multiplier: 1.8
+      max_backoff_s: 120.0
+      impersonate: chrome         # Cloudflare refuses the requests client
+  loc:
+    network: {delay_ms: 300, jitter_ms: 150, headers: {Accept: application/json}}
+  bne:
+    network:
+      delay_ms: 4000
+      jitter_ms: 1000
+      base_backoff_s: 2.0
+      backoff_multiplier: 1.8
+      max_backoff_s: 120.0
+      timeout_s: 60
+      impersonate: chrome         # Cloudflare refuses the requests client
+  ddb:
+    network: {delay_ms: 400, jitter_ms: 200}
+  polona:                         # retry_insecure_once exists; ships off
+    network: {delay_ms: 600, jitter_ms: 200, max_attempts: 8}
+  europeana:
+    network: {delay_ms: 400, jitter_ms: 200, max_attempts: 8}
+  dpla:
+    network:
+      delay_ms: 400
+      jitter_ms: 200
+      max_attempts: 8
+      headers: {Accept: application/json}
+  google_books:
+    free_only: true               # skip volumes that are not free to download
+    prefer: pdf                   # pdf | epub
+    allow_drm: false              # allow DRM-protected files
+    max_files: 2                  # direct pdf or epub files per volume
+    max_pages: 50                 # bound of the page-by-page image fallback
+    slots: 1
+    network:
+      delay_ms: 2000
+      jitter_ms: 500
+      max_attempts: 3
+      base_backoff_s: 2.0
+      backoff_multiplier: 2.0
+      max_backoff_s: 30.0
+      circuit_breaker_threshold: 2
+      circuit_breaker_cooldown_s: 600.0
+      headers: {Referer: "https://books.google.com/"}
+  wellcome:
+    max_pages: 0                  # pages per work; 0 = no limit
+    slots: 1
+    network: {delay_ms: 300, jitter_ms: 150, max_attempts: 8}
+  annas_archive:
+    # Official mirrors on 20.10.2026: .gl, .pk, .gd. Search and md5 pages sit
+    # behind a DDoS-Guard browser check (403); only the member API answers.
+    base_url: https://annas-archive.gl  # '' makes the provider unavailable
+    quota:
+      enabled: true
+      daily_limit: 875            # fast downloads per reset period
+      reset_hours: 24
+    slots: 1
+    network:
+      delay_ms: 800
+      jitter_ms: 300
+      max_attempts: 5
+      base_backoff_s: 2.0
+      backoff_multiplier: 2.0
+      max_backoff_s: 45.0
+      timeout_s: 45
+      ssl_error_policy: fail      # stays fail: the member key is in the query
+  slub:
+    slots: 1
+    network: {delay_ms: 600, jitter_ms: 200, max_attempts: 8}
+  e_rara:
+    slots: 1
+    network: {delay_ms: 600, jitter_ms: 200, max_attempts: 8}
+  sbb_digital:
+    slots: 1
+    network:
+      delay_ms: 700
+      jitter_ms: 250
+      max_attempts: 8
+      timeout_s: 40
+      headers: {Accept: application/xml}
+  british_library: {}             # its search host no longer resolves
+  hathitrust: {}                  # metadata only
+
+# Size limits of a run in GB (MB for metadata per work); 0 = no limit.
+download_limits:
+  total:
+    images_gb: 100
+    pdfs_gb: 50
+    metadata_gb: 1
+  per_work:
+    images_gb: 5
+    pdfs_gb: 3
+    metadata_mb: 250
+  on_exceed: stop               # stop the run | skip the file
+
+# Work-folder names; a change renames the folders of new runs only.
+naming:
+  include_creator_in_work_dir: false
+  include_year_in_work_dir: false
+  title_slug_max_len: 80
+
+# Folder of the tool's state files, an absolute path (~ allowed); '' uses
+# ~/.chronodownloader.
+state_dir: ''
+
+# Log folder, or a file ending in .log; '' writes logs/application.log in the
+# repository.
+logs_dir: ''
+
+# Run defaults keyed by option name; flags override them. The providers are
+# searched in this order; a provider missing from the list is not used.
+defaults:
+  providers:
+    - mdz
+    - bnf_gallica
+    - e_rara
+    - internet_archive
+    - wellcome
+    - europeana
+    - ddb
+    - polona
+  # output: downloaded_works
+  # matching: judge             # judge | fuzzy | hybrid
+  # edition_policy: any_edition # any_edition | same_edition | any_language
+  # format: pdf                 # images | pdf | both
+  # max_pages: 0                # 0 = no limit
+  # max_candidates: 5           # candidates kept per provider
+  # search_timeout: 60          # seconds per provider search; 0 = none
+  # include_metadata: true
+  # concurrency: 3              # works in parallel

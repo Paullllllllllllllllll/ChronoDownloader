@@ -1,0 +1,53 @@
+{
+  "totalElements": 2,
+  "hits": [
+    {
+      "basicFields": {
+        "title": {
+          "name": "title",
+          "values": [
+            "[Compendium ferculorum albo Zebranie potraw - recenzja]"
+          ],
+          "type": "TEXT"
+        }
+      },
+      "hiddenFields": {},
+      "attributes": {},
+      "objectId": "8232b659-16de-4b6b-8c5d-7ec976975416"
+    },
+    {
+      "basicFields": {
+        "title": {
+          "name": "title",
+          "values": [
+            "Compendium ferculorum albo zebranie potraw"
+          ],
+          "type": "TEXT"
+        },
+        "creatorForSearch": {
+          "name": "creatorForSearch",
+          "values": [
+            "Czerniecki, Stanisław Autor"
+          ],
+          "type": "SEARCH"
+        },
+        "dateDescriptive": {
+          "name": "dateDescriptive",
+          "values": [
+            "1755"
+          ],
+          "type": "TEXT"
+        }
+      },
+      "hiddenFields": {},
+      "attributes": {
+        "thumbnail": {
+          "name": "thumbnail",
+          "stringValue": "/download/digital-content/312b4dc1-d237-449d-b7f7-bda6dd917b11",
+          "valueType": "STRING"
+        }
+      },
+      "objectId": "b11c20f5-9ff1-4b16-995e-a8451a8b954c"
+    }
+  ]
+}

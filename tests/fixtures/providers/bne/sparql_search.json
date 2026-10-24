@@ -1,0 +1,35 @@
+{
+  "head": {"link": [], "vars": ["id", "title", "digital", "creator", "date"]},
+  "results": {
+    "distinct": false,
+    "ordered": true,
+    "bindings": [
+      {
+        "id": {"type": "uri", "value": "https://datos.bne.es/resource/bima0000020829"},
+        "title": {"type": "literal", "value": "Nuevo arte de cocina"},
+        "digital": {"type": "uri", "value": "https://bnedigital.bne.es/bd/card?id=e7a1d9e6-51ce-4eea-a25f-11f35ffa6d41"},
+        "creator": {"type": "literal", "value": "Altamiras, Juan"},
+        "date": {"type": "literal", "value": "1758"}
+      },
+      {
+        "id": {"type": "uri", "value": "https://datos.bne.es/resource/bima0000070134"},
+        "title": {"type": "literal", "value": "Arte de cocina, pastelería, vizcochería, y conservería"},
+        "digital": {"type": "uri", "value": "https://bnedigital.bne.es/bd/es/card?id=ad28ecee-2fb2-45af-9fe2-6fdb3c6a5c90"},
+        "creator": {"type": "literal", "value": "Martínez Montiño, Francisco"},
+        "date": {"type": "literal", "value": "1763"}
+      },
+      {
+        "id": {"type": "uri", "value": "https://datos.bne.es/resource/bimo0001244675"},
+        "title": {"type": "literal", "value": "Novísimo arte de cocina o aviso a las cocineras"},
+        "digital": {"type": "uri", "value": "https://bnedigital.bne.es/bd/card?id=a984ca89-2da2-4d68-b979-a996cf9b5eac"},
+        "date": {"type": "literal", "value": "1845"}
+      },
+      {
+        "id": {"type": "uri", "value": "https://datos.bne.es/resource/991047329279708606"},
+        "title": {"type": "literal", "value": "Manual popular, o Arte de cocina y medicina doméstica"},
+        "digital": {"type": "uri", "value": "https://bnedigital.bne.es/bd/card?id=23b896a6-7075-4579-b4fd-1f47c22bf9ac"},
+        "date": {"type": "literal", "value": "1848"}
+      }
+    ]
+  }
+}

@@ -1,0 +1,427 @@
+{
+  "properties": {
+    "item-id": "EVZECNILXXNF2QLAQNBPEECKDKFYG5AZ",
+    "dataset-id": "10043836539387167fBRD",
+    "dataset-label": "Hauptportal: 1713g - ddb-slub-dresden-without-issues - SLUB Dresden - (00014072) - METS/MODS",
+    "revision-id": "1",
+    "ingest-date": "2026-05-18T14:11:02+0200",
+    "cortex-type": "Kultur",
+    "mapping-version": "6.18"
+  },
+  "edm": {
+    "RDF": {
+      "Aggregation": {
+        "@about": "http://www.zvdd.de/record/DE-14/oai:de:slub-dresden:db:id-313665893/uuid-44659eb5-9350-3e29-9260-92f5c0d09d1b",
+        "aggregatedCHO": {
+          "@resource": "http://www.deutsche-digitale-bibliothek.de/item/EVZECNILXXNF2QLAQNBPEECKDKFYG5AZ"
+        },
+        "dataProvider": [
+          "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden",
+          {
+            "@resource": "http://www.deutsche-digitale-bibliothek.de/organization/265BI7NE7QBS4NQMZCCGIVLFR73OCOSL"
+          }
+        ],
+        "isShownAt": {
+          "@resource": "https://digital.slub-dresden.de/id313665893"
+        },
+        "isShownBy": {
+          "@resource": "https://digital.slub-dresden.de/data/kitodo/kochunke_313665893/kochunke_313665893_tif/jpegs/00000130.tif.medium.jpg"
+        },
+        "provider": "Deutsche Digitale Bibliothek",
+        "rights": [
+          {
+            "@resource": "http://creativecommons.org/publicdomain/mark/1.0/"
+          },
+          {
+            "@resource": "http://creativecommons.org/publicdomain/zero/1.0/"
+          }
+        ],
+        "$": "\n"
+      },
+      "Agent": {
+        "@about": "http://www.deutsche-digitale-bibliothek.de/organization/265BI7NE7QBS4NQMZCCGIVLFR73OCOSL",
+        "prefLabel": "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden",
+        "type": {
+          "@resource": "http://ddb.vocnet.org/sparte/sparte002"
+        },
+        "$": "\n"
+      },
+      "Concept": [
+        {
+          "@about": "http://ddb.vocnet.org/sparte/sparte002",
+          "notation": "sec_02",
+          "$": "\n"
+        },
+        {
+          "@about": "http://ddb.vocnet.org/medientyp/mt003",
+          "notation": "mediatype_003",
+          "$": "\n"
+        },
+        {
+          "@about": "http://ddb.vocnet.org/medientyp/mt003",
+          "notation": "mediatype_003",
+          "$": "\n"
+        },
+        {
+          "@about": "https://d-nb.info/gnd/4132120-0",
+          "prefLabel": {
+            "@lang": "de",
+            "$": "Index"
+          },
+          "$": "\n"
+        }
+      ],
+      "WebResource": [
+        {
+          "@about": "https://digital.slub-dresden.de/id313665893",
+          "type": {
+            "@resource": "http://ddb.vocnet.org/medientyp/mt003"
+          },
+          "$": "\n"
+        },
+        {
+          "@about": "https://digital.slub-dresden.de/data/kitodo/kochunke_313665893/kochunke_313665893_tif/jpegs/00000130.tif.medium.jpg",
+          "rights": {
+            "@resource": "http://creativecommons.org/publicdomain/mark/1.0/"
+          },
+          "type": {
+            "@resource": "http://ddb.vocnet.org/medientyp/mt003"
+          },
+          "fnd": "Deutsche Forschungsgemeinschaft",
+          "$": "\n"
+        }
+      ],
+      "ProvidedCHO": {
+        "@about": "http://www.deutsche-digitale-bibliothek.de/item/EVZECNILXXNF2QLAQNBPEECKDKFYG5AZ",
+        "hasMet": {
+          "@resource": "FCXIOEINILFNAKDSQIMDRDOJELABSANU"
+        },
+        "hasType": {
+          "@resource": "https://d-nb.info/gnd/4132120-0"
+        },
+        "type": {
+          "@resource": "http://www.wikidata.org/entity/Q873506",
+          "@lang": "ger",
+          "$": "Index"
+        },
+        "language": {
+          "@resource": "http://id.loc.gov/vocabulary/iso639-2/ger"
+        },
+        "title": {
+          "@lang": "zxx",
+          "$": "Register Dieser Koch- und Kellermeisterey"
+        },
+        "issued": "1684",
+        "hierarchyType": "htype_016",
+        "isPartOf": {
+          "@resource": "http://www.deutsche-digitale-bibliothek.de/item/32MBHTYD7KSFBUL6EWJPVLRCWRJODEH7"
+        },
+        "$": "\n"
+      },
+      "LinguisticSystem": {
+        "@about": "http://id.loc.gov/vocabulary/iso639-2/ger",
+        "value": "ger",
+        "$": "\n"
+      },
+      "Event": {
+        "@about": "FCXIOEINILFNAKDSQIMDRDOJELABSANU",
+        "hasType": {
+          "@resource": "http://terminology.lido-schema.org/eventType/publication"
+        },
+        "occuredAt": {
+          "@resource": "GL3DYO4HZO35DFQT7ER4P5DMEU3A46KK"
+        },
+        "$": "\n"
+      },
+      "TimeSpan": {
+        "@about": "GL3DYO4HZO35DFQT7ER4P5DMEU3A46KK",
+        "begin": "1684",
+        "end": "1684",
+        "$": "\n"
+      },
+      "$": "\n"
+    }
+  },
+  "indexing-profile": {
+    "item-id": "EVZECNILXXNF2QLAQNBPEECKDKFYG5AZ",
+    "facet": [
+      {
+        "@name": "keywords_fct",
+        "value": "Index"
+      },
+      {
+        "@name": "keywords_fct_autocomplete",
+        "value": "Index"
+      },
+      {
+        "@name": "objecttype_fct",
+        "value": "Index"
+      },
+      {
+        "@name": "objecttype_fct_autocomplete",
+        "value": "Index"
+      },
+      {
+        "@name": "language_fct",
+        "value": "ger"
+      },
+      {
+        "@name": "type_fct",
+        "value": "mediatype_003"
+      },
+      {
+        "@name": "provider_fct",
+        "value": "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden"
+      },
+      {
+        "@name": "provider_fct_autocomplete",
+        "value": "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden"
+      },
+      {
+        "@name": "provider_fct_normdata",
+        "value": "http://www.deutsche-digitale-bibliothek.de/organization/265BI7NE7QBS4NQMZCCGIVLFR73OCOSL"
+      },
+      {
+        "@name": "dataprovider_fct",
+        "value": "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden"
+      },
+      {
+        "@name": "dataprovider_fct_autocomplete",
+        "value": "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden"
+      },
+      {
+        "@name": "dataprovider_fct_normdata",
+        "value": "http://www.deutsche-digitale-bibliothek.de/organization/265BI7NE7QBS4NQMZCCGIVLFR73OCOSL"
+      },
+      {
+        "@name": "sector_fct",
+        "value": "sec_02"
+      },
+      {
+        "@name": "last_update",
+        "value": "2026-05-18T14:11:02+0200"
+      }
+    ]
+  },
+  "preview": {
+    "@media": "text",
+    "@type": "Kultur",
+    "title": "Register Dieser Koch- und Kellermeisterey",
+    "subtitle": "SLUB Dresden; Deutsche Forschungsgemeinschaft. -  Koch- und Kellermeysterey : Von allen Speisen und Geträncken, viel guter heimlicher Künste, auch wie man Latwergen, Salsen, Confect, Conserven uud Einbeytzungen machen, von mancherley Früchten, Blumen, Kräutern und Wurtzeln; Einem jeden im Hause gar nohtwendig und nützlich zugebrauchen",
+    "thumbnail": {
+      "@href": "c29a3def-8747-4cc0-aef6-a86522d76971"
+    }
+  },
+  "view": {
+    "item": {
+      "identifier": "http://www.zvdd.de/object/DE-14/oai:de:slub-dresden:db:id-313665893/uuid-f3e30367-88fb-4a06-82b2-d5fff691e16c",
+      "label": "Register Dieser Koch- und Kellermeisterey",
+      "title": "Register Dieser Koch- und Kellermeisterey",
+      "subtitle": "",
+      "rights": "",
+      "metadata-rights": "http://creativecommons.org/publicdomain/zero/1.0/",
+      "origin": "https://digital.slub-dresden.de/id313665893",
+      "category": "Kultur",
+      "media": "text",
+      "thumbnail": "",
+      "latitude": "",
+      "longitude": "",
+      "viewers": {
+        "viewer": {
+          "name": {
+            "@id": "dfgKey",
+            "$": "DFG-Viewer"
+          },
+          "url": "http://dfg-viewer.de/show/?tx_dlf[id]/tx_dlf[page]"
+        }
+      },
+      "license": {
+        "@resource": "http://creativecommons.org/publicdomain/mark/1.0/",
+        "$": ""
+      },
+      "institution": {
+        "url": "http://www.slub-dresden.de",
+        "id": "265BI7NE7QBS4NQMZCCGIVLFR73OCOSL",
+        "name": "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden",
+        "logo-institution-ddbid": "265BI7NE7QBS4NQMZCCGIVLFR73OCOSL"
+      },
+      "fields": [
+        {
+          "@usage": "display",
+          "field": [
+            {
+              "@id": "flex_bibl_003",
+              "name": "Dokumenttyp",
+              "value": "Index"
+            },
+            {
+              "@id": "flex_bibl_004",
+              "name": "Erschienen in",
+              "value": "Koch- und Kellermeysterey : Von allen Speisen und Geträncken, viel guter heimlicher Künste, auch wie man Latwergen, Salsen, Confect, Conserven uud Einbeytzungen machen, von mancherley Früchten, Blumen, Kräutern und Wurtzeln; Einem jeden im Hause gar nohtwendig und nützlich zugebrauchen"
+            },
+            {
+              "@id": "flex_bibl_008",
+              "name": "Sprache",
+              "value": "Deutsch"
+            },
+            {
+              "@id": "stat_016",
+              "name": "Förderung",
+              "value": "Deutsche Forschungsgemeinschaft"
+            }
+          ]
+        },
+        {
+          "@usage": "index",
+          "field": [
+            {
+              "@id": "title",
+              "@resource": "http://purl.org/dc/elements/1.1/title",
+              "name": "Title",
+              "value": "Register Dieser Koch- und Kellermeisterey"
+            },
+            {
+              "@id": "apd_document_type",
+              "name": "Archivalientyp",
+              "value": "Index"
+            },
+            {
+              "@id": "objecttype_delivered",
+              "name": "Objekttyp aus Lieferdaten",
+              "value": "http://ddb.vocnet.org/hierarchietyp/ht016"
+            },
+            {
+              "@id": "ranking",
+              "name": "Ranking",
+              "value": "Index"
+            },
+            {
+              "@id": "begin_time",
+              "name": "Anfang",
+              "value": "614705"
+            },
+            {
+              "@id": "end_time",
+              "name": "Ende",
+              "value": "615070"
+            },
+            {
+              "@id": "license",
+              "name": "Lizenz",
+              "value": "http://creativecommons.org/publicdomain/mark/1.0/"
+            },
+            {
+              "@id": "license_group",
+              "name": "Lizenzstatus",
+              "value": "rights_001"
+            },
+            {
+              "@id": "digitalisat",
+              "name": "digitalisat",
+              "value": "true"
+            },
+            {
+              "@id": "dataset_id",
+              "name": "dataset_id",
+              "value": "10043836539387167fBRD"
+            },
+            {
+              "@id": "dataset_label",
+              "name": "dataset_label",
+              "value": "Hauptportal: 1713g - ddb-slub-dresden-without-issues - SLUB Dresden - (00014072) - METS/MODS"
+            },
+            {
+              "@id": "delivery_id",
+              "name": "delivery_id",
+              "value": "10043895935817131GgKn"
+            },
+            {
+              "@id": "supplier_id",
+              "name": "supplier_id",
+              "value": "00014072"
+            },
+            {
+              "@id": "mapping_version",
+              "name": "mapping_version",
+              "value": "6.18"
+            },
+            {
+              "@id": "md_format",
+              "name": "Metadata Format",
+              "value": "mets"
+            },
+            {
+              "@id": "source_format",
+              "name": "source_format",
+              "value": "http://www.loc.gov/METS/"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "source": {
+    "description": {
+      "@id": "EVZECNILXXNF2QLAQNBPEECKDKFYG5AZ",
+      "record": {
+        "@href": "/items/32MBHTYD7KSFBUL6EWJPVLRCWRJODEH7/source/record",
+        "@ref": "32MBHTYD7KSFBUL6EWJPVLRCWRJODEH7",
+        "@type": "http://www.loc.gov/METS/",
+        "id": [
+          {
+            "@type": "mods:recordIdentifier",
+            "@value": ""
+          },
+          {
+            "@type": "mets:div/@DMDID",
+            "@value": "uuid-44659eb5-9350-3e29-9260-92f5c0d09d1b"
+          },
+          {
+            "@type": "mets:div/@ID",
+            "@value": "PHYS_0130"
+          }
+        ]
+      }
+    }
+  },
+  "provider-info": {
+    "provider-domains": {
+      "provider-domain": [
+        "http://ddb.vocnet.org/sparte/sparte002",
+        "",
+        ""
+      ]
+    },
+    "provider-name": "Sächsische Landesbibliothek - Staats- und Universitätsbibliothek Dresden",
+    "provider-europeana-name": "",
+    "provider-parent-id": "",
+    "provider-facebook": "",
+    "provider-twitter": "https://twitter.com/slubdresden",
+    "provider-uri": "http://www.slub-dresden.de",
+    "provider-email": "",
+    "provider-collection": "",
+    "provider-item-id": "http://www.zvdd.de/object/DE-14/oai:de:slub-dresden:db:id-313665893/uuid-f3e30367-88fb-4a06-82b2-d5fff691e16c",
+    "provider-item-id-type": "",
+    "provider-id": "00014072",
+    "provider-ddb-id": "265BI7NE7QBS4NQMZCCGIVLFR73OCOSL",
+    "provider-isil": "http://ld.zdb-services.de/resource/organisations/DE-14",
+    "provider-logo": "https://registrierung.deutsche-digitale-bibliothek.de/logos/00014072.jpg",
+    "provider-longitude": "13.73593",
+    "provider-latitude": "51.02874",
+    "provider-state": "Sachsen",
+    "provider-parents": null
+  },
+  "binaries": {
+    "binary": {
+      "@name": "Register Dieser Koch- und Kellermeisterey",
+      "@name3": "Digitalisierung: Dresden SLUB, ZB",
+      "@kind": "http://creativecommons.org/publicdomain/mark/1.0/",
+      "@mimetype": "image/jpeg",
+      "@position": "1",
+      "@primary": "true",
+      "@local_pathname": "https://digital.slub-dresden.de/data/kitodo/kochunke_313665893/kochunke_313665893_tif/jpegs/00000130.tif.medium.jpg",
+      "@ref": "c29a3def-8747-4cc0-aef6-a86522d76971",
+      "@license_group": "rights_001"
+    }
+  }
+}

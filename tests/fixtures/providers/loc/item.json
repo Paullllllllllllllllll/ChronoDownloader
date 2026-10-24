@@ -1,0 +1,16 @@
+{
+  "item": {
+    "id": "http://www.loc.gov/item/65078367/",
+    "title": "The queen-like closet, or, Rich cabinet",
+    "resources": [
+      {"iiif_manifest": "https://www.loc.gov/item/65078367/manifest.json"}
+    ],
+    "image_url": [
+      "//tile.loc.gov/image-services/iiif/service:rbc:65078367:0001/full/pct:6.25/0/default.jpg",
+      "//tile.loc.gov/image-services/iiif/service:rbc:65078367:0001/full/pct:25/0/default.jpg"
+    ]
+  },
+  "resources": [
+    {"url": "https://www.loc.gov/resource/rbc.65078367/"}
+  ]
+}

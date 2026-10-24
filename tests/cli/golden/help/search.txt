@@ -1,0 +1,62 @@
+usage: chronodownloader search (--input FILE | --title TEXT) [options]
+
+Search the providers and judge the candidates without downloading. Without --output the results
+are printed as a table; with --output DIR the candidates, judgments and resulting statuses are
+written to that output root.
+
+options:
+  -h, --help            show this help message and exit
+
+works CSV or ad hoc query:
+  --input FILE          works CSV with entry_id and title
+  --title TEXT          ad hoc query
+  --creator NAME        creator of the ad hoc query
+  --year YEAR           year of the ad hoc query
+  --entry-id ID         work id of an ad hoc query, used with --output; default: adhoc
+
+works:
+  --entry-ids LIST      only these entry_id values; default: all rows
+  --limit N             at most N works after the filters; default: all
+  --only LIST           only works in these stored statuses; from new, complete, partial, failed,
+                        no_match, needs_review, deferred, blocked; default:
+                        new,partial,failed,deferred,blocked
+  --research            search and judge again; old candidates kept as history
+
+search and matching:
+  --matching {judge,fuzzy,hybrid}
+                        judge needs the OpenRouter key; fuzzy needs none; default: judge
+  --edition-policy {any_edition,same_edition,any_language}
+                        editions accepted without review; default: any_edition
+  --providers LIST      providers to search, in preference order; default: defaults.providers
+  --max-candidates N    candidates kept per provider; default: 5
+  --search-timeout SECONDS
+                        per-provider search timeout; 0 disables; default: 60
+
+output:
+  --output DIR          write the results into this output root; default: print the results
+
+run control:
+  --dry-run             plan without network requests or writes
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    no work failed; works left needs_review, deferred or blocked are
+       open, not failed, and counted in the summary; a dry run that planned
+  1    a work failed
+  2    usage or configuration error: an invalid option or settings file,
+       neither --input nor --title, or an unset judge key under --matching
+       judge or hybrid (--matching fuzzy needs none)
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.
+
+Examples:
+  Print the candidates of one title:
+    chronodownloader search --title "Le cuisinier francois" --year 1651
+  Store candidates and judgments for every work of a CSV:
+    chronodownloader search --input works.csv --output out

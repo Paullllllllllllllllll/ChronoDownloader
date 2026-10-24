@@ -1,0 +1,2233 @@
+{
+  "items": [
+    {
+      "id": "https://polona.pl/iiif/3/990b522b-aa1e-4b90-8a7d-1fdf357794ce/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/990b522b-aa1e-4b90-8a7d-1fdf357794ce/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/990b522b-aa1e-4b90-8a7d-1fdf357794ce/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/990b522b-aa1e-4b90-8a7d-1fdf357794ce/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3191,
+                "width": 2177,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/990b522b-aa1e-4b90-8a7d-1fdf357794ce",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/91e49973-8175-419c-9446-7f2a24613806",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3191,
+      "width": 2177,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/aee216f6-9ee5-48d5-8d40-4a4b6592815f/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/aee216f6-9ee5-48d5-8d40-4a4b6592815f/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/aee216f6-9ee5-48d5-8d40-4a4b6592815f/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/aee216f6-9ee5-48d5-8d40-4a4b6592815f/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3176,
+                "width": 2117,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/aee216f6-9ee5-48d5-8d40-4a4b6592815f",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/c61651b0-583d-4c32-9098-7b756e5fa9c0",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3176,
+      "width": 2117,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/3f424bb3-553e-44e7-b000-ec1d45980178/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/3f424bb3-553e-44e7-b000-ec1d45980178/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/3f424bb3-553e-44e7-b000-ec1d45980178/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/3f424bb3-553e-44e7-b000-ec1d45980178/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3207,
+                "width": 2150,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/3f424bb3-553e-44e7-b000-ec1d45980178",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/5530052c-5e9e-4748-a562-592449e138c7",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3207,
+      "width": 2150,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/c9a4fe94-ecee-4d20-897f-7f8ce903e308/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/c9a4fe94-ecee-4d20-897f-7f8ce903e308/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/c9a4fe94-ecee-4d20-897f-7f8ce903e308/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/c9a4fe94-ecee-4d20-897f-7f8ce903e308/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3180,
+                "width": 2122,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/c9a4fe94-ecee-4d20-897f-7f8ce903e308",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/35b52ff6-4474-446c-be3e-2d9e342836df",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3180,
+      "width": 2122,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/1428a4a0-4020-4410-a319-7e291c49fa1c/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/1428a4a0-4020-4410-a319-7e291c49fa1c/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/1428a4a0-4020-4410-a319-7e291c49fa1c/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/1428a4a0-4020-4410-a319-7e291c49fa1c/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3203,
+                "width": 2150,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/1428a4a0-4020-4410-a319-7e291c49fa1c",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "1"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/782c285e-d189-4301-b9fd-4f4efdeddbb8",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3203,
+      "width": 2150,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/a5b27174-f963-4a75-81db-f21cb9721f18/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/a5b27174-f963-4a75-81db-f21cb9721f18/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/a5b27174-f963-4a75-81db-f21cb9721f18/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/a5b27174-f963-4a75-81db-f21cb9721f18/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3180,
+                "width": 2117,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/a5b27174-f963-4a75-81db-f21cb9721f18",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "2"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/bbc0a76d-3b23-4429-9a2b-7789656d53ac",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3180,
+      "width": 2117,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/b4b7fb8d-4535-4503-af66-9ba870aa7191/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/b4b7fb8d-4535-4503-af66-9ba870aa7191/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/b4b7fb8d-4535-4503-af66-9ba870aa7191/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/b4b7fb8d-4535-4503-af66-9ba870aa7191/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3203,
+                "width": 2159,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/b4b7fb8d-4535-4503-af66-9ba870aa7191",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "3"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/01e28029-5414-440c-bc4b-219964403825",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3203,
+      "width": 2159,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/6eef7605-5e81-45fe-9a7d-619afa91cb03/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/6eef7605-5e81-45fe-9a7d-619afa91cb03/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/6eef7605-5e81-45fe-9a7d-619afa91cb03/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/6eef7605-5e81-45fe-9a7d-619afa91cb03/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3180,
+                "width": 2113,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/6eef7605-5e81-45fe-9a7d-619afa91cb03",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "4"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/6b9e2b18-688b-4a46-b9d5-4cfc3cc605e5",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3180,
+      "width": 2113,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/e1749cc9-8c2e-4a76-aae5-26819b1f47e6/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/e1749cc9-8c2e-4a76-aae5-26819b1f47e6/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/e1749cc9-8c2e-4a76-aae5-26819b1f47e6/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/e1749cc9-8c2e-4a76-aae5-26819b1f47e6/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3199,
+                "width": 2155,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/e1749cc9-8c2e-4a76-aae5-26819b1f47e6",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "5"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/90e87a90-fe81-445c-8d69-96f3cbc161c1",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3199,
+      "width": 2155,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/6ab7a1e1-4ea9-484d-9d1d-b71c754ae698/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/6ab7a1e1-4ea9-484d-9d1d-b71c754ae698/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/6ab7a1e1-4ea9-484d-9d1d-b71c754ae698/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/6ab7a1e1-4ea9-484d-9d1d-b71c754ae698/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3184,
+                "width": 2113,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/6ab7a1e1-4ea9-484d-9d1d-b71c754ae698",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "6"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/fed5f902-e7af-4be2-b828-714886c1ed64",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3184,
+      "width": 2113,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/6d2e2236-3546-4114-9c0e-f277de9909f7/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/6d2e2236-3546-4114-9c0e-f277de9909f7/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/6d2e2236-3546-4114-9c0e-f277de9909f7/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/6d2e2236-3546-4114-9c0e-f277de9909f7/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3204,
+                "width": 2159,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/6d2e2236-3546-4114-9c0e-f277de9909f7",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "7"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/302a26ee-c470-41da-9587-d8f9100ce8f4",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3204,
+      "width": 2159,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/cc43b44d-f9eb-41b5-8f42-25d35f625ab9/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/cc43b44d-f9eb-41b5-8f42-25d35f625ab9/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/cc43b44d-f9eb-41b5-8f42-25d35f625ab9/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/cc43b44d-f9eb-41b5-8f42-25d35f625ab9/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3189,
+                "width": 2109,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/cc43b44d-f9eb-41b5-8f42-25d35f625ab9",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "8"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/504ea9b3-9a22-46a2-9f36-588b3d7a2fa6",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3189,
+      "width": 2109,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/627a1930-07d9-465a-99d0-1f1ca286599e/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/627a1930-07d9-465a-99d0-1f1ca286599e/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/627a1930-07d9-465a-99d0-1f1ca286599e/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/627a1930-07d9-465a-99d0-1f1ca286599e/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3194,
+                "width": 2155,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/627a1930-07d9-465a-99d0-1f1ca286599e",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "9"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/679464c8-f686-4f74-81a2-614c4c686c86",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3194,
+      "width": 2155,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/7296c201-f9ca-4104-a8ac-65cf47e27e0e/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/7296c201-f9ca-4104-a8ac-65cf47e27e0e/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/7296c201-f9ca-4104-a8ac-65cf47e27e0e/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/7296c201-f9ca-4104-a8ac-65cf47e27e0e/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3189,
+                "width": 2109,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/7296c201-f9ca-4104-a8ac-65cf47e27e0e",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "10"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/27f3b7b0-830e-4b92-9c3e-b5f0ca46c072",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3189,
+      "width": 2109,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/d7641dfc-724e-480a-8d7f-4f8e65e13145/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/d7641dfc-724e-480a-8d7f-4f8e65e13145/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/d7641dfc-724e-480a-8d7f-4f8e65e13145/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/d7641dfc-724e-480a-8d7f-4f8e65e13145/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3194,
+                "width": 2159,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/d7641dfc-724e-480a-8d7f-4f8e65e13145",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "11"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/f3928ebe-1568-4fc0-a4a7-52be8863d037",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3194,
+      "width": 2159,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/a0a8fb89-e376-4d5f-9397-0453ef4a153e/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/a0a8fb89-e376-4d5f-9397-0453ef4a153e/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/a0a8fb89-e376-4d5f-9397-0453ef4a153e/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/a0a8fb89-e376-4d5f-9397-0453ef4a153e/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3197,
+                "width": 2104,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/a0a8fb89-e376-4d5f-9397-0453ef4a153e",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "12"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/10443dce-9df5-47cd-924e-0e22ccc92261",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3197,
+      "width": 2104,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/99b0428a-e35f-4298-ab12-8307d3a206ac/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/99b0428a-e35f-4298-ab12-8307d3a206ac/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/99b0428a-e35f-4298-ab12-8307d3a206ac/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/99b0428a-e35f-4298-ab12-8307d3a206ac/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3199,
+                "width": 2080,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/99b0428a-e35f-4298-ab12-8307d3a206ac",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "13"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/1d6c9f18-8109-4f0c-82a1-d913b6ca2a17",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3199,
+      "width": 2080,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/79f8f04c-d301-424e-a564-e6f44e8b4d5b/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/79f8f04c-d301-424e-a564-e6f44e8b4d5b/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/79f8f04c-d301-424e-a564-e6f44e8b4d5b/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/79f8f04c-d301-424e-a564-e6f44e8b4d5b/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3220,
+                "width": 2107,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/79f8f04c-d301-424e-a564-e6f44e8b4d5b",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "14"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/2debaa24-4ee3-4917-b302-566b757c6c6c",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3220,
+      "width": 2107,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/c1afc62e-ea85-4e53-8804-a8a10e127e0a/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/c1afc62e-ea85-4e53-8804-a8a10e127e0a/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/c1afc62e-ea85-4e53-8804-a8a10e127e0a/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/c1afc62e-ea85-4e53-8804-a8a10e127e0a/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3186,
+                "width": 2002,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/c1afc62e-ea85-4e53-8804-a8a10e127e0a",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "15"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/225ed568-72f6-4b08-bc99-8cba431ec454",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3186,
+      "width": 2002,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/032831dc-58fe-402c-b908-07014080d241/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/032831dc-58fe-402c-b908-07014080d241/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/032831dc-58fe-402c-b908-07014080d241/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/032831dc-58fe-402c-b908-07014080d241/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3202,
+                "width": 2096,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/032831dc-58fe-402c-b908-07014080d241",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "16"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/5dcde93a-6270-48fb-ac52-93d119b14105",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3202,
+      "width": 2096,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/0211183f-eb52-4da1-be1c-2291d893a4a1/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/0211183f-eb52-4da1-be1c-2291d893a4a1/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/0211183f-eb52-4da1-be1c-2291d893a4a1/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/0211183f-eb52-4da1-be1c-2291d893a4a1/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3181,
+                "width": 2045,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/0211183f-eb52-4da1-be1c-2291d893a4a1",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "17"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/fef04fcf-25e5-4e6b-a4fa-041c418ff134",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3181,
+      "width": 2045,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/08d77fae-41d0-43a8-a6c3-1afe0af0a275/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/08d77fae-41d0-43a8-a6c3-1afe0af0a275/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/08d77fae-41d0-43a8-a6c3-1afe0af0a275/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/08d77fae-41d0-43a8-a6c3-1afe0af0a275/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3207,
+                "width": 2100,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/08d77fae-41d0-43a8-a6c3-1afe0af0a275",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "18"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/e4ebe363-a7a0-4dcd-af28-aebfc7ec6941",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3207,
+      "width": 2100,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/529b484c-a05b-4b94-b026-67fc1602bda6/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/529b484c-a05b-4b94-b026-67fc1602bda6/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/529b484c-a05b-4b94-b026-67fc1602bda6/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/529b484c-a05b-4b94-b026-67fc1602bda6/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3181,
+                "width": 2045,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/529b484c-a05b-4b94-b026-67fc1602bda6",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "19"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/f9183176-aa27-47a7-bc90-d1f679feb010",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3181,
+      "width": 2045,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/6b847fc7-0afd-462a-8769-74ec8744139d/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/6b847fc7-0afd-462a-8769-74ec8744139d/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/6b847fc7-0afd-462a-8769-74ec8744139d/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/6b847fc7-0afd-462a-8769-74ec8744139d/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3206,
+                "width": 2107,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/6b847fc7-0afd-462a-8769-74ec8744139d",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "20"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/ab767053-2e11-41d1-a1e2-121e4bec8c72",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3206,
+      "width": 2107,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/f77a1ae4-1940-4306-8735-d7620f7cf81b/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/f77a1ae4-1940-4306-8735-d7620f7cf81b/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/f77a1ae4-1940-4306-8735-d7620f7cf81b/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/f77a1ae4-1940-4306-8735-d7620f7cf81b/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3181,
+                "width": 2041,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/f77a1ae4-1940-4306-8735-d7620f7cf81b",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "21"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/f7f3ff54-269a-4cd1-a3a4-bfa42e05ff39",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3181,
+      "width": 2041,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/8072f3be-3697-42fd-98bd-e94d212c2489/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/8072f3be-3697-42fd-98bd-e94d212c2489/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/8072f3be-3697-42fd-98bd-e94d212c2489/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/8072f3be-3697-42fd-98bd-e94d212c2489/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3206,
+                "width": 2107,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/8072f3be-3697-42fd-98bd-e94d212c2489",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "22"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/d11e8ae2-d6b3-47b9-a27f-d1a319f11e21",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3206,
+      "width": 2107,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/cac9df17-afd1-4cb2-a5ba-b0e2c88813e2/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/cac9df17-afd1-4cb2-a5ba-b0e2c88813e2/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/cac9df17-afd1-4cb2-a5ba-b0e2c88813e2/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/cac9df17-afd1-4cb2-a5ba-b0e2c88813e2/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3181,
+                "width": 2045,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/cac9df17-afd1-4cb2-a5ba-b0e2c88813e2",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "23"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/57678078-b1e5-47ea-b5de-37b200d11e2f",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3181,
+      "width": 2045,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/a17d1fca-bbb9-431d-a253-8849a1e5091c/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/a17d1fca-bbb9-431d-a253-8849a1e5091c/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/a17d1fca-bbb9-431d-a253-8849a1e5091c/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/a17d1fca-bbb9-431d-a253-8849a1e5091c/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3206,
+                "width": 2096,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/a17d1fca-bbb9-431d-a253-8849a1e5091c",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "24"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/c44c47a6-ee49-475e-8eb3-fd22c41ea385",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3206,
+      "width": 2096,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/80f27b6c-901c-441a-82bc-6d4bec7a7fba/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/80f27b6c-901c-441a-82bc-6d4bec7a7fba/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/80f27b6c-901c-441a-82bc-6d4bec7a7fba/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/80f27b6c-901c-441a-82bc-6d4bec7a7fba/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3185,
+                "width": 2045,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/80f27b6c-901c-441a-82bc-6d4bec7a7fba",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "25"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/83b88682-2108-403a-b7a6-b70833583474",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3185,
+      "width": 2045,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/27f9ffb5-3029-4566-9b28-a809d881e393/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/27f9ffb5-3029-4566-9b28-a809d881e393/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/27f9ffb5-3029-4566-9b28-a809d881e393/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/27f9ffb5-3029-4566-9b28-a809d881e393/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3206,
+                "width": 2096,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/27f9ffb5-3029-4566-9b28-a809d881e393",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "26"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/3983135e-f74e-4d70-9c62-0aa44da6df3d",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3206,
+      "width": 2096,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/c81636b7-201d-4e63-98f9-0f7dac27678e/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/c81636b7-201d-4e63-98f9-0f7dac27678e/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/c81636b7-201d-4e63-98f9-0f7dac27678e/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/c81636b7-201d-4e63-98f9-0f7dac27678e/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3181,
+                "width": 2045,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/c81636b7-201d-4e63-98f9-0f7dac27678e",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "27"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/0d3efa87-9156-47ca-9a7d-3e918d39e436",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3181,
+      "width": 2045,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/62ed3227-335d-4a91-9048-d2724655467c/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/62ed3227-335d-4a91-9048-d2724655467c/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/62ed3227-335d-4a91-9048-d2724655467c/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/62ed3227-335d-4a91-9048-d2724655467c/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3193,
+                "width": 2078,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/62ed3227-335d-4a91-9048-d2724655467c",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "28"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/f26b5dfa-866e-4e51-b148-90c9162bd0bd",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3193,
+      "width": 2078,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/3a0b0ef9-edec-477c-ba9a-1c8a01e5b666/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/3a0b0ef9-edec-477c-ba9a-1c8a01e5b666/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/3a0b0ef9-edec-477c-ba9a-1c8a01e5b666/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/3a0b0ef9-edec-477c-ba9a-1c8a01e5b666/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3199,
+                "width": 2067,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/3a0b0ef9-edec-477c-ba9a-1c8a01e5b666",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "29"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/309b2e07-29c7-48f4-b66d-171c8edf36c5",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3199,
+      "width": 2067,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/1ac4df92-dae0-4c83-bfae-e72b8313e253/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/1ac4df92-dae0-4c83-bfae-e72b8313e253/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/1ac4df92-dae0-4c83-bfae-e72b8313e253/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/1ac4df92-dae0-4c83-bfae-e72b8313e253/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3193,
+                "width": 2078,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/1ac4df92-dae0-4c83-bfae-e72b8313e253",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "30"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/3cbf6a31-b9be-439e-a978-ffa00db2e0ac",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3193,
+      "width": 2078,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/2855910f-1c55-48a3-909f-533846573c17/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/2855910f-1c55-48a3-909f-533846573c17/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/2855910f-1c55-48a3-909f-533846573c17/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/2855910f-1c55-48a3-909f-533846573c17/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3199,
+                "width": 2067,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/2855910f-1c55-48a3-909f-533846573c17",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "31"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/3c893946-735f-4fcf-82b6-f83e7c77fbd1",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3199,
+      "width": 2067,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/454594f5-7dff-45ff-a086-93d2ec4e3f1a/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/454594f5-7dff-45ff-a086-93d2ec4e3f1a/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/454594f5-7dff-45ff-a086-93d2ec4e3f1a/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/454594f5-7dff-45ff-a086-93d2ec4e3f1a/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3184,
+                "width": 2074,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/454594f5-7dff-45ff-a086-93d2ec4e3f1a",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "32"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/1f80d18d-ecca-4a42-9556-fd049f976fbb",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3184,
+      "width": 2074,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/f58ece8c-0722-41cc-bfda-21a5aea0dcde/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/f58ece8c-0722-41cc-bfda-21a5aea0dcde/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/f58ece8c-0722-41cc-bfda-21a5aea0dcde/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/f58ece8c-0722-41cc-bfda-21a5aea0dcde/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3199,
+                "width": 2067,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/f58ece8c-0722-41cc-bfda-21a5aea0dcde",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "33"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/77bb512b-2c8d-4c4c-b66a-680e5308f4e3",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3199,
+      "width": 2067,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/91b63129-d2d9-4ec0-be81-cd64e06f5632/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/91b63129-d2d9-4ec0-be81-cd64e06f5632/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/91b63129-d2d9-4ec0-be81-cd64e06f5632/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/91b63129-d2d9-4ec0-be81-cd64e06f5632/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3211,
+                "width": 2094,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/91b63129-d2d9-4ec0-be81-cd64e06f5632",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "34"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/5c2734f2-664c-4223-b3cf-2d301ca6c185",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3211,
+      "width": 2094,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/d4b48fe0-6111-4fda-981e-144511a2221b/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/d4b48fe0-6111-4fda-981e-144511a2221b/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/d4b48fe0-6111-4fda-981e-144511a2221b/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/d4b48fe0-6111-4fda-981e-144511a2221b/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3186,
+                "width": 2054,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/d4b48fe0-6111-4fda-981e-144511a2221b",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "35"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/a2d469b7-9500-4e0b-8eaf-e253d5114b32",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3186,
+      "width": 2054,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/aed3f444-a761-4be7-b3b7-cf2aab7aaa6d/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/aed3f444-a761-4be7-b3b7-cf2aab7aaa6d/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/aed3f444-a761-4be7-b3b7-cf2aab7aaa6d/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/aed3f444-a761-4be7-b3b7-cf2aab7aaa6d/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3194,
+                "width": 2122,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/aed3f444-a761-4be7-b3b7-cf2aab7aaa6d",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          "36"
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/3fc07e15-f1f0-49eb-9e2c-fcfa96da4d22",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3194,
+      "width": 2122,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/6c8f1087-937d-43b9-91c2-e04eadc152b3/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/6c8f1087-937d-43b9-91c2-e04eadc152b3/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/6c8f1087-937d-43b9-91c2-e04eadc152b3/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/6c8f1087-937d-43b9-91c2-e04eadc152b3/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3190,
+                "width": 2076,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/6c8f1087-937d-43b9-91c2-e04eadc152b3",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/99de4b37-cab6-432b-aa2e-b7ea2d2b0221",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3190,
+      "width": 2076,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/8cd2c9a5-5368-4367-bc82-482d42bc02fc/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/8cd2c9a5-5368-4367-bc82-482d42bc02fc/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/8cd2c9a5-5368-4367-bc82-482d42bc02fc/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/8cd2c9a5-5368-4367-bc82-482d42bc02fc/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3198,
+                "width": 2122,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/8cd2c9a5-5368-4367-bc82-482d42bc02fc",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/69e5541d-8cb8-4036-8d12-36015225cd94",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3198,
+      "width": 2122,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/f6a59007-16ba-4c9b-8c2b-d365ae458e0b/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/f6a59007-16ba-4c9b-8c2b-d365ae458e0b/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/f6a59007-16ba-4c9b-8c2b-d365ae458e0b/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/f6a59007-16ba-4c9b-8c2b-d365ae458e0b/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3182,
+                "width": 2076,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/f6a59007-16ba-4c9b-8c2b-d365ae458e0b",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/b12e64ce-c935-41c8-be63-9f8cfaf23e48",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3182,
+      "width": 2076,
+      "type": "Canvas"
+    },
+    {
+      "id": "https://polona.pl/iiif/3/4ffe6666-a24c-4621-85b0-39218057a2d1/info.json",
+      "items": [
+        {
+          "items": [
+            {
+              "id": "https://polona.pl/iiif/3/4ffe6666-a24c-4621-85b0-39218057a2d1/full/max/0/default.jpg",
+              "target": "https://polona.pl/iiif/3/4ffe6666-a24c-4621-85b0-39218057a2d1/info.json",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://polona.pl/iiif/3/4ffe6666-a24c-4621-85b0-39218057a2d1/full/max/0/default.jpg",
+                "type": "Image",
+                "format": "image/tiff",
+                "height": 3184,
+                "width": 2175,
+                "service": [
+                  {
+                    "id": "https://polona.pl/iiif/3/4ffe6666-a24c-4621-85b0-39218057a2d1",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "AnnotationPage",
+          "id": "https://example.org/uuid/56b19e3b-c811-47dc-a8ee-e675b9810474"
+        }
+      ],
+      "label": {
+        "pl": [
+          ""
+        ]
+      },
+      "thumbnail": [
+        {
+          "id": "https://polona.pl/api/download/digital-content/6dcbcf16-511f-417e-a2e3-bb06704b1905",
+          "format": "image/jpeg",
+          "type": "Image"
+        }
+      ],
+      "height": 3184,
+      "width": 2175,
+      "type": "Canvas"
+    }
+  ],
+  "type": "manifest",
+  "label": {
+    "pl": [
+      "Essai sur la gelatine des os"
+    ]
+  },
+  "id": "https://polona.pl/api/search-service/search/iiif/52c7d7fd-e857-4cd8-95dc-eea728738df5/manifest.json",
+  "metadata": [
+    {
+      "label": {
+        "pl": [
+          "Tytuł"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Essai sur la gelatine des os"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Autor"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Cadet de Vaux, Antoine-Alexis (1743-1828)"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Autor"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Cadet de Vaux, Antoine-Alexis (1743-1828) (1743-1828)"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Data powstania"
+        ]
+      },
+      "value": {
+        "pl": [
+          "1803"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Autor"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Cadet de Vaux, Antoine-Alexis (1743-1828)"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Adres wydawniczy"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Liège : J. F. Desoer, 1803."
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Miejsce wydania"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Liège"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Wydawca"
+        ]
+      },
+      "value": {
+        "pl": [
+          "J. F. Desoer"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Opis fizyczny"
+        ]
+      },
+      "value": {
+        "pl": [
+          "36 s. ; 22 cm"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Język"
+        ]
+      },
+      "value": {
+        "pl": [
+          "francuski"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Sygnatura"
+        ]
+      },
+      "value": {
+        "pl": [
+          "80.805"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Prawa autorskie"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Domena Publiczna. Wolno zwielokrotniać, zmieniać i rozpowszechniać oraz wykonywać utwór, nawet w celach komercyjnych, bez konieczności pytania o zgodę. Wykorzystując utwór należy pamiętać o poszanowaniu autorskich praw osobistych Twórcy."
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Źródło"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Biblioteka Narodowa"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Projekt"
+        ]
+      },
+      "value": {
+        "pl": [
+          "Patrimonium 2"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Identyfikator rekordu bibliograficznego"
+        ]
+      },
+      "value": {
+        "pl": [
+          "b0000001903318"
+        ]
+      }
+    },
+    {
+      "label": {
+        "pl": [
+          "Identyfikator ALMA"
+        ]
+      },
+      "value": {
+        "pl": [
+          "991033755479705066"
+        ]
+      }
+    }
+  ],
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    "http://iiif.io/api/presentation/3/context.json"
+  ]
+}

@@ -1,0 +1,75 @@
+usage: chronodownloader fetch --entry-id ID
+                              (--url URL | --provider KEY --id ID) [options]
+
+Download one known item, named by its URL or by provider and identifier, into a work of the output
+root, without search or judgment. Fetch also closes a needs_review work; --reason is then
+required.
+
+options:
+  -h, --help            show this help message and exit
+
+item:
+  --entry-id ID         work the item belongs to
+  --title TEXT          title of a work not yet in the store; default: stored title
+  --url URL             IIIF manifest or item URL; excludes --provider and --id
+  --provider KEY        provider of --id
+  --id ID               provider item identifier
+  --reason TEXT         reason recorded with the download; required when the work is needs_review
+
+download:
+  --format {images,pdf,both}
+                        what to download: pdf takes the item's PDF when it offers one, else its
+                        page images; images takes page images only; both takes both; default: pdf
+  --max-pages N         page limit per work, binding page images only; the smaller of this and the
+                        provider's max_pages applies; 0 = none; default: 0
+  --include-metadata, --no-include-metadata
+                        save the metadata files; default: on
+  --force               re-download complete works; take over unstored folders
+
+size limits:
+  --total-images-gb GB  run size limit of page images in GB; 0 = none; default:
+                        download_limits.total.images_gb
+  --total-pdfs-gb GB    run size limit of PDFs in GB; 0 = none; default:
+                        download_limits.total.pdfs_gb
+  --total-metadata-gb GB
+                        run size limit of metadata files in GB; 0 = none; default:
+                        download_limits.total.metadata_gb
+  --work-images-gb GB   per-work size limit of page images in GB; 0 = none; default:
+                        download_limits.per_work.images_gb
+  --work-pdfs-gb GB     per-work size limit of PDFs in GB; 0 = none; default:
+                        download_limits.per_work.pdfs_gb
+  --work-metadata-mb MB
+                        per-work size limit of metadata files in MB; 0 = none; default:
+                        download_limits.per_work.metadata_mb
+  --on-exceed {stop,skip}
+                        stop the run or skip the file at a limit; default:
+                        download_limits.on_exceed
+
+output:
+  --output DIR          output root; default: downloaded_works
+
+run control:
+  --dry-run             plan without network requests or writes
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    the item was downloaded, or a dry run planned it
+  1    the download failed
+  2    usage or configuration error: an invalid option or settings file,
+       neither --url nor --provider with --id, a needs_review work without
+       --reason, or a store the tool refuses
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.
+
+Examples:
+  Fetch a IIIF manifest for a work:
+    chronodownloader fetch --entry-id E0001 --url https://example.org/manifest
+  Close a needs_review work with a chosen candidate:
+    chronodownloader fetch --entry-id E0001 --provider mdz --id bsb11111111
+      --reason "same edition, title page checked"

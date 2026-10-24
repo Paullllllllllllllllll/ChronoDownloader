@@ -1,0 +1,21 @@
+{
+  "results": [
+    {
+      "id": "http://www.loc.gov/item/65078367/",
+      "title": "The queen-like closet, or, Rich cabinet",
+      "contributor_names": ["Woolley, Hannah, b. 1623"],
+      "date": "1672",
+      "url": "https://www.loc.gov/item/65078367/",
+      "resources": [
+        {"iiif_manifest": "https://www.loc.gov/item/65078367/manifest.json"}
+      ]
+    },
+    {
+      "id": "http://www.loc.gov/item/75320945/",
+      "title": "The accomplished lady's delight in preserving, physick, beautifying, and cookery",
+      "contributor_names": "Woolley, Hannah, b. 1623",
+      "dates": ["1675-01-01T00:00:00Z"],
+      "url": "https://www.loc.gov/item/75320945/"
+    }
+  ]
+}

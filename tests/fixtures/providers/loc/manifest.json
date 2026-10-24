@@ -1,0 +1,53 @@
+{
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "@id": "https://www.loc.gov/item/65078367/manifest.json",
+  "@type": "sc:Manifest",
+  "label": "The queen-like closet, or, Rich cabinet",
+  "sequences": [
+    {
+      "@type": "sc:Sequence",
+      "canvases": [
+        {
+          "@id": "https://www.loc.gov/item/65078367/canvas/1",
+          "@type": "sc:Canvas",
+          "label": "Title page",
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "https://tile.loc.gov/image-services/iiif/service:rbc:65078367:0001/full/full/0/default.jpg",
+                "@type": "dctypes:Image",
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "https://tile.loc.gov/image-services/iiif/service:rbc:65078367:0001",
+                  "profile": "http://iiif.io/api/image/2/level2.json"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "@id": "https://www.loc.gov/item/65078367/canvas/2",
+          "@type": "sc:Canvas",
+          "label": "Page 2",
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "https://tile.loc.gov/image-services/iiif/service:rbc:65078367:0002/full/full/0/default.jpg",
+                "@type": "dctypes:Image",
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "https://tile.loc.gov/image-services/iiif/service:rbc:65078367:0002",
+                  "profile": "http://iiif.io/api/image/2/level2.json"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "count": 1,
+  "docs": [
+    {
+      "@context": "http://dp.la/api/items/context",
+      "@id": "http://dp.la/api/items/5c7a04f479ecfdae716e58c1dcb1e7e1",
+      "@type": "ore:Aggregation",
+      "aggregatedCHO": "#sourceResource",
+      "dataProvider": {
+        "@id": "http://dp.la/api/contributor/university-of-california",
+        "exactMatch": [
+          "http://www.wikidata.org/entity/Q184478"
+        ],
+        "name": "University of California"
+      },
+      "id": "5c7a04f479ecfdae716e58c1dcb1e7e1",
+      "ingestDate": "2026-08-19T02:02:07.522Z",
+      "ingestType": "item",
+      "isShownAt": "http://catalog.hathitrust.org/Record/100158800",
+      "originalRecord": {
+        "stringValue": "<record>\n  <header \n  xmlns=\"http://www.openarchives.org/OAI/2.0/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n    <identifier>oai:hathitrust.org:100158800</identifier>\n    <datestamp>2025-10-20T00:00:00Z</datestamp>\n    <setSpec>hathitrust:pd</setSpec>\n    <setSpec>hathitrust:pdus</setSpec>\n    <setSpec>hathitrust</setSpec>\n</header>\n  <metadata \n  xmlns=\"http://www.openarchives.org/OAI/2.0/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n    <record \n    xsi:schemaLocation=\"http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.loc.gov/MARC21/slim\">\n      <leader>01592cam a2200277Ia 4500</leader>\n      <controlfield tag=\"005\">20140421000000.0</controlfield>\n      <datafield tag=\"035\" ind1=\" \" ind2=\" \">\n        <subfield code=\"a\">sdr-ucd000558242</subfield>\n      </datafield>\n      <datafield tag=\"035\" ind1=\" \" ind2=\" \">\n        <subfield code=\"a\">(OCoLC)7543684</subfield>\n      </datafield>\n      <datafield tag=\"100\" ind1=\"1\" ind2=\" \">\n        <subfield code=\"a\">Smith, E.</subfield>\n        <subfield code=\"q\">(Eliza),</subfield>\n        <subfield code=\"d\">-approximately 1732.</subfield>\n      </datafield>\n      <datafield tag=\"240\" ind1=\"1\" ind2=\"0\">\n        <subfield code=\"a\">Compleat housewife</subfield>\n      </datafield>\n      <datafield tag=\"245\" ind1=\"1\" ind2=\"4\">\n        <subfield code=\"a\">\n          The compleat housewife, or, Accomplish'd gentlewoman's companion :\n        </subfield>\n        <subfield code=\"b\">\n          being a collection of upwards of five hundred of the most approved receipts in cookery, pastry, confectionary, preserving, pickles, cakes, creams, jellies, made wines, cordials : with copper plates curiously engraven for the regular disposition or placing the various dishes and courses : and also bills of fare for every month in the year : to which is added, a collection of above two hundred family receipts of medicines ... /\n        </subfield>\n        <subfield code=\"c\">by E.S.</subfield>\n      </datafield>\n      <datafield tag=\"250\" ind1=\" \" ind2=\" \">\n        <subfield code=\"a\">The third edition corrected and improved.</subfield>\n      </datafield>\n      <datafield tag=\"260\" ind1=\" \" ind2=\" \">\n        <subfield code=\"a\">London :</subfield>\n        <subfield code=\"b\">Printed for J. Pemberton ...,</subfield>\n        <subfield code=\"c\">1729.</subfield>\n      </datafield>\n      <datafield tag=\"300\" ind1=\" \" ind2=\" \">\n        <subfield code=\"a\">\n          [16], 332, [4], xv, [1] p., 6 folded leaves of plates :\n        </subfield>\n      </datafield>\n      <datafield tag=\"650\" ind1=\" \" ind2=\"0\">\n        <subfield code=\"a\">Medicine</subfield>\n      </datafield>\n      <datafield tag=\"650\" ind1=\" \" ind2=\"0\">\n        <subfield code=\"a\">Recipes.</subfield>\n      </datafield>\n      <datafield tag=\"650\" ind1=\" \" ind2=\"0\">\n        <subfield code=\"a\">Cooking</subfield>\n      </datafield>\n      <datafield tag=\"650\" ind1=\" \" ind2=\"0\">\n        <subfield code=\"a\">Cooking, English</subfield>\n      </datafield>\n      <datafield tag=\"856\" ind1=\"4\" ind2=\"1\">\n        <subfield code=\"u\">http://hdl.handle.net/2027/uc1.31175035227522</subfield>\n        <subfield code=\"z\"/>\n        <subfield code=\"x\">eContent</subfield>\n        <subfield code=\"r\">pd</subfield>\n      </datafield>\n</record>\n</metadata>\n  <about>\n    <request verb=\"ListRecords\" metadataPrefix=\"marc21\" set=\"hathitrust:pdus\"/>\n    <resumptionToken>\n      marc21.s(hathitrust:pdus).f(2013-08-01T00:00:00Z).u(2026-06-23T21:23:33Z):2223000-3596200-AoEpMTAwMTU4Njc5\n    </resumptionToken>\n    <responseDate>2026-06-23T23:21:28.340Z</responseDate>\n  </about>\n</record>"
+      },
+      "provider": {
+        "@id": "http://dp.la/api/contributor/hathi",
+        "exactMatch": [
+          "http://www.wikidata.org/entity/Q3128305"
+        ],
+        "name": "HathiTrust"
+      },
+      "rights": "http://creativecommons.org/publicdomain/mark/1.0/",
+      "rightsCategory": "Unlimited Re-Use",
+      "sourceResource": {
+        "@id": "http://dp.la/api/items/5c7a04f479ecfdae716e58c1dcb1e7e1#SourceResource",
+        "creator": [
+          "Smith, E. (Eliza), -approximately 1732"
+        ],
+        "date": [
+          {
+            "begin": "1729",
+            "displayDate": "1729",
+            "end": "1729"
+          }
+        ],
+        "description": [
+          "by E.S."
+        ],
+        "extent": [
+          "[16], 332, [4], xv, [1] p., 6 folded leaves of plates :"
+        ],
+        "format": [
+          "Language material"
+        ],
+        "identifier": [
+          "sdr-ucd000558242",
+          "(OCoLC)7543684"
+        ],
+        "publisher": [
+          "London : Printed for J. Pemberton..."
+        ],
+        "rights": [
+          "Public domain. Learn more at http://www.hathitrust.org/access_use"
+        ],
+        "subject": [
+          {
+            "name": "Medicine"
+          },
+          {
+            "name": "Recipes"
+          },
+          {
+            "name": "Cooking"
+          },
+          {
+            "name": "Cooking, English"
+          }
+        ],
+        "title": [
+          "The compleat housewife, or, Accomplish'd gentlewoman's companion : being a collection of upwards of five hundred of the most approved receipts in cookery, pastry, confectionary, preserving, pickles, cakes, creams, jellies, made wines, cordials : with copper plates curiously engraven for the regular disposition or placing the various dishes and courses : and also bills of fare for every month in the year : to which is added, a collection of above two hundred family receipts of medicines...",
+          "Compleat housewife"
+        ],
+        "type": [
+          "text"
+        ]
+      }
+    }
+  ]
+}

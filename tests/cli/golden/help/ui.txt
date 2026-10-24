@@ -1,0 +1,12 @@
+usage: chronodownloader ui [-h] [--settings FILE]
+
+Guided run: choose a command, answer its steps with Back navigation, then review the values with
+the equivalent command and run it, copy the command or quit. Needs an interactive terminal.
+
+options:
+  -h, --help       show this help message and exit
+
+run control:
+  --settings FILE  alternate settings file; default: config/settings.yaml
+
+Exit codes are those of the chosen command. For scripts and agents, use the commands with flags.

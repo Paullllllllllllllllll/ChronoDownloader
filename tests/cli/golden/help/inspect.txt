@@ -1,0 +1,39 @@
+usage: chronodownloader inspect
+       (--entry-ids LIST --output DIR | --provider KEY --id ID) [options]
+
+Sample the first pages of a candidate at reduced size and check them with the page model: a title
+page among the first pages and the imprint year. fetch and drop remove the sampled pages of their
+works.
+
+options:
+  -h, --help        show this help message and exit
+
+candidates:
+  --entry-ids LIST  inspect the stored candidates of these works; needs --output
+  --provider KEY    provider of --id; inspects one item outside the store
+  --id ID           provider item identifier; inspects one item outside the store
+  --providers LIST  only candidates of these providers; default: all
+  --first N         pages sampled per candidate; default: 10
+
+output:
+  --output DIR      store root; pages go to <output>/_inspect/<entry_id>/<provider>_<id>/;
+                    default: a scratch folder in %TEMP%\chronodownloader\inspect
+
+run control:
+  --dry-run         plan without network requests or writes
+  --json            print one JSON summary line on stdout
+  --settings FILE   alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    every candidate was sampled and checked, or a dry run planned it
+  1    a candidate could not be sampled or checked
+  2    usage or configuration error: an invalid option or settings file,
+       not exactly one of --entry-ids and --provider with --id, or an
+       unset page-model key
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.

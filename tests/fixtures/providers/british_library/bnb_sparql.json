@@ -1,0 +1,21 @@
+{
+  "head": {"vars": ["work", "title", "creatorName", "same", "ident"]},
+  "results": {
+    "bindings": [
+      {
+        "work": {"type": "uri", "value": "http://bnb.data.bl.uk/id/resource/009876544"},
+        "title": {"type": "literal", "value": "The Cook's Oracle and Housekeeper's Manual"},
+        "creatorName": {"type": "literal", "value": "Kitchiner, William"},
+        "ident": {"type": "literal", "value": "ark:/81055/vdc_100000000998"}
+      },
+      {
+        "work": {"type": "uri", "value": "http://bnb.data.bl.uk/id/resource/009876543"},
+        "same": {"type": "uri", "value": "http://api.bl.uk/metadata/iiif/ark:/81055/vdc_100000000999"}
+      },
+      {
+        "work": {"type": "uri", "value": "http://bnb.data.bl.uk/id/resource/009876545"},
+        "title": {"type": "literal", "value": "Cookery without a copy"}
+      }
+    ]
+  }
+}

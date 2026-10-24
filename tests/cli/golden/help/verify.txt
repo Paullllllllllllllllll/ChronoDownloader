@@ -1,0 +1,36 @@
+usage: chronodownloader verify [-h] [--entry-ids LIST] [--pages] [--first N] [--output DIR]
+                               [--dry-run] [--json] [--settings FILE]
+
+Check the files of the stored works against the store and update their statuses; with --pages also
+check the title page and the imprint year with the page model.
+
+options:
+  -h, --help        show this help message and exit
+
+works:
+  --entry-ids LIST  only these works; default: all works
+
+page check:
+  --pages           also check title page and imprint year with the page model
+  --first N         pages sampled for the check; only with --pages; default: 10
+
+output:
+  --output DIR      output root to verify; default: downloaded_works
+
+run control:
+  --dry-run         report without changing statuses
+  --json            print one JSON summary line on stdout
+  --settings FILE   alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    every checked work passed, or a dry run reported
+  1    a work failed the check
+  2    usage or configuration error: an invalid option or settings file, a
+       store the tool refuses, or an unset page-model key with --pages
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.

@@ -1,0 +1,12 @@
+{
+  "head": {"link": [], "vars": ["digital"]},
+  "results": {
+    "distinct": false,
+    "ordered": true,
+    "bindings": [
+      {
+        "digital": {"type": "uri", "value": "https://bnedigital.bne.es/bd/card?id=a984ca89-2da2-4d68-b979-a996cf9b5eac"}
+      }
+    ]
+  }
+}

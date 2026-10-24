@@ -1,0 +1,71 @@
+{
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/manifest.json",
+  "@type": "sc:Manifest",
+  "label": "Le cuisinier royal",
+  "attribution": "Bibliothèque nationale de France",
+  "metadata": [
+    {"label": "Repository", "value": "Bibliothèque nationale de France"},
+    {"label": "Date", "value": "1817"}
+  ],
+  "sequences": [
+    {
+      "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/sequence/default",
+      "@type": "sc:Sequence",
+      "canvases": [
+        {
+          "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/canvas/f1",
+          "@type": "sc:Canvas",
+          "label": "NP",
+          "height": 3000,
+          "width": 2000,
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "on": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/canvas/f1",
+              "resource": {
+                "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/f1/full/full/0/native.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2000,
+                "service": {
+                  "@context": "http://iiif.io/api/image/1/context.json",
+                  "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/f1",
+                  "profile": "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level2"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/canvas/f2",
+          "@type": "sc:Canvas",
+          "label": "1",
+          "height": 3000,
+          "width": 2000,
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "on": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/canvas/f2",
+              "resource": {
+                "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/f2/full/full/0/native.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2000,
+                "service": {
+                  "@context": "http://iiif.io/api/image/1/context.json",
+                  "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k12345q/f2",
+                  "profile": "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level2"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

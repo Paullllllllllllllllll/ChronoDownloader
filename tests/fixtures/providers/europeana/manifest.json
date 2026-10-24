@@ -1,0 +1,195 @@
+{
+  "@type": "sc:Manifest",
+  "@id": "https://iiif.europeana.eu/presentation/794/ark__12148_bpt6k114423k/manifest",
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "label": [
+    {
+      "@language": "fr",
+      "@value": "Le cuisinier françois , enseignant la manière de bien apprester et assaisonner toutes sortes de viandes... légumes,... par le sieur de La Varenne,..."
+    }
+  ],
+  "description": [
+    {
+      "@language": "en",
+      "@value": "Part of the documentary ensemble: PatGourm"
+    },
+    {
+      "@language": "en",
+      "@value": "Part of the documentary ensemble: GTextes1"
+    },
+    {
+      "@language": "fr",
+      "@value": "Appartient à l’ensemble documentaire : PatGourm"
+    },
+    {
+      "@language": "fr",
+      "@value": "Appartient à l’ensemble documentaire : GTextes1"
+    },
+    {
+      "@language": "fr",
+      "@value": "Ouvrages avant 1800"
+    },
+    {
+      "@value": "Appartient à l’ensemble documentaire : PatGourm"
+    },
+    {
+      "@value": "Appartient à l’ensemble documentaire : GTextes1"
+    },
+    {
+      "@value": "Ouvrages avant 1800"
+    }
+  ],
+  "metadata": [
+    {
+      "label": "format",
+      "value": [
+        {
+          "@language": "en",
+          "@value": "[XIV] -309 p. : limine parts. ; in-8"
+        },
+        {
+          "@language": "en",
+          "@value": "Total number of views: 326"
+        },
+        {
+          "@language": "fr",
+          "@value": "[XIV]-309 p. : pièces limin. ; in-8"
+        },
+        {
+          "@language": "fr",
+          "@value": "Nombre total de vues :  326"
+        },
+        {
+          "@value": "[XIV]-309 p. : pièces limin. ; in-8"
+        },
+        {
+          "@value": "Nombre total de vues :  326"
+        }
+      ]
+    },
+    {
+      "label": "relation",
+      "value": [
+        {
+          "@language": "en",
+          "@value": "Catalogue notice: http://catalog.bnf.fr/ark:/12148/cb30754438c"
+        },
+        {
+          "@language": "fr",
+          "@value": "Notice du catalogue : http://catalogue.bnf.fr/ark:/12148/cb30754438c"
+        }
+      ]
+    },
+    {
+      "label": "type",
+      "value": [
+        {
+          "@value": "http://data.europeana.eu/concept/2841"
+        },
+        {
+          "@value": "http://www.wikidata.org/entity/Q193495"
+        },
+        {
+          "@language": "en",
+          "@value": "text"
+        },
+        {
+          "@language": "en",
+          "@value": "monographie imprimée"
+        },
+        {
+          "@language": "fr",
+          "@value": "monographie imprimée"
+        }
+      ]
+    },
+    {
+      "label": "language",
+      "value": [
+        {
+          "@value": "fra"
+        },
+        {
+          "@value": "fre"
+        },
+        {
+          "@value": "français"
+        }
+      ]
+    },
+    {
+      "label": "source",
+      "value": [
+        {
+          "@language": "fr",
+          "@value": "Bibliothèque nationale de France, département Réserve des livres rares, RES-V-3039"
+        }
+      ]
+    }
+  ],
+  "thumbnail": {
+    "@type": "dctypes:Image",
+    "@id": "https://api.europeana.eu/thumbnail/v2/url.json?uri=https%3A%2F%2Fgallica.bnf.fr%2Fiiif%2Fark%3A%2F12148%2Fbpt6k114423k%2Ff1%2Ffull%2F512%2C%2F0%2Fnative.jpg&type=TEXT"
+  },
+  "attribution": "(fr) Le cuisinier françois , enseignant la manière de bien apprester et assaisonner toutes sortes de viandes... légumes,... par le sieur de La Varenne,.. - https://www.europeana.eu/item/794/ark__12148_bpt6k114423k. (en) The Varenne (1618-1678). Author of the text. Bibliothèque nationale de France - https://gallica.bnf.fr/ark:/12148/bpt6k114423k. No Copyright - Other Known Legal Restrictions - http://rightsstatements.org/vocab/NoC-OKLR/1.0/",
+  "license": "http://rightsstatements.org/vocab/NoC-OKLR/1.0/",
+  "logo": "https://style.europeana.eu/images/europeana-logo-default.png",
+  "seeAlso": [
+    {
+      "@id": "https://api.europeana.eu/record/794/ark__12148_bpt6k114423k.json-ld",
+      "format": "application/ld+json",
+      "profile": "http://www.europeana.eu/schemas/edm/"
+    },
+    {
+      "@id": "https://api.europeana.eu/record/794/ark__12148_bpt6k114423k.json",
+      "format": "application/json",
+      "profile": "http://www.europeana.eu/schemas/edm/"
+    },
+    {
+      "@id": "https://api.europeana.eu/record/794/ark__12148_bpt6k114423k.rdf",
+      "format": "application/rdf+xml",
+      "profile": "http://www.europeana.eu/schemas/edm/"
+    }
+  ],
+  "service": {
+    "@context": "http://iiif.io/api/search/1/context.json",
+    "@id": "https://iiif.europeana.eu/presentation/794/ark__12148_bpt6k114423k/search",
+    "profile": "http://iiif.io/api/search/1/search"
+  },
+  "sequences": [
+    {
+      "@type": "sc:Sequence",
+      "label": "Current Page Order",
+      "startCanvas": "https://iiif.europeana.eu/presentation/794/ark__12148_bpt6k114423k/canvas/p1",
+      "canvases": [
+        {
+          "@type": "sc:Canvas",
+          "@id": "https://iiif.europeana.eu/presentation/794/ark__12148_bpt6k114423k/canvas/p1",
+          "label": "p. 1",
+          "height": 1749,
+          "width": 1239,
+          "attribution": "(fr) Le cuisinier françois , enseignant la manière de bien apprester et assaisonner toutes sortes de viandes... légumes,... par le sieur de La Varenne,.. - https://www.europeana.eu/item/794/ark__12148_bpt6k114423k. (en) The Varenne (1618-1678). Author of the text. Bibliothèque nationale de France - https://gallica.bnf.fr/ark:/12148/bpt6k114423k. No Copyright - Other Known Legal Restrictions - http://rightsstatements.org/vocab/NoC-OKLR/1.0/",
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@type": "dctypes:Image",
+                "@id": "https://gallica.bnf.fr/iiif/ark:/12148/bpt6k114423k/f1/full/full/0/native.jpg",
+                "format": "image/jpeg",
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "http://gallica.bnf.fr/view3if/ga/ark:/12148/bpt6k114423k/f1",
+                  "profile": "http://iiif.io/api/image/2/level2.json"
+                },
+                "height": 1749,
+                "width": 1239
+              },
+              "on": "https://iiif.europeana.eu/presentation/794/ark__12148_bpt6k114423k/canvas/p1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

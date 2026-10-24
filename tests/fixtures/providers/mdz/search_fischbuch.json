@@ -1,0 +1,662 @@
+{
+  "params" : {
+    "query" : "Fischbuch Gregor Mangolt",
+    "sortField" : "relevancy",
+    "sortOrder" : "DESC",
+    "startPage" : 0,
+    "pageSize" : 5,
+    "handler" : "simple-metadata",
+    "ocrContext" : 1
+  },
+  "numTotal" : 3846,
+  "docs" : [ {
+    "id" : "bsb11359226",
+    "shelfNos" : [ "Oecon. 2178 g#Beibd.2" ],
+    "provenance" : "München, Bayerische Staatsbibliothek",
+    "authors" : [ "<em>Mangolt</em>, <em>Gregor</em>, 1498-1584" ],
+    "publicationPlaces" : [ "Gedruckt zů Cöllen" ],
+    "publicationDate" : "[1575?]",
+    "publishers" : [ "bey Felix Röschlin" ],
+    "mediaTypes" : [ "book" ],
+    "contentType" : "text",
+    "manufacturingType" : "print",
+    "previewPage" : "bsb11359226_00003",
+    "iiifAvailable" : true,
+    "title" : "Fischbüchlin : von der Natur vnd eigenschafft der Fischen. Jtem, Wie man Fisch vnnd Vögel fahen soll. Zu welcher zeyt auch jeder Fisch am besten sey",
+    "doi" : "urn:nbn:de:bvb:12-bsb11359226-8",
+    "contained" : false
+  }, {
+    "id" : "bsb00027043",
+    "shelfNos" : [ "Res/Zool. 348" ],
+    "provenance" : "München, Bayerische Staatsbibliothek",
+    "authors" : [ "<em>Mangolt</em>, <em>Gregor</em>, 1498-1584" ],
+    "publicationPlaces" : [ "Zürych" ],
+    "publicationDate" : "[1557]",
+    "publishers" : [ "[Geßner]" ],
+    "mediaTypes" : [ "book" ],
+    "contentType" : "text",
+    "manufacturingType" : "print",
+    "previewPage" : "bsb00027043_00005",
+    "iiifAvailable" : true,
+    "title" : "<em>Fischbuch</em> : von der Natur der Fische",
+    "doi" : "urn:nbn:de:bvb:12-bsb00027043-7",
+    "contained" : false
+  }, {
+    "id" : "bsb11200266",
+    "shelfNos" : [ "2 Nat 58" ],
+    "provenance" : "Augsburg, Staats- und Stadtbibliothek",
+    "authors" : [ "Gessner, Conrad, 1516-1565" ],
+    "publicationPlaces" : [ "Franckfurt a. M." ],
+    "publicationDate" : "1598",
+    "publishers" : [ "Cambier", "Saur" ],
+    "mediaTypes" : [ "book" ],
+    "contentType" : "text",
+    "manufacturingType" : "print",
+    "previewPage" : "bsb11200266_00001",
+    "iiifAvailable" : true,
+    "title" : "<em>Fischbuch</em>, das ist ausführliche Beschreibung &amp; lebendige Conterfactur aller &amp; jeden Fischen ...",
+    "doi" : "urn:nbn:de:bvb:12-bsb11200266-7",
+    "contained" : false
+  }, {
+    "id" : "bsb11200270",
+    "shelfNos" : [ "2 Nat 59#(Beibd." ],
+    "provenance" : "Augsburg, Staats- und Stadtbibliothek",
+    "authors" : [ "Gessner, Conrad, 1516-1565" ],
+    "publicationPlaces" : [ "Franckfurt a. M." ],
+    "publicationDate" : "1598",
+    "publishers" : [ "Cambier", "Saur" ],
+    "mediaTypes" : [ "book" ],
+    "contentType" : "text",
+    "manufacturingType" : "print",
+    "previewPage" : "bsb11200270_00001",
+    "iiifAvailable" : true,
+    "title" : "<em>Fischbuch</em>, das ist ausführliche Beschreibung &amp; lebendige Conterfactur aller &amp; jeden Fischen ...",
+    "doi" : "urn:nbn:de:bvb:12-bsb11200270-0",
+    "contained" : false
+  }, {
+    "id" : "bsb11671421",
+    "shelfNos" : [ "P.o.germ. 914 ue-2" ],
+    "provenance" : "München, Bayerische Staatsbibliothek",
+    "authors" : [ "Samarow, <em>Gregor</em>, 1829-1903" ],
+    "publicationPlaces" : [ "Stuttgart u. Leipzig" ],
+    "publicationDate" : "1884",
+    "publishers" : [ "Deutsche Verlags-Anstalt" ],
+    "mediaTypes" : [ "book" ],
+    "contentType" : "text",
+    "manufacturingType" : "print",
+    "previewPage" : "bsb11671421_00001",
+    "iiifAvailable" : true,
+    "title" : "Plewna : Roman von <em>Gregor</em> Samarow. 2",
+    "doi" : "urn:nbn:de:bvb:12-bsb11671421-8",
+    "contained" : false
+  } ],
+  "facets" : {
+    "collections_facet" : {
+      "filterField" : "collections",
+      "numTotal" : 35,
+      "counts" : [ {
+        "value" : "211",
+        "count" : 673,
+        "translations" : {
+          "de" : "VD 18 digital - Verzeichnis der im deutschen Sprachraum erschienenen Drucke des 18. Jahrhunderts der Bayerischen Staatsbibliothek",
+          "en" : "VD 18 Digital - Catalogue of Printed Works of the 18th Century Published in German Speaking Countries of the Bavarian State Library"
+        }
+      }, {
+        "value" : "212",
+        "count" : 512,
+        "translations" : {
+          "de" : "VD 17 digital - Verzeichnis der im deutschen Sprachraum erschienenen Drucke des 17. Jahrhunderts der Bayerischen Staatsbibliothek",
+          "en" : "VD 17 Digital - Catalogue of Printed Works of the 17th Century Published in German Speaking Countries of the Bavarian State Library"
+        }
+      }, {
+        "value" : "210",
+        "count" : 278,
+        "translations" : {
+          "de" : "VD 16 digital - Verzeichnis der im deutschen Sprachgebiet erschienenen Drucke des 16. Jahrhunderts der Bayerischen Staatsbibliothek",
+          "en" : "VD 16 Digital - Catalog of Printed Works of the 16th Century Published in German Speaking Countries of the Bavarian State Library"
+        }
+      }, {
+        "value" : "148",
+        "count" : 111,
+        "translations" : {
+          "de" : "Lateinische Handschriften",
+          "en" : "Latin Manuscripts"
+        }
+      }, {
+        "value" : "15",
+        "count" : 101,
+        "translations" : {
+          "de" : "Inkunabeln (Wiegendrucke)",
+          "en" : "Incunabula (Early Printed Works)"
+        }
+      }, {
+        "value" : "198",
+        "count" : 34,
+        "translations" : {
+          "de" : "Europeana Regia: Kooperative digitale Bibliothek königlicher Handschriften des europäischen Mittelalters und der Renaissance - Handschriften der Bayerischen Staatsbibliothek",
+          "en" : "Europeana Regia: A Digital Collaborative Library of Royal Manuscripts in Medieval and Renaissance Europe - Manuscripts of the Bavarian State Library"
+        }
+      }, {
+        "value" : "228",
+        "count" : 30,
+        "translations" : {
+          "de" : "Notendrucke der Bayerischen Staatsbibliothek",
+          "en" : "Digitized Music Supplies from the Collections of the Bavarian State Library"
+        }
+      }, {
+        "value" : "16",
+        "count" : 23,
+        "translations" : {
+          "de" : "Digi20",
+          "en" : "Digi20"
+        }
+      }, {
+        "value" : "254",
+        "count" : 23,
+        "translations" : {
+          "de" : "Notendrucke des 16. und 17. Jahrhunderts mit mehrstimmiger Musik in der BSB",
+          "en" : "Printed Sources of Polyphonic Music (1501-1700) from the Bavarian State Library"
+        }
+      }, {
+        "value" : "162",
+        "count" : 19,
+        "translations" : {
+          "de" : "Handschriften Benediktinerkloster St. Emmeram in Regensburg",
+          "en" : "Manuscripts of the Benedictine Monastery St. Emmeram in Regensburg"
+        }
+      } ]
+    },
+    "type_media_facet" : {
+      "filterField" : "type_media_facet",
+      "numTotal" : 6,
+      "counts" : [ {
+        "value" : "book",
+        "count" : 3360,
+        "translations" : {
+          "de" : "Buch",
+          "en" : "Book"
+        }
+      }, {
+        "value" : "contained",
+        "count" : 460,
+        "translations" : {
+          "de" : "Enthaltene Einheit",
+          "en" : "Contained"
+        }
+      }, {
+        "value" : "serial",
+        "count" : 20,
+        "translations" : {
+          "de" : "Zeitschriftenband",
+          "en" : "Serial volume"
+        }
+      }, {
+        "value" : "Wasserzeichen",
+        "count" : 12,
+        "translations" : {
+          "de" : "Wasserzeichen",
+          "en" : "Watermark"
+        }
+      }, {
+        "value" : "part",
+        "count" : 6,
+        "translations" : {
+          "de" : "Teil",
+          "en" : "Part"
+        }
+      }, {
+        "value" : "map",
+        "count" : 2,
+        "translations" : {
+          "de" : "Karte",
+          "en" : "Map"
+        }
+      } ]
+    },
+    "provenance_facet" : {
+      "filterField" : "provenance_facet",
+      "numTotal" : 13,
+      "counts" : [ {
+        "value" : "München, Bayerische Staatsbibliothek",
+        "count" : 2583
+      }, {
+        "value" : "Augsburg, Staats- und Stadtbibliothek",
+        "count" : 676
+      }, {
+        "value" : "Regensburg, Staatliche Bibliothek",
+        "count" : 228
+      }, {
+        "value" : "Bamberg, Staatsbibliothek",
+        "count" : 218
+      }, {
+        "value" : "Coburg, Landesbibliothek",
+        "count" : 47
+      }, {
+        "value" : "Passau, Staatliche Bibliothek",
+        "count" : 38
+      }, {
+        "value" : "Dillingen, Studienbibliothek",
+        "count" : 34
+      }, {
+        "value" : "Amberg, Provinzialbibliothek",
+        "count" : 14
+      }, {
+        "value" : "München, Bibliothek der Monumenta Germaniae Historica",
+        "count" : 3
+      }, {
+        "value" : "München, Universitätsbibliothek der Ludwig-Maximilians-Universität",
+        "count" : 2
+      } ]
+    },
+    "shelfgroup_not_facet" : {
+      "filterField" : "shelfgroup_not",
+      "numTotal" : 157,
+      "counts" : [ {
+        "value" : "Diss.",
+        "count" : 476,
+        "translations" : {
+          "de" : "Hochschulprüfungsschriften bis 1908, Schweizer Hochschulschriften bis 1915",
+          "la" : "Dissertationes"
+        }
+      }, {
+        "value" : "P.lat.",
+        "count" : 167,
+        "translations" : {
+          "de" : "Einzelne lateinische Kirchenväter samt Sekundärliteratur",
+          "la" : "Patres latini singulares"
+        }
+      }, {
+        "value" : "Res",
+        "count" : 150,
+        "translations" : {
+          "de" : "Reserve"
+        }
+      }, {
+        "value" : "Clm",
+        "count" : 133,
+        "translations" : {
+          "de" : "Lateinische Handschriften",
+          "la" : "Codices latini monacenses"
+        }
+      }, {
+        "value" : "P.o.germ.",
+        "count" : 127,
+        "translations" : {
+          "de" : "Deutsche Dichter und Schriftsteller samt Sekundärliteratur",
+          "la" : "Poetae et oratores germanici"
+        }
+      }, {
+        "value" : "Bavar.",
+        "count" : 107,
+        "translations" : {
+          "de" : "Alles auf Bayern Bezügliche",
+          "la" : "Bavarica"
+        }
+      }, {
+        "value" : "H.eccl.",
+        "count" : 107,
+        "translations" : {
+          "de" : "Kirchengeschichte (ohne reformatorische Kirchen). Anhänge: Altkatholizismus, Deutsch-Katholiken, Kölner Streit, Schematismen",
+          "la" : "Historia ecclesiastica"
+        }
+      }, {
+        "value" : "J.rom.f.",
+        "count" : 91,
+        "translations" : {
+          "de" : "Quellenschriften des Römischen Rechts, insbesondere Corpus Iuris Romani",
+          "la" : "Fontes iuris Romani civilis"
+        }
+      }, {
+        "value" : "Hom.",
+        "count" : 90,
+        "translations" : {
+          "de" : "Homiletik, Predigtliteratur",
+          "la" : "Homiletica"
+        }
+      }, {
+        "value" : "J.can.f.",
+        "count" : 76,
+        "translations" : {
+          "de" : "Quellen und Literaturgeschichte des Kirchenrechts",
+          "la" : "Juris canonici fontes"
+        }
+      } ]
+    },
+    "language_facet" : {
+      "filterField" : "language_bib",
+      "numTotal" : 24,
+      "counts" : [ {
+        "value" : "la",
+        "count" : 2184,
+        "translations" : {
+          "en" : "Latin",
+          "de" : "Latein"
+        }
+      }, {
+        "value" : "de",
+        "count" : 1239,
+        "translations" : {
+          "en" : "German",
+          "de" : "Deutsch"
+        }
+      }, {
+        "value" : "und",
+        "count" : 523,
+        "translations" : {
+          "en" : "Not identified",
+          "de" : "Unbestimmt"
+        }
+      }, {
+        "value" : "it",
+        "count" : 97,
+        "translations" : {
+          "en" : "Italian",
+          "de" : "Italienisch"
+        }
+      }, {
+        "value" : "fr",
+        "count" : 31,
+        "translations" : {
+          "en" : "French",
+          "de" : "Französisch"
+        }
+      }, {
+        "value" : "grc",
+        "count" : 27,
+        "translations" : {
+          "en" : "Ancient Greek",
+          "de" : "Altgriechisch"
+        }
+      }, {
+        "value" : "en",
+        "count" : 13,
+        "translations" : {
+          "en" : "English",
+          "de" : "Englisch"
+        }
+      }, {
+        "value" : "gmh",
+        "count" : 7,
+        "translations" : {
+          "en" : "Middle High German",
+          "de" : "Mittelhochdeutsch"
+        }
+      }, {
+        "value" : "hy",
+        "count" : 6,
+        "translations" : {
+          "en" : "Armenian",
+          "de" : "Armenisch"
+        }
+      }, {
+        "value" : "el",
+        "count" : 6,
+        "translations" : {
+          "en" : "Greek",
+          "de" : "Griechisch"
+        }
+      } ]
+    },
+    "place_publ_facet" : {
+      "filterField" : "place_publ_facet",
+      "numTotal" : 740,
+      "counts" : [ {
+        "value" : "Augsburg",
+        "count" : 386
+      }, {
+        "value" : "Leipzig",
+        "count" : 256
+      }, {
+        "value" : "Ingolstadt",
+        "count" : 220
+      }, {
+        "value" : "Ingolstadii",
+        "count" : 149
+      }, {
+        "value" : "[o.O.]",
+        "count" : 136
+      }, {
+        "value" : "Paris",
+        "count" : 117
+      }, {
+        "value" : "Wien",
+        "count" : 116
+      }, {
+        "value" : "Salisburgi",
+        "count" : 115
+      }, {
+        "value" : "Salzburg",
+        "count" : 105
+      }, {
+        "value" : "München",
+        "count" : 96
+      } ]
+    },
+    "features" : {
+      "filterField" : "features",
+      "numTotal" : 2,
+      "counts" : [ {
+        "value" : "iiif",
+        "count" : 3846,
+        "translations" : {
+          "de" : "IIIF",
+          "en" : "IIIF"
+        }
+      }, {
+        "value" : "ocr",
+        "count" : 3381,
+        "translations" : {
+          "de" : "Volltext",
+          "en" : "Full text"
+        }
+      } ]
+    },
+    "type_manufact" : {
+      "filterField" : "type_manufact",
+      "numTotal" : 2,
+      "counts" : [ {
+        "value" : "print",
+        "count" : 3206,
+        "translations" : {
+          "de" : "Druck",
+          "en" : "Print"
+        }
+      }, {
+        "value" : "handmade",
+        "count" : 640,
+        "translations" : {
+          "de" : "Handschrift",
+          "en" : "Manuscript"
+        }
+      } ]
+    },
+    "pers_inst_facet" : {
+      "filterField" : "pers_inst_facet",
+      "numTotal" : 2101,
+      "counts" : [ {
+        "value" : "Gregor I., Papst, 542-604",
+        "count" : 386
+      }, {
+        "value" : "Gregor IX., Papst, 1170-1241",
+        "count" : 161
+      }, {
+        "value" : "Haloander, Gregor, 1501-1531",
+        "count" : 137
+      }, {
+        "value" : "Dreer, Johannes, 1543-1616",
+        "count" : 126
+      }, {
+        "value" : "Kloster Sankt Ulrich und Afra Augsburg",
+        "count" : 126
+      }, {
+        "value" : "Samarow, Gregor, 1829-1903",
+        "count" : 108
+      }, {
+        "value" : "Aichinger, Gregor, 1564-1628",
+        "count" : 101
+      }, {
+        "value" : "Regnart, Jakob, 1545-1599",
+        "count" : 86
+      }, {
+        "value" : "Gregor XIII., Papst, 1502-1585",
+        "count" : 85
+      }, {
+        "value" : "Kolb, Gregor, 1681-1746",
+        "count" : 85
+      } ]
+    },
+    "date_facet" : {
+      "filterField" : "date_facet",
+      "counts" : [ {
+        "value" : "[1600-01-01 TO 1649-12-31]",
+        "count" : 867
+      }, {
+        "value" : "[1850-01-01 TO 1899-12-31]",
+        "count" : 539
+      }, {
+        "value" : "[1550-01-01 TO 1599-12-31]",
+        "count" : 527
+      }, {
+        "value" : "[1700-01-01 TO 1749-12-31]",
+        "count" : 409
+      }, {
+        "value" : "[1750-01-01 TO 1799-12-31]",
+        "count" : 375
+      }, {
+        "value" : "[1800-01-01 TO 1849-12-31]",
+        "count" : 334
+      }, {
+        "value" : "[1650-01-01 TO 1699-12-31]",
+        "count" : 320
+      }, {
+        "value" : "[1500-01-01 TO 1549-12-31]",
+        "count" : 199
+      }, {
+        "value" : "[1450-01-01 TO 1499-12-31]",
+        "count" : 122
+      }, {
+        "value" : "[1400-01-01 TO 1449-12-31]",
+        "count" : 29
+      }, {
+        "value" : "[0800-01-01 TO 0849-12-31]",
+        "count" : 24
+      }, {
+        "value" : "[1950-01-01 TO 1999-12-31]",
+        "count" : 23
+      }, {
+        "value" : "[1000-01-01 TO 1049-12-31]",
+        "count" : 16
+      }, {
+        "value" : "[1900-01-01 TO 1949-12-31]",
+        "count" : 15
+      }, {
+        "value" : "[1100-01-01 TO 1149-12-31]",
+        "count" : 14
+      }, {
+        "value" : "[1150-01-01 TO 1199-12-31]",
+        "count" : 13
+      }, {
+        "value" : "[0750-01-01 TO 0799-12-31]",
+        "count" : 11
+      }, {
+        "value" : "[0850-01-01 TO 0899-12-31]",
+        "count" : 8
+      }, {
+        "value" : "[1200-01-01 TO 1249-12-31]",
+        "count" : 8
+      }, {
+        "value" : "[0900-01-01 TO 0949-12-31]",
+        "count" : 7
+      }, {
+        "value" : "[2000-01-01 TO 2049-12-31]",
+        "count" : 6
+      }, {
+        "value" : "[0950-01-01 TO 0999-12-31]",
+        "count" : 5
+      }, {
+        "value" : "[1050-01-01 TO 1099-12-31]",
+        "count" : 5
+      }, {
+        "value" : "[1250-01-01 TO 1299-12-31]",
+        "count" : 5
+      }, {
+        "value" : "[1350-01-01 TO 1399-12-31]",
+        "count" : 4
+      }, {
+        "value" : "[0700-01-01 TO 0749-12-31]",
+        "count" : 3
+      }, {
+        "value" : "[1300-01-01 TO 1349-12-31]",
+        "count" : 3
+      } ]
+    },
+    "type_content" : {
+      "filterField" : "type_content",
+      "numTotal" : 4,
+      "counts" : [ {
+        "value" : "text",
+        "count" : 3733,
+        "translations" : {
+          "de" : "Text",
+          "en" : "Text"
+        }
+      }, {
+        "value" : "score",
+        "count" : 546,
+        "translations" : {
+          "de" : "Noten",
+          "en" : "Score"
+        }
+      }, {
+        "value" : "image",
+        "count" : 11,
+        "translations" : {
+          "de" : "Bild",
+          "en" : "Image"
+        }
+      }, {
+        "value" : "map",
+        "count" : 2,
+        "translations" : {
+          "de" : "Karte",
+          "en" : "Map"
+        }
+      } ]
+    },
+    "subject_facet" : {
+      "filterField" : "subject_facet",
+      "numTotal" : 368,
+      "counts" : [ {
+        "value" : "Musikhandschrift",
+        "count" : 482
+      }, {
+        "value" : "Hochschulschrift",
+        "count" : 471
+      }, {
+        "value" : "Handschrift",
+        "count" : 110
+      }, {
+        "value" : "Inkunabel",
+        "count" : 106
+      }, {
+        "value" : "Quelle",
+        "count" : 64
+      }, {
+        "value" : "Einblattdruck",
+        "count" : 44
+      }, {
+        "value" : "Festschrift",
+        "count" : 40
+      }, {
+        "value" : "Geschichte",
+        "count" : 37
+      }, {
+        "value" : "Kommentar",
+        "count" : 33
+      }, {
+        "value" : "Pastoraltheologie",
+        "count" : 21
+      } ]
+    }
+  }
+}

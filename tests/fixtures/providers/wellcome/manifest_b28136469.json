@@ -1,0 +1,348 @@
+{
+ "@context": "http://iiif.io/api/presentation/2/context.json",
+ "@id": "https://iiif.wellcomecollection.org/presentation/v2/b28136469",
+ "@type": "sc:Manifest",
+ "label": "Il cuciniere italiano moderno : ovvero, L'amico dei ghiotti economi e dei convalescenti opera necessaria pei capi di famiglia che desiderano fare una cucina economica, familiare, e sana.",
+ "metadata": [
+  {
+   "label": "Publication/creation",
+   "value": "Livorno : Tip. di E. Vignozzi, 1858."
+  },
+  {
+   "label": "Physical description",
+   "value": "291 pages, 2 unnumbered folded leaves of plates : illustrations ; 17 cm"
+  },
+  {
+   "label": "Subjects",
+   "value": "Cooking, Italian"
+  },
+  {
+   "label": "Attribution",
+   "value": "Wellcome Collection"
+  },
+  {
+   "label": "Full conditions of use",
+   "value": "<span>This work has been identified as being free of known restrictions under copyright law, including all related and neighbouring rights and is being made available under the <a target=\"_top\" href=\"http://creativecommons.org/publicdomain/mark/1.0/\">Creative Commons, Public Domain Mark</a>.<br/><br/>You can copy, modify, distribute and perform the work, even for commercial purposes, without asking permission.</span>"
+  }
+ ],
+ "thumbnail": {
+  "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0009.jp2/full/63,100/0/default.jpg",
+  "@type": "dctypes:Image",
+  "service": {
+   "@context": "http://iiif.io/api/image/2/context.json",
+   "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0009.jp2",
+   "profile": "http://iiif.io/api/image/2/level0.json",
+   "protocol": "http://iiif.io/api/image",
+   "width": 646,
+   "height": 1024,
+   "sizes": [
+    {
+     "width": 63,
+     "height": 100
+    },
+    {
+     "width": 126,
+     "height": 200
+    },
+    {
+     "width": 253,
+     "height": 400
+    },
+    {
+     "width": 646,
+     "height": 1024
+    }
+   ]
+  }
+ },
+ "license": "http://creativecommons.org/publicdomain/mark/1.0/",
+ "logo": "https://iiif.wellcomecollection.org/logos/wellcome-collection-black.png",
+ "related": {
+  "@id": "https://wellcomecollection.org/works/k967axqt",
+  "format": "text/html",
+  "label": "Il cuciniere italiano moderno : ovvero, L'amico dei ghiotti economi e dei convalescenti opera necessaria pei capi di famiglia che desiderano fare una cucina economica, familiare, e sana."
+ },
+ "seeAlso": {
+  "@id": "https://api.wellcomecollection.org/catalogue/v2/works/k967axqt",
+  "profile": "https://api.wellcomecollection.org/catalogue/v2/context.json",
+  "format": "application/json",
+  "label": "Wellcome Collection Catalogue API"
+ },
+ "service": [
+  {
+   "@context": "http://iiif.io/api/search/0/context.json",
+   "@id": "https://iiif.wellcomecollection.org/search/v0/b28136469",
+   "profile": "http://iiif.io/api/search/0/search",
+   "label": "Search within this manifest",
+   "service": {
+    "@id": "https://iiif.wellcomecollection.org/search/autocomplete/v1/b28136469",
+    "profile": "http://iiif.io/api/search/0/autocomplete",
+    "label": "Autocomplete words in this manifest"
+   }
+  },
+  {
+   "@context": "http://universalviewer.io/context.json",
+   "@id": "http://wellcomelibrary.org/service/trackingLabels/b28136469",
+   "profile": "http://universalviewer.io/tracking-extensions-profile",
+   "trackingLabel": "Format: Monograph, Institution: n/a, Identifier: b28136469, Digicode: digukmhl, Collection code: n/a"
+  },
+  {
+   "@context": "http://wellcomelibrary.org/ld/iiif-ext/0/context.json",
+   "@id": "https://wellcomelibrary.org/iiif/b28136469/access-control-hints-service",
+   "profile": "http://wellcomelibrary.org/ld/iiif-ext/access-control-hints",
+   "accessHint": "open"
+  }
+ ],
+ "sequences": [
+  {
+   "@id": "https://iiif.wellcomecollection.org/presentation/v2/b28136469/sequences/s0",
+   "@type": "sc:Sequence",
+   "label": "Sequence s0",
+   "rendering": [
+    {
+     "@id": "https://iiif.wellcomecollection.org/pdf/b28136469",
+     "label": "View as PDF",
+     "format": "application/pdf"
+    },
+    {
+     "@id": "https://api.wellcomecollection.org/text/v1/b28136469",
+     "label": "View raw text",
+     "format": "text/plain"
+    }
+   ],
+   "viewingHint": "paged",
+   "canvases": [
+    {
+     "@id": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0001.jp2",
+     "@type": "sc:Canvas",
+     "label": "-",
+     "thumbnail": {
+      "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0001.jp2/full/66,100/0/default.jpg",
+      "@type": "dctypes:Image",
+      "service": {
+       "@context": "http://iiif.io/api/image/2/context.json",
+       "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0001.jp2",
+       "profile": "http://iiif.io/api/image/2/level0.json",
+       "protocol": "http://iiif.io/api/image",
+       "width": 678,
+       "height": 1024,
+       "sizes": [
+        {
+         "width": 66,
+         "height": 100
+        },
+        {
+         "width": 132,
+         "height": 200
+        },
+        {
+         "width": 265,
+         "height": 400
+        },
+        {
+         "width": 678,
+         "height": 1024
+        }
+       ]
+      }
+     },
+     "seeAlso": {
+      "@id": "https://api.wellcomecollection.org/text/alto/b28136469/b28136469_0001.jp2",
+      "profile": "http://www.loc.gov/standards/alto/v3/alto.xsd",
+      "format": "text/xml",
+      "label": "METS-ALTO XML"
+     },
+     "height": 2436,
+     "width": 1612,
+     "images": [
+      {
+       "@id": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0001.jp2/painting/anno",
+       "@type": "oa:Annotation",
+       "motivation": "sc:painting",
+       "resource": {
+        "@id": "https://iiif.wellcomecollection.org/image/b28136469_0001.jp2/full/678,1024/0/default.jpg",
+        "@type": "dctypes:Image",
+        "format": "image/jpeg",
+        "height": 1024,
+        "width": 678,
+        "service": {
+         "@context": "http://iiif.io/api/image/2/context.json",
+         "@id": "https://iiif.wellcomecollection.org/image/b28136469_0001.jp2",
+         "profile": "http://iiif.io/api/image/2/level1.json",
+         "protocol": "http://iiif.io/api/image",
+         "width": 1612,
+         "height": 2436
+        }
+       },
+       "on": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0001.jp2"
+      }
+     ],
+     "otherContent": [
+      {
+       "@id": "https://iiif.wellcomecollection.org/annotations/v2/b28136469/b28136469_0001.jp2/line",
+       "@type": "sc:AnnotationList",
+       "label": "Text of page  -"
+      }
+     ],
+     "within": ""
+    },
+    {
+     "@id": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0002.jp2",
+     "@type": "sc:Canvas",
+     "label": "-",
+     "thumbnail": {
+      "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0002.jp2/full/63,100/0/default.jpg",
+      "@type": "dctypes:Image",
+      "service": {
+       "@context": "http://iiif.io/api/image/2/context.json",
+       "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0002.jp2",
+       "profile": "http://iiif.io/api/image/2/level0.json",
+       "protocol": "http://iiif.io/api/image",
+       "width": 646,
+       "height": 1024,
+       "sizes": [
+        {
+         "width": 63,
+         "height": 100
+        },
+        {
+         "width": 126,
+         "height": 200
+        },
+        {
+         "width": 253,
+         "height": 400
+        },
+        {
+         "width": 646,
+         "height": 1024
+        }
+       ]
+      }
+     },
+     "seeAlso": {
+      "@id": "https://api.wellcomecollection.org/text/alto/b28136469/b28136469_0002.jp2",
+      "profile": "http://www.loc.gov/standards/alto/v3/alto.xsd",
+      "format": "text/xml",
+      "label": "METS-ALTO XML"
+     },
+     "height": 2273,
+     "width": 1435,
+     "images": [
+      {
+       "@id": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0002.jp2/painting/anno",
+       "@type": "oa:Annotation",
+       "motivation": "sc:painting",
+       "resource": {
+        "@id": "https://iiif.wellcomecollection.org/image/b28136469_0002.jp2/full/646,1024/0/default.jpg",
+        "@type": "dctypes:Image",
+        "format": "image/jpeg",
+        "height": 1024,
+        "width": 646,
+        "service": {
+         "@context": "http://iiif.io/api/image/2/context.json",
+         "@id": "https://iiif.wellcomecollection.org/image/b28136469_0002.jp2",
+         "profile": "http://iiif.io/api/image/2/level1.json",
+         "protocol": "http://iiif.io/api/image",
+         "width": 1435,
+         "height": 2273
+        }
+       },
+       "on": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0002.jp2"
+      }
+     ],
+     "otherContent": [
+      {
+       "@id": "https://iiif.wellcomecollection.org/annotations/v2/b28136469/b28136469_0002.jp2/line",
+       "@type": "sc:AnnotationList",
+       "label": "Text of page  -"
+      }
+     ],
+     "within": ""
+    },
+    {
+     "@id": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0003.jp2",
+     "@type": "sc:Canvas",
+     "label": "-",
+     "thumbnail": {
+      "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0003.jp2/full/63,100/0/default.jpg",
+      "@type": "dctypes:Image",
+      "service": {
+       "@context": "http://iiif.io/api/image/2/context.json",
+       "@id": "https://iiif.wellcomecollection.org/thumbs/b28136469_0003.jp2",
+       "profile": "http://iiif.io/api/image/2/level0.json",
+       "protocol": "http://iiif.io/api/image",
+       "width": 646,
+       "height": 1024,
+       "sizes": [
+        {
+         "width": 63,
+         "height": 100
+        },
+        {
+         "width": 126,
+         "height": 200
+        },
+        {
+         "width": 253,
+         "height": 400
+        },
+        {
+         "width": 646,
+         "height": 1024
+        }
+       ]
+      }
+     },
+     "seeAlso": {
+      "@id": "https://api.wellcomecollection.org/text/alto/b28136469/b28136469_0003.jp2",
+      "profile": "http://www.loc.gov/standards/alto/v3/alto.xsd",
+      "format": "text/xml",
+      "label": "METS-ALTO XML"
+     },
+     "height": 2273,
+     "width": 1435,
+     "images": [
+      {
+       "@id": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0003.jp2/painting/anno",
+       "@type": "oa:Annotation",
+       "motivation": "sc:painting",
+       "resource": {
+        "@id": "https://iiif.wellcomecollection.org/image/b28136469_0003.jp2/full/646,1024/0/default.jpg",
+        "@type": "dctypes:Image",
+        "format": "image/jpeg",
+        "height": 1024,
+        "width": 646,
+        "service": {
+         "@context": "http://iiif.io/api/image/2/context.json",
+         "@id": "https://iiif.wellcomecollection.org/image/b28136469_0003.jp2",
+         "profile": "http://iiif.io/api/image/2/level1.json",
+         "protocol": "http://iiif.io/api/image",
+         "width": 1435,
+         "height": 2273
+        }
+       },
+       "on": "https://iiif.wellcomecollection.org/presentation/b28136469/canvases/b28136469_0003.jp2"
+      }
+     ],
+     "otherContent": [
+      {
+       "@id": "https://iiif.wellcomecollection.org/annotations/v2/b28136469/b28136469_0003.jp2/line",
+       "@type": "sc:AnnotationList",
+       "label": "Text of page  -"
+      }
+     ],
+     "within": ""
+    }
+   ]
+  }
+ ],
+ "otherContent": [
+  {
+   "@id": "https://iiif.wellcomecollection.org/annotations/v2/b28136469/images",
+   "@type": "sc:AnnotationList",
+   "label": "OCR-identified images and figures for b28136469"
+  }
+ ],
+ "within": "https://iiif.wellcomecollection.org/presentation/v2/collections/subjects/mvk85yej"
+}

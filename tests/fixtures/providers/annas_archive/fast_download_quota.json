@@ -1,0 +1,9 @@
+{
+  "download_url": null,
+  "error": "Daily fast download limit reached",
+  "account_fast_download_info": {
+    "downloads_left": 0,
+    "downloads_per_day": 875,
+    "recently_downloaded_md5s": []
+  }
+}

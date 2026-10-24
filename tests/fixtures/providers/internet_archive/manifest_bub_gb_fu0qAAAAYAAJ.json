@@ -1,0 +1,788 @@
+{
+ "@context": "http://iiif.io/api/presentation/3/context.json",
+ "behavior": [
+  "paged"
+ ],
+ "homepage": [
+  {
+   "format": "text/html",
+   "id": "https://archive.org/details/bub_gb_fu0qAAAAYAAJ",
+   "label": {
+    "en": [
+     "Item Page on Internet Archive"
+    ]
+   },
+   "type": "Text"
+  }
+ ],
+ "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ/manifest.json",
+ "items": [
+  {
+   "annotations": [
+    {
+     "id": "https://iiif.archive.org/iiif/3/annotations/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_djvu.xml/1.json",
+     "type": "AnnotationPage"
+    }
+   ],
+   "height": 3513,
+   "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ$0/canvas",
+   "items": [
+    {
+     "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ/annotationPage/0",
+     "items": [
+      {
+       "body": {
+        "format": "image/jpeg",
+        "id": "https://iiif.archive.org/image/iiif/3/bub_gb_fu0qAAAAYAAJ%2Fbub_gb_fu0qAAAAYAAJ_jp2.zip%2Fbub_gb_fu0qAAAAYAAJ_jp2%2Fbub_gb_fu0qAAAAYAAJ_0000.jp2/full/max/0/default.jpg",
+        "service": [
+         {
+          "id": "https://iiif.archive.org/image/iiif/3/bub_gb_fu0qAAAAYAAJ%2Fbub_gb_fu0qAAAAYAAJ_jp2.zip%2Fbub_gb_fu0qAAAAYAAJ_jp2%2Fbub_gb_fu0qAAAAYAAJ_0000.jp2",
+          "profile": "level2",
+          "type": "ImageService3"
+         }
+        ],
+        "type": "Image"
+       },
+       "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ/annotation/0",
+       "motivation": "painting",
+       "target": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ$0/canvas",
+       "type": "Annotation"
+      }
+     ],
+     "type": "AnnotationPage"
+    }
+   ],
+   "label": {
+    "none": [
+     "0"
+    ]
+   },
+   "type": "Canvas",
+   "width": 2500
+  },
+  {
+   "annotations": [
+    {
+     "id": "https://iiif.archive.org/iiif/3/annotations/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_djvu.xml/2.json",
+     "type": "AnnotationPage"
+    }
+   ],
+   "height": 4066,
+   "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ$1/canvas",
+   "items": [
+    {
+     "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ/annotationPage/1",
+     "items": [
+      {
+       "body": {
+        "format": "image/jpeg",
+        "id": "https://iiif.archive.org/image/iiif/3/bub_gb_fu0qAAAAYAAJ%2Fbub_gb_fu0qAAAAYAAJ_jp2.zip%2Fbub_gb_fu0qAAAAYAAJ_jp2%2Fbub_gb_fu0qAAAAYAAJ_0001.jp2/full/max/0/default.jpg",
+        "service": [
+         {
+          "id": "https://iiif.archive.org/image/iiif/3/bub_gb_fu0qAAAAYAAJ%2Fbub_gb_fu0qAAAAYAAJ_jp2.zip%2Fbub_gb_fu0qAAAAYAAJ_jp2%2Fbub_gb_fu0qAAAAYAAJ_0001.jp2",
+          "profile": "level2",
+          "type": "ImageService3"
+         }
+        ],
+        "type": "Image"
+       },
+       "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ/annotation/1",
+       "motivation": "painting",
+       "target": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ$1/canvas",
+       "type": "Annotation"
+      }
+     ],
+     "type": "AnnotationPage"
+    }
+   ],
+   "label": {
+    "none": [
+     "1"
+    ]
+   },
+   "type": "Canvas",
+   "width": 2500
+  },
+  {
+   "annotations": [
+    {
+     "id": "https://iiif.archive.org/iiif/3/annotations/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_djvu.xml/3.json",
+     "type": "AnnotationPage"
+    }
+   ],
+   "height": 4075,
+   "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ$2/canvas",
+   "items": [
+    {
+     "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ/annotationPage/2",
+     "items": [
+      {
+       "body": {
+        "format": "image/jpeg",
+        "id": "https://iiif.archive.org/image/iiif/3/bub_gb_fu0qAAAAYAAJ%2Fbub_gb_fu0qAAAAYAAJ_jp2.zip%2Fbub_gb_fu0qAAAAYAAJ_jp2%2Fbub_gb_fu0qAAAAYAAJ_0002.jp2/full/max/0/default.jpg",
+        "service": [
+         {
+          "id": "https://iiif.archive.org/image/iiif/3/bub_gb_fu0qAAAAYAAJ%2Fbub_gb_fu0qAAAAYAAJ_jp2.zip%2Fbub_gb_fu0qAAAAYAAJ_jp2%2Fbub_gb_fu0qAAAAYAAJ_0002.jp2",
+          "profile": "level2",
+          "type": "ImageService3"
+         }
+        ],
+        "type": "Image"
+       },
+       "id": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ/annotation/2",
+       "motivation": "painting",
+       "target": "https://iiif.archive.org/iiif/bub_gb_fu0qAAAAYAAJ$2/canvas",
+       "type": "Annotation"
+      }
+     ],
+     "type": "AnnotationPage"
+    }
+   ],
+   "label": {
+    "none": [
+     "2"
+    ]
+   },
+   "type": "Canvas",
+   "width": 2500
+  }
+ ],
+ "label": {
+  "none": [
+   "Die süddeutsche küche auf ihrem gegenwärtigen standpunkte, mit berücksichtigung des thee's und einem anhange über das moderne servieren nach metrischem mass und gewicht berechnet für anfängerinnen sowie fürpraktische köchinnen"
+  ]
+ },
+ "metadata": [
+  {
+   "label": {
+    "none": [
+     "identifier"
+    ]
+   },
+   "value": {
+    "none": [
+     "bub_gb_fu0qAAAAYAAJ"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "creator"
+    ]
+   },
+   "value": {
+    "none": [
+     "Scheiger, Katharina Prato, Edle von, 1818-1899"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "date"
+    ]
+   },
+   "value": {
+    "none": [
+     "1890"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "google-id"
+    ]
+   },
+   "value": {
+    "none": [
+     "fu0qAAAAYAAJ"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "language"
+    ]
+   },
+   "value": {
+    "none": [
+     "ger"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "mediatype"
+    ]
+   },
+   "value": {
+    "none": [
+     "texts"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "scanner"
+    ]
+   },
+   "value": {
+    "none": [
+     "google"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "source"
+    ]
+   },
+   "value": {
+    "none": [
+     "http://books.google.com/books?id=fu0qAAAAYAAJ&hl=&source=gbs_api"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "sponsor"
+    ]
+   },
+   "value": {
+    "none": [
+     "Google"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "subject"
+    ]
+   },
+   "value": {
+    "none": [
+     "bub_upload",
+     "Cooking, German"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "title"
+    ]
+   },
+   "value": {
+    "none": [
+     "Die süddeutsche küche auf ihrem gegenwärtigen standpunkte, mit berücksichtigung des thee's und einem anhange über das moderne servieren nach metrischem mass und gewicht berechnet für anfängerinnen sowie fürpraktische köchinnen"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "year"
+    ]
+   },
+   "value": {
+    "none": [
+     "1890"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "collection"
+    ]
+   },
+   "value": {
+    "none": [
+     "americana"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "addeddate"
+    ]
+   },
+   "value": {
+    "none": [
+     "2015-02-13 08:32:15"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "oclc-id"
+    ]
+   },
+   "value": {
+    "none": [
+     "39066864"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "contributor"
+    ]
+   },
+   "value": {
+    "none": [
+     "New York Public Library"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "identifier-access"
+    ]
+   },
+   "value": {
+    "none": [
+     "http://archive.org/details/bub_gb_fu0qAAAAYAAJ"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "identifier-ark"
+    ]
+   },
+   "value": {
+    "none": [
+     "ark:/13960/t80k5mm46"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "repub_state"
+    ]
+   },
+   "value": {
+    "none": [
+     "4"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "foldoutcount"
+    ]
+   },
+   "value": {
+    "none": [
+     "0"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "page_number_confidence"
+    ]
+   },
+   "value": {
+    "none": [
+     "100"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "ocr"
+    ]
+   },
+   "value": {
+    "none": [
+     "tesseract 5.0.0-rc2-1-gf788"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "ocr_parameters"
+    ]
+   },
+   "value": {
+    "none": [
+     "-l deu+Fraktur"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "ocr_module_version"
+    ]
+   },
+   "value": {
+    "none": [
+     "0.0.14"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "ocr_detected_script"
+    ]
+   },
+   "value": {
+    "none": [
+     "Fraktur"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "ocr_detected_script_conf"
+    ]
+   },
+   "value": {
+    "none": [
+     "0.9853"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "ocr_detected_lang"
+    ]
+   },
+   "value": {
+    "none": [
+     "de"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "ocr_detected_lang_conf"
+    ]
+   },
+   "value": {
+    "none": [
+     "1.0000"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "page_number_module_version"
+    ]
+   },
+   "value": {
+    "none": [
+     "1.0.5"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "pdf_degraded"
+    ]
+   },
+   "value": {
+    "none": [
+     "invalid-page-size",
+     "invalid-jp2-headers"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "pdf_module_version"
+    ]
+   },
+   "value": {
+    "none": [
+     "0.0.25"
+    ]
+   }
+  },
+  {
+   "label": {
+    "none": [
+     "external-identifier"
+    ]
+   },
+   "value": {
+    "none": [
+     "urn:lcp:bub_gb_fu0qAAAAYAAJ:epub:7568705f-ea52-4cb3-8677-c4db3d48cea0"
+    ]
+   }
+  }
+ ],
+ "partOf": [
+  {
+   "id": "https://iiif.archive.org/iiif/americana/collection.json",
+   "type": "Collection"
+  }
+ ],
+ "provider": [
+  {
+   "homepage": [
+    {
+     "format": "text/html",
+     "id": "https://archive.org",
+     "label": {
+      "en": [
+       "Internet Archive Homepage"
+      ]
+     },
+     "type": "Text"
+    }
+   ],
+   "id": "https://archive.org",
+   "label": {
+    "en": [
+     "The Internet Archive"
+    ]
+   },
+   "logo": [
+    {
+     "format": "image/png",
+     "height": 79,
+     "id": "https://archive.org/images/glogo.png",
+     "type": "Image",
+     "width": 79
+    }
+   ],
+   "type": "Agent"
+  }
+ ],
+ "rendering": [
+  {
+   "format": "image/gif",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ.gif",
+   "label": {
+    "en": [
+     "Animated GIF"
+    ]
+   },
+   "type": "Image"
+  },
+  {
+   "format": "application/pdf",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ.pdf",
+   "label": {
+    "en": [
+     "Text PDF"
+    ]
+   },
+   "type": "Text"
+  },
+  {
+   "format": "application/x-bittorrent",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_archive.torrent",
+   "label": {
+    "en": [
+     "Archive BitTorrent"
+    ]
+   },
+   "type": "Dataset"
+  },
+  {
+   "format": "application/gzip",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_chocr.html.gz",
+   "label": {
+    "en": [
+     "chOCR"
+    ]
+   },
+   "type": "Text"
+  },
+  {
+   "format": "text/plain",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_djvu.txt",
+   "label": {
+    "en": [
+     "DjVuTXT"
+    ]
+   },
+   "type": "Text"
+  },
+  {
+   "format": "application/xml",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_djvu.xml",
+   "label": {
+    "en": [
+     "Djvu XML"
+    ]
+   },
+   "type": "Dataset"
+  },
+  {
+   "format": "text/html",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_hocr.html",
+   "label": {
+    "en": [
+     "hOCR"
+    ]
+   },
+   "type": "Text"
+  },
+  {
+   "format": "application/gzip",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_hocr_searchtext.txt.gz",
+   "label": {
+    "en": [
+     "OCR Search Text"
+    ]
+   },
+   "type": "Text"
+  },
+  {
+   "format": "application/zip",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_jp2.zip",
+   "label": {
+    "en": [
+     "Single Page Processed JP2 ZIP"
+    ]
+   },
+   "type": "Image"
+  }
+ ],
+ "rights": "http://creativecommons.org/publicdomain/mark/1.0/",
+ "seeAlso": [
+  {
+   "format": "application/json",
+   "id": "https://archive.org/metadata/bub_gb_fu0qAAAAYAAJ",
+   "label": {
+    "en": [
+     "Item Metadata"
+    ]
+   },
+   "type": "Metadata"
+  },
+  {
+   "format": "text/plain",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_cloth_detection.log",
+   "label": {
+    "en": [
+     "Cloth Cover Detection Log"
+    ]
+   },
+   "type": "Text"
+  },
+  {
+   "format": "application/xml",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_dc.xml",
+   "label": {
+    "en": [
+     "Dublin Core"
+    ]
+   },
+   "type": "Dataset"
+  },
+  {
+   "format": "application/json",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_hocr_pageindex.json.gz",
+   "label": {
+    "en": [
+     "OCR Page Index"
+    ]
+   },
+   "type": "Dataset"
+  },
+  {
+   "format": "application/xml",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_marc.xml",
+   "label": {
+    "en": [
+     "MARC"
+    ]
+   },
+   "type": "Dataset"
+  },
+  {
+   "format": "application/marc",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_meta.mrc",
+   "label": {
+    "en": [
+     "MARC Binary"
+    ]
+   },
+   "type": "Dataset"
+  },
+  {
+   "format": "application/json",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_page_numbers.json",
+   "label": {
+    "en": [
+     "Page Numbers JSON"
+    ]
+   },
+   "type": "Dataset"
+  },
+  {
+   "format": "application/xml",
+   "id": "https://archive.org/download/bub_gb_fu0qAAAAYAAJ/bub_gb_fu0qAAAAYAAJ_scandata.xml",
+   "label": {
+    "en": [
+     "Scandata"
+    ]
+   },
+   "type": "Dataset"
+  }
+ ],
+ "service": [
+  {
+   "@context": "http://iiif.io/api/search/1/context.json",
+   "@id": "https://iiif.archive.org/iiif/search/bub_gb_fu0qAAAAYAAJ",
+   "@type": "SearchService1",
+   "profile": "http://iiif.io/api/search/1/search"
+  }
+ ],
+ "summary": {
+  "none": [
+   "Mode of access: Internet"
+  ]
+ },
+ "thumbnail": [
+  {
+   "format": "image/jpeg",
+   "height": 253,
+   "id": "https://iiif.archive.org/image/iiif/2/bub_gb_fu0qAAAAYAAJ%2f__ia_thumb.jpg/full/180,/0/default.jpg",
+   "service": [
+    {
+     "@id": "https://iiif.archive.org/image/iiif/2/bub_gb_fu0qAAAAYAAJ%2F__ia_thumb.jpg",
+     "@type": "ImageService2",
+     "format": "image/jpeg",
+     "profile": "http://iiif.io/api/image/2/level2.json"
+    }
+   ],
+   "type": "Image",
+   "width": 180
+  }
+ ],
+ "type": "Manifest",
+ "viewingDirection": "left-to-right"
+}

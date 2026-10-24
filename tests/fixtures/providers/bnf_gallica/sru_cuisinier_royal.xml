@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<srw:searchRetrieveResponse xmlns:srw="http://www.loc.gov/zing/srw/">
+  <srw:version>1.2</srw:version>
+  <srw:numberOfRecords>3</srw:numberOfRecords>
+  <srw:records>
+    <srw:record>
+      <srw:recordSchema>http://www.openarchives.org/OAI/2.0/oai_dc/</srw:recordSchema>
+      <srw:recordPacking>xml</srw:recordPacking>
+      <srw:recordData>
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>Le cuisinier royal</dc:title>
+          <dc:creator>Viard, Alexandre</dc:creator>
+          <dc:creator>Fouret, Léon</dc:creator>
+          <dc:date>1817</dc:date>
+          <dc:identifier>https://gallica.bnf.fr/ark:/12148/bpt6k12345q.texteBrut?rk=21459;2</dc:identifier>
+        </oai_dc:dc>
+      </srw:recordData>
+      <srw:recordPosition>1</srw:recordPosition>
+    </srw:record>
+    <srw:record>
+      <srw:recordSchema>http://www.openarchives.org/OAI/2.0/oai_dc/</srw:recordSchema>
+      <srw:recordPacking>xml</srw:recordPacking>
+      <srw:recordData>
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>Le cuisinier royal, ou l'art de faire la cuisine</dc:title>
+          <dc:creator>Viard, Alexandre</dc:creator>
+          <dc:date>1828</dc:date>
+          <dc:relation>Notice du catalogue : http://catalogue.bnf.fr/ark:/12148/cb30000001x</dc:relation>
+          <dc:identifier>Disponible sur https://gallica.bnf.fr/ark:/12148/bpt6k67890r (consulté le 01.08.2026)</dc:identifier>
+        </oai_dc:dc>
+      </srw:recordData>
+      <srw:recordPosition>2</srw:recordPosition>
+    </srw:record>
+    <srw:record>
+      <srw:recordSchema>http://www.openarchives.org/OAI/2.0/oai_dc/</srw:recordSchema>
+      <srw:recordPacking>xml</srw:recordPacking>
+      <srw:recordData>
+        <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>Le cuisinier royal (notice sans numérisation)</dc:title>
+          <dc:identifier>ISBN 978-0-00-000000-0</dc:identifier>
+        </oai_dc:dc>
+      </srw:recordData>
+      <srw:recordPosition>3</srw:recordPosition>
+    </srw:record>
+  </srw:records>
+</srw:searchRetrieveResponse>

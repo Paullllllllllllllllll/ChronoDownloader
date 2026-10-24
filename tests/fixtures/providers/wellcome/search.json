@@ -1,0 +1,341 @@
+{
+ "type": "ResultList",
+ "pageSize": 25,
+ "totalPages": 1,
+ "totalResults": 3,
+ "results": [
+  {
+   "production": [
+    {
+     "label": "Leghorn : Vignozzi, 1848.",
+     "agents": [
+      {
+       "label": "Vignozzi",
+       "type": "Agent"
+      }
+     ],
+     "dates": [
+      {
+       "label": "1848",
+       "type": "Period"
+      }
+     ],
+     "function": {
+      "label": "Publication",
+      "type": "Concept"
+     },
+     "type": "ProductionEvent",
+     "places": [
+      {
+       "label": "Leghorn",
+       "type": "Place"
+      }
+     ]
+    }
+   ],
+   "physicalDescription": "276 pages ; (12mo)",
+   "items": [
+    {
+     "id": "s7xbgj9y",
+     "locations": [
+      {
+       "label": "Closed stores",
+       "accessConditions": [
+        {
+         "method": {
+          "id": "online-request",
+          "type": "AccessMethod",
+          "label": "Online request"
+         },
+         "status": {
+          "id": "open",
+          "type": "AccessStatus",
+          "label": "Open"
+         },
+         "type": "AccessCondition"
+        }
+       ],
+       "shelfmark": "EPB/A/19240",
+       "locationType": {
+        "id": "closed-stores",
+        "type": "LocationType",
+        "label": "Closed stores"
+       },
+       "type": "PhysicalLocation"
+      }
+     ],
+     "type": "Item"
+    }
+   ],
+   "workType": {
+    "id": "a",
+    "type": "Format",
+    "label": "Books"
+   },
+   "alternativeTitles": [],
+   "id": "mvm2n25j",
+   "title": "Il cuciniere italiano moderno, ovvero l'amico dei ghiotti economi e dei convalescenti.",
+   "type": "Work",
+   "contributors": [],
+   "availabilities": [
+    {
+     "id": "closed-stores",
+     "type": "Availability",
+     "label": "Closed stores"
+    }
+   ]
+  },
+  {
+   "production": [
+    {
+     "label": "Livorno : Tip. di E. Vignozzi, 1858.",
+     "agents": [
+      {
+       "label": "Tip. di E. Vignozzi",
+       "type": "Agent"
+      }
+     ],
+     "dates": [
+      {
+       "label": "1858",
+       "type": "Period"
+      }
+     ],
+     "function": {
+      "label": "Publication",
+      "type": "Concept"
+     },
+     "type": "ProductionEvent",
+     "places": [
+      {
+       "label": "Livorno",
+       "type": "Place"
+      }
+     ]
+    }
+   ],
+   "physicalDescription": "291 pages, 2 unnumbered folded leaves of plates : illustrations ; 17 cm",
+   "items": [
+    {
+     "id": "rab7852m",
+     "locations": [
+      {
+       "label": "Closed stores",
+       "accessConditions": [
+        {
+         "method": {
+          "id": "online-request",
+          "type": "AccessMethod",
+          "label": "Online request"
+         },
+         "status": {
+          "id": "open",
+          "type": "AccessStatus",
+          "label": "Open"
+         },
+         "type": "AccessCondition"
+        }
+       ],
+       "shelfmark": "K8956",
+       "locationType": {
+        "id": "closed-stores",
+        "type": "LocationType",
+        "label": "Closed stores"
+       },
+       "type": "PhysicalLocation"
+      },
+      {
+       "url": "https://iiif.wellcomecollection.org/presentation/v2/b28136469",
+       "license": {
+        "id": "pdm",
+        "type": "License",
+        "label": "Public Domain Mark",
+        "url": "https://creativecommons.org/share-your-work/public-domain/pdm/"
+       },
+       "accessConditions": [
+        {
+         "method": {
+          "id": "view-online",
+          "type": "AccessMethod",
+          "label": "View online"
+         },
+         "status": {
+          "id": "open",
+          "type": "AccessStatus",
+          "label": "Open"
+         },
+         "type": "AccessCondition"
+        }
+       ],
+       "locationType": {
+        "id": "iiif-presentation",
+        "type": "LocationType",
+        "label": "IIIF Presentation API"
+       },
+       "type": "DigitalLocation"
+      }
+     ],
+     "type": "Item"
+    }
+   ],
+   "edition": "edizione 16. /",
+   "workType": {
+    "id": "a",
+    "type": "Format",
+    "label": "Books"
+   },
+   "thumbnail": {
+    "url": "https://iiif.wellcomecollection.org/thumbs/b28136469_0009.jp2/full/!200,200/0/default.jpg",
+    "license": {
+     "id": "pdm",
+     "type": "License",
+     "label": "Public Domain Mark",
+     "url": "https://creativecommons.org/share-your-work/public-domain/pdm/"
+    },
+    "accessConditions": [],
+    "locationType": {
+     "id": "thumbnail-image",
+     "type": "LocationType",
+     "label": "Thumbnail image"
+    },
+    "type": "DigitalLocation"
+   },
+   "alternativeTitles": [],
+   "id": "k967axqt",
+   "title": "Il cuciniere italiano moderno : ovvero, L'amico dei ghiotti economi e dei convalescenti opera necessaria pei capi di famiglia che desiderano fare una cucina economica, familiare, e sana.",
+   "type": "Work",
+   "contributors": [],
+   "availabilities": [
+    {
+     "id": "closed-stores",
+     "type": "Availability",
+     "label": "Closed stores"
+    },
+    {
+     "id": "online",
+     "type": "Availability",
+     "label": "Online"
+    }
+   ]
+  },
+  {
+   "production": [
+    {
+     "label": "[Livorno?] : [Tip. di Eg'o Vignozzi?], [between 1800 and 1899]",
+     "agents": [
+      {
+       "label": "[Tip. di Eg'o Vignozzi?]",
+       "type": "Agent"
+      }
+     ],
+     "dates": [
+      {
+       "label": "[between 1800 and 1899]",
+       "type": "Period"
+      }
+     ],
+     "function": {
+      "label": "Publication",
+      "type": "Concept"
+     },
+     "type": "ProductionEvent",
+     "places": [
+      {
+       "label": "[Livorno?]",
+       "type": "Place"
+      }
+     ]
+    }
+   ],
+   "physicalDescription": "291 pages ; 17 cm",
+   "items": [
+    {
+     "locations": [
+      {
+       "url": "https://iiif.wellcomecollection.org/presentation/v2/b21538372",
+       "license": {
+        "id": "pdm",
+        "type": "License",
+        "label": "Public Domain Mark",
+        "url": "https://creativecommons.org/share-your-work/public-domain/pdm/"
+       },
+       "accessConditions": [
+        {
+         "method": {
+          "id": "view-online",
+          "type": "AccessMethod",
+          "label": "View online"
+         },
+         "status": {
+          "id": "open",
+          "type": "AccessStatus",
+          "label": "Open"
+         },
+         "type": "AccessCondition"
+        }
+       ],
+       "locationType": {
+        "id": "iiif-presentation",
+        "type": "LocationType",
+        "label": "IIIF Presentation API"
+       },
+       "type": "DigitalLocation"
+      }
+     ],
+     "type": "Item"
+    }
+   ],
+   "workType": {
+    "id": "a",
+    "type": "Format",
+    "label": "Books"
+   },
+   "thumbnail": {
+    "url": "https://iiif.wellcomecollection.org/thumbs/b21538372_0001.jp2/full/!200,200/0/default.jpg",
+    "license": {
+     "id": "pdm",
+     "type": "License",
+     "label": "Public Domain Mark",
+     "url": "https://creativecommons.org/share-your-work/public-domain/pdm/"
+    },
+    "accessConditions": [],
+    "locationType": {
+     "id": "thumbnail-image",
+     "type": "LocationType",
+     "label": "Thumbnail image"
+    },
+    "type": "DigitalLocation"
+   },
+   "alternativeTitles": [
+    "Amico dei ghiotti economi e dei convalescenti"
+   ],
+   "id": "nk9erjtd",
+   "title": "Il cuciniere italiano moderno, ovvero, L'amico dei ghiotti economi e dei convalescenti : opera necessaria pei capi di famiglia che desiderano fare una cucina economica, famigliare, e sana ... e per chi vuole imparare l'arte del pasticciere, confetturiere, liquorista e diacciatore.",
+   "type": "Work",
+   "contributors": [
+    {
+     "agent": {
+      "id": "qu7wk6cj",
+      "label": "University of Leeds Libraries",
+      "type": "Organisation"
+     },
+     "roles": [
+      {
+       "label": "data contributor",
+       "type": "ContributionRole"
+      }
+     ],
+     "primary": false,
+     "type": "Contributor"
+    }
+   ],
+   "availabilities": [
+    {
+     "id": "online",
+     "type": "Availability",
+     "label": "Online"
+    }
+   ]
+  }
+ ]
+}

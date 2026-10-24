@@ -1,0 +1,176 @@
+{
+  "totalElements": 17,
+  "number": 0,
+  "size": 3,
+  "numberOfElements": 3,
+  "totalPages": 6,
+  "first": true,
+  "last": false,
+  "hits": [
+    {
+      "basicFields": {
+        "title": {
+          "name": "title",
+          "values": [
+            "Kucharz doskonały : sekrety kuchmistrzowskie Wojciecha Wielądki"
+          ],
+          "labels": {
+            "en": "Title",
+            "pl": "Tytuł"
+          },
+          "type": "TEXT"
+        },
+        "creatorForSearch": {
+          "name": "creatorForSearch",
+          "values": [
+            "Dumanowski, Jarosław (1967- ) Autor"
+          ],
+          "labels": {
+            "en": "Creator",
+            "pl": "Autor"
+          },
+          "type": "SEARCH"
+        },
+        "dateDescriptive": {
+          "name": "dateDescriptive",
+          "values": [
+            "copyright 2018"
+          ],
+          "labels": {
+            "en": "Creation date",
+            "pl": "Data powstania"
+          },
+          "type": "TEXT"
+        }
+      },
+      "hiddenFields": {
+        "date": {
+          "name": "date",
+          "values": [
+            "2018-01-01"
+          ],
+          "labels": {
+            "en": "Date",
+            "pl": "Data"
+          },
+          "type": "TEXT"
+        }
+      },
+      "attributes": {
+        "thumbnail": {
+          "name": "thumbnail",
+          "stringArrValues": null,
+          "stringValue": "/download/digital-content/5b045498-17df-4035-bd56-6ec0181cb5da",
+          "longValue": null,
+          "valueType": "STRING"
+        }
+      },
+      "score": 415.56802,
+      "objectId": "6e15cb64-c546-4b38-9f3f-2eccf761f57d"
+    },
+    {
+      "basicFields": {
+        "title": {
+          "name": "title",
+          "values": [
+            "Kucharz doskonały. T. 2"
+          ],
+          "labels": {
+            "en": "Title",
+            "pl": "Tytuł"
+          },
+          "type": "TEXT"
+        },
+        "creatorForSearch": {
+          "name": "creatorForSearch",
+          "values": [
+            "Szytler, Jan (1763-1850)"
+          ],
+          "labels": {
+            "en": "Creator",
+            "pl": "Autor"
+          },
+          "type": "SEARCH"
+        },
+        "dateDescriptive": {
+          "name": "dateDescriptive",
+          "values": [
+            "1834"
+          ],
+          "labels": {
+            "en": "Creation date",
+            "pl": "Data powstania"
+          },
+          "type": "TEXT"
+        }
+      },
+      "hiddenFields": {
+        "date": {
+          "name": "date",
+          "values": [
+            "1834-01-01"
+          ],
+          "labels": {
+            "en": "Date",
+            "pl": "Data"
+          },
+          "type": "TEXT"
+        }
+      },
+      "attributes": {
+        "thumbnail": {
+          "name": "thumbnail",
+          "stringArrValues": null,
+          "stringValue": "/download/digital-content/da240875-76e9-4b7f-a83b-cb91486cfc22",
+          "longValue": null,
+          "valueType": "STRING"
+        }
+      },
+      "score": 413.344,
+      "objectId": "7ca593d6-2d0d-497f-98f0-a4b4f5723a28"
+    },
+    {
+      "basicFields": {
+        "title": {
+          "name": "title",
+          "values": [
+            "Kucharz doskonały. T. 1"
+          ],
+          "labels": {
+            "en": "Title",
+            "pl": "Tytuł"
+          },
+          "type": "TEXT"
+        },
+        "creatorForSearch": {
+          "name": "creatorForSearch",
+          "values": [
+            "Szytler, Jan (1763-1850)"
+          ],
+          "labels": {
+            "en": "Creator",
+            "pl": "Autor"
+          },
+          "type": "SEARCH"
+        },
+        "dateDescriptive": {
+          "name": "dateDescriptive",
+          "values": [
+            "1834"
+          ],
+          "labels": {
+            "en": "Creation date",
+            "pl": "Data powstania"
+          },
+          "type": "TEXT"
+        }
+      },
+      "hiddenFields": {},
+      "attributes": {},
+      "score": 412.04913,
+      "objectId": "2a7cfd9e-273a-47bc-92ee-f7f563413f25"
+    }
+  ],
+  "aggregations": {},
+  "timeAggregations": {}
+}

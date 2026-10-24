@@ -1,0 +1,34 @@
+usage: chronodownloader status [-h] [--input FILE] [--entry-ids LIST] [--only LIST] [--output DIR]
+                               [--json] [--settings FILE]
+
+List the works of an output root with their statuses, the review queue and leftover pages of
+inspect; with --input, the rows of the works CSV without a store entry count as new.
+
+options:
+  -h, --help        show this help message and exit
+
+works:
+  --input FILE      works CSV; rows without a store entry count as new
+  --entry-ids LIST  only these entry_id values; default: all rows
+  --only LIST       only works in these statuses; from new, complete, partial, failed, no_match,
+                    needs_review, deferred, blocked; default: all
+
+output:
+  --output DIR      output root; statuses, review queue, _inspect leftovers; default:
+                    downloaded_works
+
+run control:
+  --json            print one JSON summary line on stdout
+  --settings FILE   alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+Exit codes:
+  0    the listing was written
+  2    usage or configuration error: an invalid option or settings file,
+       or a store the tool refuses
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.

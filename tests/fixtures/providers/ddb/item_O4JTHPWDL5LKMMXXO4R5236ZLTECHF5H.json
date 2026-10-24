@@ -1,0 +1,482 @@
+{
+  "properties": {
+    "item-id": "O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H",
+    "dataset-id": "4918029711627434UCQL",
+    "dataset-label": "Gesamtlieferung - BSB München - (00005860) - MARCXML",
+    "revision-id": "6",
+    "ingest-date": "2026-01-23T15:51:03+0100",
+    "cortex-type": "Kultur",
+    "mapping-version": "6.18"
+  },
+  "edm": {
+    "RDF": {
+      "Aggregation": {
+        "@about": "YETUCA4WOFQZMT5KN5TVIZVSVOT6IELS",
+        "aggregatedCHO": {
+          "@resource": "http://www.deutsche-digitale-bibliothek.de/item/O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H"
+        },
+        "dataProvider": [
+          "Bayerische Staatsbibliothek",
+          {
+            "@resource": "http://www.deutsche-digitale-bibliothek.de/organization/PE423JPDSCU6C72BAC2PUBOHAINDRGFO"
+          }
+        ],
+        "isShownAt": {
+          "@resource": "http://mdz-nbn-resolving.de/urn:nbn:de:bvb:12-bsb10923113-3"
+        },
+        "isShownBy": {
+          "@resource": "https://api.digitale-sammlungen.de/iiif/image/v2/bsb10923113_00001/full/full/0/default.jpg"
+        },
+        "provider": "Deutsche Digitale Bibliothek",
+        "rights": [
+          {
+            "@resource": "http://rightsstatements.org/vocab/NoC-NC/1.0/"
+          },
+          {
+            "@resource": "http://creativecommons.org/publicdomain/zero/1.0/"
+          }
+        ],
+        "$": "\n"
+      },
+      "WebResource": [
+        {
+          "@about": "http://mdz-nbn-resolving.de/urn:nbn:de:bvb:12-bsb10923113-3",
+          "type": {
+            "@resource": "http://ddb.vocnet.org/medientyp/mt003"
+          },
+          "$": "\n"
+        },
+        {
+          "@about": "https://api.digitale-sammlungen.de/iiif/image/v2/bsb10923113_00001/full/full/0/default.jpg",
+          "rights": {
+            "@resource": "http://rightsstatements.org/vocab/NoC-NC/1.0/"
+          },
+          "type": {
+            "@resource": "http://ddb.vocnet.org/medientyp/mt003"
+          },
+          "$": "\n"
+        }
+      ],
+      "Concept": [
+        {
+          "@about": "http://ddb.vocnet.org/medientyp/mt003",
+          "notation": "mediatype_003",
+          "$": "\n"
+        },
+        {
+          "@about": "http://ddb.vocnet.org/medientyp/mt003",
+          "notation": "mediatype_003",
+          "$": "\n"
+        },
+        {
+          "@about": "http://ddb.vocnet.org/sparte/sparte002",
+          "notation": "sec_02",
+          "$": "\n"
+        },
+        {
+          "@about": "https://d-nb.info/gnd/4059596-1",
+          "prefLabel": {
+            "@lang": "de",
+            "$": "Text"
+          },
+          "$": "\n"
+        }
+      ],
+      "Agent": {
+        "@about": "http://www.deutsche-digitale-bibliothek.de/organization/PE423JPDSCU6C72BAC2PUBOHAINDRGFO",
+        "prefLabel": "Bayerische Staatsbibliothek",
+        "type": {
+          "@resource": "http://ddb.vocnet.org/sparte/sparte002"
+        },
+        "$": "\n"
+      },
+      "ProvidedCHO": {
+        "@about": "http://www.deutsche-digitale-bibliothek.de/item/O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H",
+        "currentLocation": {
+          "@resource": "http://d-nb.info/gnd/4127793-4"
+        },
+        "hasType": {
+          "@resource": "https://d-nb.info/gnd/4059596-1"
+        },
+        "type": {
+          "@lang": "eng",
+          "$": "text"
+        },
+        "description": [
+          {
+            "@lang": "deu",
+            "$": "Vorlageform des Erscheinungsvermerks: Getruckt zu Franckfurt am Mayn, M.D.LXXVI. - Vorlageform des Kolophons: ... durch Nicolaum Bassee ..."
+          },
+          {
+            "@lang": "deu",
+            "$": "Bibliograph. Nachweis: Stev.Inv.II,649a"
+          },
+          {
+            "@lang": "deu",
+            "$": "1. enth. Werk: Kellermeisterei von allen Getränk Kellermeisterei. (VD16 K 687)"
+          }
+        ],
+        "identifier": [
+          "Res/Oecon. 2177 r",
+          "VD16 K 2524 (vd16)",
+          "urn:nbn:de:bvb:12-bsb10923113-3 (urn)"
+        ],
+        "language": {
+          "@resource": "http://id.loc.gov/vocabulary/iso639-2/ger"
+        },
+        "publisher": {
+          "@lang": "zxx",
+          "$": "Franckfurt am Mayn : Bassee"
+        },
+        "title": {
+          "@lang": "zxx",
+          "$": "Koch vnd Kellermeisterey, Von Allen Speysen, Getränck vnd Gerichten, allerhandt art künstlich vnd wol zu kochen, eynmachen vnd bereiten ..."
+        },
+        "alternative": [
+          {
+            "@lang": "zxx",
+            "$": "Koch und Kellermeisterey, Von Allen Speysen, Getränck und Gerichten, allerhandt art künstlich und wol zu kochen, eynmachen und bereiten ..."
+          },
+          {
+            "@lang": "zxx",
+            "$": "Kellermeisterei Speisen Getränken einmachen"
+          }
+        ],
+        "extent": [
+          {
+            "@lang": "deu",
+            "$": "[1] Bl., 189 S., [4] Bl."
+          },
+          {
+            "@lang": "deu",
+            "$": "8"
+          }
+        ],
+        "issued": "1576",
+        "hierarchyType": "htype_021",
+        "aggregationEntity": "false",
+        "$": "\n"
+      },
+      "LinguisticSystem": {
+        "@about": "http://id.loc.gov/vocabulary/iso639-2/ger",
+        "value": "ger",
+        "$": "\n"
+      },
+      "Place": {
+        "@about": "http://d-nb.info/gnd/4127793-4",
+        "lat": "48.14761",
+        "long": "11.58082",
+        "prefLabel": {
+          "@lang": "deu",
+          "$": "München"
+        },
+        "$": "\n"
+      },
+      "$": "\n"
+    }
+  },
+  "indexing-profile": {
+    "item-id": "O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H",
+    "facet": [
+      {
+        "@name": "place_fct",
+        "value": "München"
+      },
+      {
+        "@name": "place_fct_autocomplete",
+        "value": "München"
+      },
+      {
+        "@name": "place_fct_normdata",
+        "value": "http://d-nb.info/gnd/4127793-4"
+      },
+      {
+        "@name": "keywords_fct",
+        "value": "Text"
+      },
+      {
+        "@name": "keywords_fct_autocomplete",
+        "value": "Text"
+      },
+      {
+        "@name": "objecttype_fct",
+        "value": "Text"
+      },
+      {
+        "@name": "objecttype_fct_autocomplete",
+        "value": "Text"
+      },
+      {
+        "@name": "language_fct",
+        "value": "ger"
+      },
+      {
+        "@name": "type_fct",
+        "value": "mediatype_003"
+      },
+      {
+        "@name": "provider_fct",
+        "value": "Bayerische Staatsbibliothek"
+      },
+      {
+        "@name": "provider_fct_autocomplete",
+        "value": "Bayerische Staatsbibliothek"
+      },
+      {
+        "@name": "provider_fct_normdata",
+        "value": "http://www.deutsche-digitale-bibliothek.de/organization/PE423JPDSCU6C72BAC2PUBOHAINDRGFO"
+      },
+      {
+        "@name": "dataprovider_fct",
+        "value": "Bayerische Staatsbibliothek"
+      },
+      {
+        "@name": "dataprovider_fct_autocomplete",
+        "value": "Bayerische Staatsbibliothek"
+      },
+      {
+        "@name": "dataprovider_fct_normdata",
+        "value": "http://www.deutsche-digitale-bibliothek.de/organization/PE423JPDSCU6C72BAC2PUBOHAINDRGFO"
+      },
+      {
+        "@name": "sector_fct",
+        "value": "sec_02"
+      },
+      {
+        "@name": "last_update",
+        "value": "2026-01-23T15:51:03+0100"
+      }
+    ]
+  },
+  "preview": {
+    "@media": "text",
+    "@type": "Kultur",
+    "title": "Koch vnd Kellermeisterey, Von Allen Speysen, Getränck vnd Gerichten, allerhandt art künstlich vnd wol zu kochen, eynmachen vnd bereiten ...",
+    "subtitle": "Text",
+    "thumbnail": {
+      "@href": "372a20ee-1b57-493c-941e-e74d1aa2f6a2"
+    }
+  },
+  "view": {
+    "item": {
+      "identifier": "BDR-BV036018867-5156",
+      "label": "Koch vnd Kellermeisterey, Von Allen Speysen, Getränck vnd Gerichten, allerhandt art künstlich vnd wol zu kochen, eynmachen vnd bereiten ...",
+      "title": "Koch vnd Kellermeisterey, Von Allen Speysen, Getränck vnd Gerichten, allerhandt art künstlich vnd wol zu kochen, eynmachen vnd bereiten ...",
+      "subtitle": "",
+      "rights": "",
+      "metadata-rights": "http://creativecommons.org/publicdomain/zero/1.0/",
+      "origin": "http://mdz-nbn-resolving.de/urn:nbn:de:bvb:12-bsb10923113-3",
+      "category": "Kultur",
+      "media": "text",
+      "thumbnail": "",
+      "latitude": "",
+      "longitude": "",
+      "viewers": null,
+      "license": {
+        "@resource": "http://rightsstatements.org/vocab/NoC-NC/1.0/",
+        "$": ""
+      },
+      "institution": {
+        "url": "http://www.bsb-muenchen.de",
+        "id": "PE423JPDSCU6C72BAC2PUBOHAINDRGFO",
+        "name": "Bayerische Staatsbibliothek",
+        "logo-institution-ddbid": "PE423JPDSCU6C72BAC2PUBOHAINDRGFO"
+      },
+      "fields": [
+        {
+          "@usage": "display",
+          "field": [
+            {
+              "@id": "flex_bibl_001",
+              "name": "Weitere Titel",
+              "value": [
+                "Koch und Kellermeisterey, Von Allen Speysen, Getränck und Gerichten, allerhandt art künstlich und wol zu kochen, eynmachen und bereiten ...",
+                "Kellermeisterei Speisen Getränken einmachen"
+              ]
+            },
+            {
+              "@id": "flex_bibl_003",
+              "name": "Dokumenttyp",
+              "value": "Text"
+            },
+            {
+              "@id": "flex_bibl_008",
+              "name": "Sprache",
+              "value": "Deutsch"
+            },
+            {
+              "@id": "flex_bibl_009",
+              "name": "Umfang",
+              "value": "[1] Bl., 189 S., [4] Bl."
+            },
+            {
+              "@id": "flex_arch_012",
+              "name": "Maße",
+              "value": "8"
+            },
+            {
+              "@id": "flex_bibl_012",
+              "name": "Anmerkungen",
+              "value": [
+                "Vorlageform des Erscheinungsvermerks: Getruckt zu Franckfurt am Mayn, M.D.LXXVI. - Vorlageform des Kolophons: ... durch Nicolaum Bassee ...",
+                "Bibliograph. Nachweis: Stev.Inv.II,649a",
+                "1. enth. Werk: Kellermeisterei von allen Getränk Kellermeisterei. (VD16 K 687)"
+              ]
+            },
+            {
+              "@id": "flex_bibl_013b",
+              "name": "URN",
+              "value": "urn:nbn:de:bvb:12-bsb10923113-3"
+            },
+            {
+              "@id": "flex_bibl_013j",
+              "name": "VD16",
+              "value": "VD16 K 2524"
+            },
+            {
+              "@id": "flex_bibl_014",
+              "name": "Standort",
+              "value": "München, Bayerische Staatsbibliothek -- Res/Oecon. 2177 r"
+            }
+          ]
+        },
+        {
+          "@usage": "index",
+          "field": [
+            {
+              "@id": "title",
+              "@resource": "http://purl.org/dc/elements/1.1/title",
+              "name": "Title",
+              "value": "Koch vnd Kellermeisterey, Von Allen Speysen, Getränck vnd Gerichten, allerhandt art künstlich vnd wol zu kochen, eynmachen vnd bereiten ..."
+            },
+            {
+              "@id": "apd_document_type",
+              "name": "Archivalientyp",
+              "value": "Text"
+            },
+            {
+              "@id": "objecttype_delivered",
+              "name": "Objekttyp aus Lieferdaten",
+              "value": "http://id.loc.gov/vocabulary/contentTypes/txt"
+            },
+            {
+              "@id": "license",
+              "name": "Lizenz",
+              "value": "http://rightsstatements.org/vocab/NoC-NC/1.0/"
+            },
+            {
+              "@id": "license_group",
+              "name": "Lizenzstatus",
+              "value": "rights_002"
+            },
+            {
+              "@id": "digitalisat",
+              "name": "digitalisat",
+              "value": "true"
+            },
+            {
+              "@id": "begin_time",
+              "name": "Anfang",
+              "value": "575268"
+            },
+            {
+              "@id": "end_time",
+              "name": "Ende",
+              "value": "575633"
+            },
+            {
+              "@id": "dataset_id",
+              "name": "dataset_id",
+              "value": "4918029711627434UCQL"
+            },
+            {
+              "@id": "dataset_label",
+              "name": "dataset_label",
+              "value": "Gesamtlieferung - BSB München - (00005860) - MARCXML"
+            },
+            {
+              "@id": "delivery_id",
+              "name": "delivery_id",
+              "value": "4223176028904388Bcsy"
+            },
+            {
+              "@id": "supplier_id",
+              "name": "supplier_id",
+              "value": "00005860"
+            },
+            {
+              "@id": "mapping_version",
+              "name": "mapping_version",
+              "value": "6.18"
+            },
+            {
+              "@id": "md_format",
+              "name": "Metadata Format",
+              "value": "marc21"
+            },
+            {
+              "@id": "source_format",
+              "name": "source_format",
+              "value": "http://www.loc.gov/MARC21/slim/"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "source": {
+    "record": {
+      "@type": "http://www.loc.gov/MARC21/slim/",
+      "@id": "O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H",
+      "$": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><record xmlns=\"http://www.loc.gov/MARC21/slim\">\n   \n<leader>00000nam a2200337 c 4500</leader>\n   \n<controlfield tag=\"001\">BDR-BV036018867-5156</controlfield>\n   \n<controlfield tag=\"003\">DE-12</controlfield>\n   \n<controlfield tag=\"005\">00000000000000.0</controlfield>\n   \n<controlfield tag=\"007\">t</controlfield>\n   \n<controlfield tag=\"008\">100209s1576             |||| 00||| gerod</controlfield>\n   \n<controlfield tag=\"009\">2025-01-23T09:16:51</controlfield>\n   \n<datafield ind1=\"8\" ind2=\" \" tag=\"024\">\n      \n<subfield code=\"a\">VD16 K 2524</subfield>\n      \n<subfield code=\"2\">vd16</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"035\">\n      \n<subfield code=\"a\">(OCoLC)643923835</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"035\">\n      \n<subfield code=\"a\">(DE-599)BVBBV036018867</subfield>\n   \n</datafield>\n   \n<datafield ind1=\"0\" ind2=\" \" tag=\"041\">\n      \n<subfield code=\"a\">ger</subfield>\n   \n</datafield>\n   \n<datafield ind1=\"1\" ind2=\"0\" tag=\"245\">\n      \n<subfield code=\"a\">Koch vnd Kellermeisterey, Von Allen Speysen, Getränck vnd Gerichten, allerhandt art künstlich vnd wol zu kochen, eynmachen vnd bereiten ...</subfield>\n   \n</datafield>\n   \n<datafield ind1=\"1\" ind2=\"3\" tag=\"246\">\n      \n<subfield code=\"a\">Koch und Kellermeisterey, Von Allen Speysen, Getränck und Gerichten, allerhandt art künstlich und wol zu kochen, eynmachen und bereiten ...</subfield>\n   \n</datafield>\n   \n<datafield ind1=\"1\" ind2=\"0\" tag=\"246\">\n      \n<subfield code=\"a\">Kellermeisterei Speisen Getränken einmachen</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\"3\" tag=\"264\">\n      \n<subfield code=\"a\">Franckfurt am Mayn</subfield>\n      \n<subfield code=\"b\">Bassee</subfield>\n      \n<subfield code=\"c\">1576</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"300\">\n      \n<subfield code=\"a\">[1] Bl., 189 S., [4] Bl.</subfield>\n      \n<subfield code=\"c\">8</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"336\">\n      \n<subfield code=\"a\">Text</subfield>\n      \n<subfield code=\"b\">txt</subfield>\n      \n<subfield code=\"2\">rdacontent</subfield>\n      \n<subfield code=\"0\">http://id.loc.gov/vocabulary/contentTypes/txt</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"338\">\n      \n<subfield code=\"a\">Band</subfield>\n      \n<subfield code=\"b\">nc</subfield>\n      \n<subfield code=\"2\">rdacarrier</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"500\">\n      \n<subfield code=\"a\">Vorlageform des Erscheinungsvermerks: Getruckt zu Franckfurt am Mayn, M.D.LXXVI. - Vorlageform des Kolophons: ... durch Nicolaum Bassee ...</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"500\">\n      \n<subfield code=\"a\">Bibliograph. Nachweis: Stev.Inv.II,649a</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"500\">\n      \n<subfield code=\"a\">1. enth. Werk: Kellermeisterei von allen Getränk Kellermeisterei. (VD16 K 687)</subfield>\n   \n</datafield>\n   \n<datafield ind1=\"0\" ind2=\"8\" tag=\"776\">\n      \n<subfield code=\"i\">Elektronische Reproduktion</subfield>\n      \n<subfield code=\"d\">München : Bayerische Staatsbibliothek, 2013</subfield>\n      \n<subfield code=\"o\">urn:nbn:de:bvb:12-bsb10923113-3</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"845\">\n      \n<subfield code=\"a\">CC0</subfield>\n      \n<subfield code=\"b\">Bayerische Staatsbibliothek</subfield>\n      \n<subfield code=\"u\">http://creativecommons.org/publicdomain/zero/1.0/</subfield>\n      \n<subfield code=\"3\">Record</subfield>\n      \n<subfield code=\"5\">DE-12</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"856\">\n      \n<subfield code=\"u\">http://mdz-nbn-resolving.de/urn:nbn:de:bvb:12-bsb10923113-3</subfield>\n      \n<subfield code=\"3\">object in context</subfield>\n      \n<subfield code=\"9\">generiert von MAPS</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"912\">\n      \n<subfield code=\"a\">digit</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"940\">\n      \n<subfield code=\"a\">(DE-604)BV036018867</subfield>\n      \n<subfield code=\"b\">oai:aleph.bib-bvb.de:BVB01-018911033</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"852\">\n      \n<subfield code=\"a\">München, Bayerische Staatsbibliothek</subfield>\n      \n<subfield code=\"e\">https://d-nb.info/gnd/4127793-4</subfield>\n      \n<subfield code=\"e\">München</subfield>\n      \n<subfield code=\"u\">https://d-nb.info/gnd/2031351-2</subfield>\n      \n<subfield code=\"j\">Res/Oecon. 2177 r</subfield>\n   \n</datafield>\n   \n<datafield ind1=\"1\" ind2=\" \" tag=\"982\">\n      \n<subfield code=\"d\">2021-08-27 05:59:59</subfield>\n      \n<subfield code=\"t\">https://api.digitale-sammlungen.de/iiif/image/v2/bsb10923113_00001/full/full/0/default.jpg</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"040\">\n      \n<subfield code=\"a\">00005860</subfield>\n      \n<subfield code=\"9\">http://creativecommons.org/publicdomain/zero/1.0/</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"337\">\n      \n<subfield code=\"a\">Text</subfield>\n      \n<subfield code=\"b\">mediatype_003</subfield>\n      \n<subfield code=\"0\">http://ddb.vocnet.org/medientyp/mt003</subfield>\n      \n<subfield code=\"9\">generiert von MAPS</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"540\">\n      \n<subfield code=\"u\">http://rightsstatements.org/vocab/NoC-NC/1.0/</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"533\">\n      \n<subfield code=\"a\">reformatted digital</subfield>\n      \n<subfield code=\"c\">Bayerische Staatsbibliothek</subfield>\n   \n</datafield>\n   \n<datafield ind1=\" \" ind2=\" \" tag=\"856\">\n      \n<subfield code=\"u\">https://api.digitale-sammlungen.de/iiif/image/v2/bsb10923113_00001/full/full/0/default.jpg</subfield>\n      \n<subfield code=\"q\">image/jpeg</subfield>\n      \n<subfield code=\"3\">preview</subfield>\n      \n<subfield code=\"9\">generiert von MAPS</subfield>\n   \n</datafield>\n   \n<datafield ind1=\"7\" ind2=\" \" tag=\"024\">\n      \n<subfield code=\"a\">urn:nbn:de:bvb:12-bsb10923113-3</subfield>\n      \n<subfield code=\"2\">urn</subfield>\n   \n</datafield>\n\n</record>\n"
+    },
+    "description": {
+      "@id": "O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H",
+      "record": {
+        "@href": "/items/O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H/source/record",
+        "@ref": "O4JTHPWDL5LKMMXXO4R5236ZLTECHF5H",
+        "@type": "http://www.loc.gov/MARC21/slim/"
+      }
+    }
+  },
+  "provider-info": {
+    "provider-domains": {
+      "provider-domain": [
+        "http://ddb.vocnet.org/sparte/sparte002",
+        "",
+        ""
+      ]
+    },
+    "provider-name": "Bayerische Staatsbibliothek",
+    "provider-europeana-name": "",
+    "provider-parent-id": "",
+    "provider-facebook": "",
+    "provider-twitter": "https://twitter.com/bsb_muenchen",
+    "provider-uri": "http://www.bsb-muenchen.de",
+    "provider-email": "direktion@bsb-muenchen.de",
+    "provider-collection": "",
+    "provider-item-id": "BDR-BV036018867-5156",
+    "provider-item-id-type": "",
+    "provider-id": "00005860",
+    "provider-ddb-id": "PE423JPDSCU6C72BAC2PUBOHAINDRGFO",
+    "provider-isil": "http://ld.zdb-services.de/resource/organisations/DE-12",
+    "provider-logo": "https://registrierung.deutsche-digitale-bibliothek.de/logos/00005860.jpg",
+    "provider-longitude": "11.58082",
+    "provider-latitude": "48.14761",
+    "provider-state": "Bayern",
+    "provider-parents": null
+  },
+  "binaries": {
+    "binary": {
+      "@name": "Koch vnd Kellermeisterey, Von Allen Speysen, Getränck vnd Gerichten, allerhandt art künstlich vnd wol zu kochen, eynmachen vnd bereiten ...",
+      "@name3": "Digitalisierung: Bayerische Staatsbibliothek",
+      "@kind": "http://rightsstatements.org/vocab/NoC-NC/1.0/",
+      "@mimetype": "image/jpeg",
+      "@position": "1",
+      "@primary": "true",
+      "@local_pathname": "https://api.digitale-sammlungen.de/iiif/image/v2/bsb10923113_00001/full/full/0/default.jpg",
+      "@ref": "372a20ee-1b57-493c-941e-e74d1aa2f6a2",
+      "@license_group": "rights_002"
+    }
+  }
+}

@@ -1,0 +1,121 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chronodownloader"
+version = "1.0.0"
+description = "Discover and download digitized historical sources from 17 digital libraries"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+authors = [
+    { name = "Paul Goetz", email = "goetz@soziologie.uzh.ch" },
+]
+dependencies = [
+    # HTTP and parsing
+    "requests>=2.34.2",
+    "urllib3>=2.7",  # security floor for the transitive dependency of requests
+    "beautifulsoup4>=4.15",
+    # Browser-fingerprint impersonation for providers behind Cloudflare
+    # (Gallica, BNE), used where a provider sets network.impersonate
+    "curl_cffi>=0.15",
+    # Configuration
+    "pyyaml>=6.0.3",
+    # Interactive prompts (options/prompts.py) and terminal output
+    "questionary>=2.1.1",
+    "prompt-toolkit>=3.0.53",
+    "rich>=15.0",
+]
+
+[project.scripts]
+chronodownloader = "chronodownloader.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "mypy>=2.1.0",
+    "types-pyyaml>=6.0.12.20260906",
+    "types-requests>=2.33.0.20260518",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["chronodownloader"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers -m 'not live'"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+markers = [
+    "slow: Slow running tests",
+    "live: Live tests against the real libraries (opt-in: pytest -m live)",
+    "real_curl: the test may import curl_cffi (tests/conftest.py blocks it)",
+]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_decorators = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+extend-include = ["*.ipynb"]
+extend-exclude = [
+    "data/",
+    "outputs/",
+    "scratch",
+    ".claude",
+    "backup",
+    "deprecated",
+    "exploratory",
+    "explorative",
+    "extras",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "I", "B", "UP", "SIM",
+    "C901", "PLR0912", "PLR0913", "PLR0915", "BLE001", "T201", "ERA001",
+]
+ignore = ["UP047"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-args = 8
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0913"]
+"chronodownloader/cli/**" = ["T201"]
+"chronodownloader/ui/**" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = false
+
+[tool.deptry]
+# tests/ carries analysis-only imports that are intentionally undeclared.
+extend_exclude = ["tests"]
+
+[tool.deptry.per_rule_ignores]
+# urllib3 is imported by requests only; it is declared to keep its floor.
+DEP002 = ["urllib3"]
+
+[tool.deptry.package_module_name_map]
+# Distributions whose import name differs from the package name; declaring these
+# keeps scans accurate even when deptry runs outside the project venv.
+beautifulsoup4 = ["bs4"]
+pyyaml = ["yaml"]
+prompt-toolkit = ["prompt_toolkit"]

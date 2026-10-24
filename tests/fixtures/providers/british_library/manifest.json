@@ -1,0 +1,47 @@
+{
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "@id": "https://api.bl.uk/metadata/iiif/ark:/81055/vdc_100022589074/manifest.json",
+  "@type": "sc:Manifest",
+  "label": "The Cook's Oracle",
+  "sequences": [
+    {
+      "@type": "sc:Sequence",
+      "canvases": [
+        {
+          "@id": "https://api.bl.uk/metadata/iiif/ark:/81055/vdc_100022589074/canvas/1",
+          "@type": "sc:Canvas",
+          "label": "Front cover",
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "resource": {
+                "@id": "https://api.bl.uk/image/iiif/ark:/81055/vdc_100022589075.0x000001/full/full/0/default.jpg",
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "https://api.bl.uk/image/iiif/ark:/81055/vdc_100022589075.0x000001"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "@id": "https://api.bl.uk/metadata/iiif/ark:/81055/vdc_100022589074/canvas/2",
+          "@type": "sc:Canvas",
+          "label": "Title page",
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "resource": {
+                "@id": "https://api.bl.uk/image/iiif/ark:/81055/vdc_100022589075.0x000002/full/full/0/default.jpg",
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "https://api.bl.uk/image/iiif/ark:/81055/vdc_100022589075.0x000002"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

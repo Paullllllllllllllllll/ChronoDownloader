@@ -1,0 +1,12 @@
+{
+  "///download_url": [
+    "This API is intended to be used by our members.",
+    "download_url is a URL for the file."
+  ],
+  "download_url": "https://fast.example.org/d3/y/1760000000/0123456789abcdef0123456789abcdef/le_cuisinier_francois.pdf",
+  "account_fast_download_info": {
+    "downloads_left": 874,
+    "downloads_per_day": 875,
+    "recently_downloaded_md5s": ["0123456789abcdef0123456789abcdef"]
+  }
+}

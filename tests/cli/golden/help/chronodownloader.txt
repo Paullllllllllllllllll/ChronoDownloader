@@ -1,0 +1,22 @@
+usage: chronodownloader [-h] COMMAND ...
+
+Discover and download digitized historical sources from 17 digital libraries: search the
+providers, judge the candidates and download the preferred copy into an output root with a SQLite
+store.
+
+options:
+  -h, --help   show this help message and exit
+
+commands:
+  COMMAND
+    download   search, judge and download the works of a CSV
+    fetch      download a known item without search
+    search     search and judge without downloading
+    inspect    sample the first pages of candidates and check them
+    verify     check the downloaded works of an output root
+    status     list the works of an output root by status
+    drop       remove works from the store, to process them from scratch
+    providers  list the providers with their capabilities and state
+    ui         guided run in an interactive terminal
+
+Run 'chronodownloader <command> --help' for the options of a command.

@@ -1,0 +1,80 @@
+{
+  "count": 1,
+  "docs": [
+    {
+      "@context": "http://dp.la/api/items/context",
+      "@id": "http://dp.la/api/items/508d5d6ee58650960c805dd259c5d4c8",
+      "@type": "ore:Aggregation",
+      "aggregatedCHO": "#sourceResource",
+      "dataProvider": {
+        "@id": "http://dp.la/api/contributor/wellcome-library",
+        "exactMatch": [
+          "http://www.wikidata.org/entity/Q7981192"
+        ],
+        "name": "Wellcome Library"
+      },
+      "id": "508d5d6ee58650960c805dd259c5d4c8",
+      "iiifManifest": "https://iiif.archivelab.org/iiif/b30510168/manifest.json",
+      "ingestDate": "2026-08-26T13:58:14.294Z",
+      "ingestType": "item",
+      "intermediateProvider": "Medical Heritage Library",
+      "isShownAt": "http://www.archive.org/details/b30510168",
+      "object": "https://archive.org/services/img/b30510168",
+      "originalRecord": {
+        "stringValue": "{\n  \"language\" : \"eng\",\n  \"contributor\" : \"Wellcome Library\",\n  \"date\" : \"1730-01-01T00:00:00Z\",\n  \"subject\" : [ \"Cooking, English\", \"Formulas, recipes, etc\", \"Cooking\" ],\n  \"title\" : \"The compleat housewife: or, accomplished gentlewoman's companion: being a collection of upwards of five hundred of the most approved receipts in cookery, pastry, confectionary, preserving, pickles ... to which is added a collection of near two hundred family receipts of medicines ...\",\n  \"creator\" : \"Smith, E., cook\",\n  \"collection\" : [ \"wellcomelibrary\", \"ukmhl\", \"medicalheritagelibrary\", \"europeanlibraries\", \"medicallibrary\", \"fav-comrade_snarky\", \"fav-cute_catgirl\", \"fav-ivanovich24\", \"fav-merxbauer\", \"fav-rroamm\", \"fav-sidney843\" ],\n  \"rights\" : \"This work is available under the Creative Commons, Public Domain Mark\",\n  \"publisher\" : \"London : Printed for J. Pemberton\",\n  \"description\" : [ \"8 unnumbered leaves, 332, xv pages, 6 unnumbered leaves of folded plates : (8vo)\", \"The author has been identified as Eliza or Elizabeth Smith. cf. Maclean, V. Household and cookery books, p.134; Oxford, A. English cookery books, Index (in text, E. Smith)\" ],\n  \"mediatype\" : \"texts\",\n  \"identifier\" : \"b30510168\"\n}"
+      },
+      "provider": {
+        "@id": "http://dp.la/api/contributor/ia",
+        "exactMatch": [
+          "http://www.wikidata.org/entity/Q461"
+        ],
+        "name": "Internet Archive"
+      },
+      "rightsCategory": "Unspecified Rights Status",
+      "sourceResource": {
+        "@id": "http://dp.la/api/items/508d5d6ee58650960c805dd259c5d4c8#SourceResource",
+        "creator": [
+          "Smith, E., cook"
+        ],
+        "date": [
+          {
+            "displayDate": "1730-01-01T00:00:00Z"
+          }
+        ],
+        "description": [
+          "8 unnumbered leaves, 332, xv pages, 6 unnumbered leaves of folded plates : (8vo)",
+          "The author has been identified as Eliza or Elizabeth Smith. cf. Maclean, V. Household and cookery books, p.134; Oxford, A. English cookery books, Index (in text, E. Smith)"
+        ],
+        "language": [
+          {
+            "iso639_3": "Eng",
+            "name": "English"
+          }
+        ],
+        "publisher": [
+          "London : Printed for J. Pemberton"
+        ],
+        "rights": [
+          "This work is available under the Creative Commons, Public Domain Mark"
+        ],
+        "subject": [
+          {
+            "name": "Cooking, English"
+          },
+          {
+            "name": "Formulas, recipes, etc"
+          },
+          {
+            "name": "Cooking"
+          }
+        ],
+        "title": [
+          "The compleat housewife: or, accomplished gentlewoman's companion: being a collection of upwards of five hundred of the most approved receipts in cookery, pastry, confectionary, preserving, pickles ... to which is added a collection of near two hundred family receipts of medicines..."
+        ]
+      },
+      "tags": [
+        "iiif"
+      ]
+    }
+  ]
+}
