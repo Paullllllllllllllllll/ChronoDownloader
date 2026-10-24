@@ -51,6 +51,10 @@ SIZE_CAUSES = frozenset(
 the server does not offer, a body of the wrong type); other causes concern
 the server and end the attempts for that file."""
 
+SIZE_STATUSES = frozenset({400, 404, 410})
+"""Statuses of a size the server does not offer: expected answers while
+another URL of the same image remains, so the client logs them at INFO."""
+
 _SUFFIX_ALIASES = {".jpeg": ".jpg", ".tiff": ".tif"}
 
 
@@ -179,7 +183,9 @@ def stage_first(  # noqa: PLR0913 - two optional attempt records (tried, failure
     A URL failing for a :data:`SIZE_CAUSES` cause moves on to the next one;
     any other failure ends the attempts and is returned. None means every
     URL failed for a size cause. URLs in *tried* are skipped and every URL
-    sent is added to it; every failure is appended to *failures*.
+    sent is added to it; every failure is appended to *failures*. The
+    :data:`SIZE_STATUSES` are expected answers, so a size fallback logs no
+    warning; the caller warns when no URL works.
 
     Raises:
         BreakerOpen, QuotaSpent, SlotLost, OSError: As
@@ -192,7 +198,14 @@ def stage_first(  # noqa: PLR0913 - two optional attempt records (tried, failure
             tried.add(url)
         try:
             return stage_download(
-                network, provider, url, staging_dir, stem, slot=slot, kind=kind
+                network,
+                provider,
+                url,
+                staging_dir,
+                stem,
+                slot=slot,
+                kind=kind,
+                final_statuses=SIZE_STATUSES,
             )
         except RequestFailed as exc:
             logger.info("%s: %s failed: %s", provider, stem, exc)

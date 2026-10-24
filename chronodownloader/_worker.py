@@ -316,9 +316,14 @@ def _provider_search(
     Catalogs file a creator under forms the works CSV rarely gives (Gallica
     has "Taillevent" for Guillaume Tirel), so the creator clause can hide every
     copy; the judge still sees the creator in the full query. Both searches
-    share one deadline.
+    share one deadline: the run's search timeout, raised to the provider's
+    ``min_search_timeout_s``; a run timeout of 0 sets none.
     """
     provider = services.registry.get(key)
+    timeout = job.search_timeout
+    if timeout:
+        floor = services.settings.providers[key].min_search_timeout_s
+        timeout = max(timeout, floor)
     variants = (query, replace(query, creator=None)) if query.creator else (query,)
 
     def search() -> list[SearchRecord]:
@@ -331,7 +336,7 @@ def _provider_search(
                 break
         return records
 
-    return run_with_deadline(search, job.search_timeout)
+    return run_with_deadline(search, timeout)
 
 
 def _search(

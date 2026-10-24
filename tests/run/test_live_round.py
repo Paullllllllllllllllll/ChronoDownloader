@@ -1,5 +1,5 @@
-"""Regressions of the v1.0.0 live round (``docs/live_round_v1_0_0.md``):
-one test per defect the run core fixes (D1, D3, D4, F2, N1)."""
+"""Regressions of the v1.0.0 live round of 24.10.2026: one test per defect
+the run core fixes (D1, D3, D4, F2, N1)."""
 
 from __future__ import annotations
 

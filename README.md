@@ -1,4 +1,4 @@
-# ChronoDownloader v1.0.1
+# ChronoDownloader v1.1.0
 
 ChronoDownloader finds and downloads digitized historical sources from 17 digital
 libraries. Given a CSV of works, it searches the libraries, has a decision model
@@ -455,6 +455,7 @@ providers:
   internet_archive:
     max_pages: 0                  # pages per work; 0 = no limit
     slots: 2                      # concurrent downloads on this machine
+    min_search_timeout_s: 0       # raises the run's search timeout; 0 = none
     network:
       delay_ms: 300               # minimum pause between requests
       jitter_ms: 150              # random extra pause up to this value
@@ -476,6 +477,7 @@ providers:
     network: {delay_ms: 300, jitter_ms: 150, max_attempts: 25}
   bnf_gallica:
     slots: 1
+    min_search_timeout_s: 180     # concurrent searches queue for the 8 s pacing
     network:
       delay_ms: 8000
       jitter_ms: 2000
@@ -629,9 +631,12 @@ The blocks:
   `gallica` is refused with that hint). `max_pages` caps the pages per work, and
   the smaller of it and `--max-pages` applies; `slots` caps that provider's
   concurrent downloads on the machine, else `coordination.default_slots`;
-  `network` sets the pacing, retries, timeout, TLS policy, impersonation, extra
-  headers and circuit breaker. A key missing from a block keeps the provider's
-  built-in profile, which the example shows. Google Books adds `free_only`,
+  `min_search_timeout_s` raises `--search-timeout` for that provider, unless
+  the run sets 0 (Gallica's 180 s covers the queue of several runs' searches
+  behind its 8 s pacing); `network` sets the pacing, retries, timeout, TLS
+  policy, impersonation, extra headers and circuit breaker. A key missing from a
+  block keeps the provider's built-in profile, which the example shows. Google
+  Books adds `free_only`,
   `prefer`, `allow_drm` and `max_files`; Anna's Archive adds `base_url` and
   `quota`; a spent quota stops the download (see Coordination Across Runs).
 - `download_limits` holds the size limits the `--total-*`, `--work-*` and

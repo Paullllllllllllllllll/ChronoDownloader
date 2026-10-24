@@ -187,14 +187,18 @@ _NETWORK_KEYS = frozenset(key for key, _ in _NETWORK_FLAT_KEYS) | {
 
 @dataclass(frozen=True)
 class ProviderSettings:
-    """One provider's page limit, download slots and network policy.
+    """One provider's page limit, download slots, search timeout floor and
+    network policy.
 
     ``max_pages`` 0 sets no page limit; ``slots`` None takes
-    ``coordination.default_slots``.
+    ``coordination.default_slots``; ``min_search_timeout_s`` raises the
+    run's search timeout for this provider (0 adds nothing), for a provider
+    whose pacing makes concurrent searches wait long.
     """
 
     max_pages: int = 0
     slots: int | None = None
+    min_search_timeout_s: float = 0.0
     network: NetworkSettings = field(default_factory=NetworkSettings)
 
 
@@ -233,7 +237,9 @@ class AnnasArchiveSettings(ProviderSettings):
     quota: AnnasQuota = field(default_factory=AnnasQuota)
 
 
-_PROVIDER_COMMON_KEYS = frozenset({"max_pages", "slots", "network"})
+_PROVIDER_COMMON_KEYS = frozenset(
+    {"max_pages", "slots", "min_search_timeout_s", "network"}
+)
 _GOOGLE_BOOKS_KEYS = frozenset({"free_only", "prefer", "allow_drm", "max_files"})
 _ANNAS_KEYS = frozenset({"base_url", "quota"})
 
@@ -250,6 +256,7 @@ PROVIDER_DEFAULTS: Mapping[str, ProviderSettings] = MappingProxyType(
         ),
         "bnf_gallica": ProviderSettings(
             slots=1,
+            min_search_timeout_s=180.0,
             network=NetworkSettings(
                 delay_ms=8000,
                 jitter_ms=2000,
@@ -768,6 +775,9 @@ def _provider(
         base,
         max_pages=reader.integer(section, "max_pages", base.max_pages, prefix),
         slots=slots,
+        min_search_timeout_s=reader.number(
+            section, "min_search_timeout_s", base.min_search_timeout_s, prefix
+        ),
         network=_network(reader, section.get("network"), base.network, path),
     )
     if isinstance(value, GoogleBooksSettings):

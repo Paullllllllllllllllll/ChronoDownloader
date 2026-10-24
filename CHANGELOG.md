@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.1.0** (24 October 2026) -- A provider block takes `min_search_timeout_s`,
+  which raises the run's `--search-timeout` for that provider unless the run sets
+  0. Gallica's built-in profile sets 180 s, since the searches of several runs queue
+  behind its 8 s pacing and exceeded the 60 s default. A page-image size the server
+  refuses with HTTP 400, 404 or 410 is now an expected answer, logged at INFO while
+  another size remains, so Polona no longer logs one warning per page; a page that
+  no size delivers still warns.
 - **v1.0.1** (24 October 2026) -- Security patch: the lockfile moves certifi to
   2026.10.23, which closes GHSA-6q48-6c7w-9gw2, and urllib3 to 2.8.0, which closes
   GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw and GHSA-gh4c-6fx4-qh6g. Dependency versions

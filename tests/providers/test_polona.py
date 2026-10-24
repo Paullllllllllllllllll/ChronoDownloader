@@ -14,6 +14,7 @@ recorded on 01.08.2026 for those tests now live in
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -314,9 +315,14 @@ def test_unreachable_manifest_fails_cleanly(
 
 
 def test_pages_fall_back_from_full_to_max_after_a_400(
-    server: ScriptedServer, network: Network, tmp_path: Path
+    server: ScriptedServer,
+    network: Network,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Every page answered 400 at full/full in the 19.10.2026 baseline."""
+    """Every page answered 400 at full/full in the 19.10.2026 baseline; the
+    fallback is expected, so it logs no warning."""
+    caplog.set_level(logging.INFO, logger="chronodownloader")
     manifest = fixture_json("polona", f"manifest_{GELATINE_ID}.json")
     server.script(
         local_path(MANIFEST_URL.format(item_id=GELATINE_ID)), json_reply(manifest)
@@ -336,6 +342,8 @@ def test_pages_fall_back_from_full_to_max_after_a_400(
     assert {
         f.source_url.rsplit("/", 4)[-3] for f in result.files if f.kind == "image"
     } == {"max"}
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("HTTP 400" in r.getMessage() for r in caplog.records)
 
 
 def test_pages_lists_the_first_canvases(

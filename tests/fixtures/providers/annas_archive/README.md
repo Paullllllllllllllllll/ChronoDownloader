@@ -1,7 +1,8 @@
 # Anna's Archive fixtures
 
-The configured mirror `annas-archive.li` is parked (live baseline, 19.10.2026), so
-the search, MD5-page and fast-download responses are reconstructed.
+The mirror configured on 19.10.2026, `annas-archive.li`, was parked in that day's
+live baseline, so the search, MD5-page and fast-download responses are
+reconstructed.
 
 - `search_table.html`: synthetic; the table layout of the v1.30.3 parsing mocks
   (`tests/unit/test_provider_parsing.py`), with a duplicate, a linkless and a

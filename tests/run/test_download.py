@@ -384,6 +384,36 @@ def test_a_creator_search_without_records_is_repeated_without_the_creator(
     assert statuses(out)["E1"]["selected_provider"] == "mdz"
 
 
+@dataclasses.dataclass
+class SlowSearch(FakeProvider):
+    """Answers after a wait, as Gallica behind several runs' pacing."""
+
+    def search(self, query: Any, *, network: Any, limit: int) -> list[Any]:
+        time.sleep(0.5)
+        return super().search(query, network=network, limit=limit)
+
+
+@pytest.mark.parametrize(("floor", "timed_out"), [(0.0, True), (5.0, False)])
+def test_a_provider_floor_raises_the_search_timeout(
+    tmp_path: Path, settings: Settings, out: Path, floor: float, timed_out: bool
+) -> None:
+    blocks = dict(settings.providers)
+    blocks["mdz"] = dataclasses.replace(blocks["mdz"], min_search_timeout_s=floor)
+    settings = dataclasses.replace(settings, providers=blocks)
+    mdz = SlowSearch("mdz", records={"cuisinier": [COOK]}, page_counts={"bsb1": 4})
+    _mdz, ia = providers()
+    events = Recorder()
+
+    core.run(
+        plan(settings, works_csv(tmp_path), out, entry_ids=("E1",), search_timeout=0.1),
+        events,
+        wiring=wiring([mdz, ia], accepting()),
+    )
+
+    assert any("mdz search timed out" in w for w in events.warnings) is timed_out
+    assert (statuses(out)["E1"]["selected_provider"] == "mdz") is not timed_out
+
+
 def test_the_judge_key_is_required_under_judge_and_not_under_fuzzy(
     tmp_path: Path, settings: Settings, out: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -54,6 +54,7 @@ providers:
   internet_archive:
     max_pages: 0                  # pages per work; 0 = no limit
     slots: 2                      # concurrent downloads on this machine
+    min_search_timeout_s: 0       # raises the run's search timeout; 0 = none
     network:
       delay_ms: 300               # minimum pause between requests
       jitter_ms: 150              # random extra pause up to this value
@@ -75,6 +76,7 @@ providers:
     network: {delay_ms: 300, jitter_ms: 150, max_attempts: 25}
   bnf_gallica:
     slots: 1
+    min_search_timeout_s: 180     # concurrent searches queue for the 8 s pacing
     network:
       delay_ms: 8000
       jitter_ms: 2000

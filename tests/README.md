@@ -10,7 +10,8 @@ The folders mirror the `chronodownloader` package:
 
 ```text
 tests/
-├── conftest.py   # suite-wide: log folder per test, logger handlers restored
+├── conftest.py   # suite-wide: log folder per test, logger handlers restored,
+│                 #   curl_cffi blocked unless a test is marked real_curl
 ├── cli/          # help goldens, agent contract, README option check
 ├── core/         # architecture, coordination, SQLite helper, spec, inputs, budget
 ├── fixtures/     # recorded provider responses, jev_eval matching fixture
