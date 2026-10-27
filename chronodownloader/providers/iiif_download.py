@@ -235,8 +235,9 @@ def stage_canvas(
 
 
 def _copy_page(run: DownloadRun, staged: StagedFile, item: str) -> StagedFile:
-    """Stage a copy of an already staged page for another canvas that names
-    the same source (one transfer per source URL).
+    """Stage a copy of a staged page for another canvas with the same source.
+
+    Each source URL is transferred once.
 
     Raises:
         OSError: The copy could not be written.

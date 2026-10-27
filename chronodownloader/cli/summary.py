@@ -71,8 +71,10 @@ that reached no report."""
 
 
 def count_fields(command: str, counts: WorkCounts) -> dict[str, int]:
-    """Return the command's own summary fields from its *counts*:
-    ``items_accepted`` of ``search``."""
+    """Return the command's own summary fields from its *counts*.
+
+    Only ``search`` has one: ``items_accepted``.
+    """
     if command == "search":
         return {"items_accepted": counts.accepted}
     return {}

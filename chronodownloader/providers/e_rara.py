@@ -191,10 +191,11 @@ class ERara:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the VLID of a title URL (``/<prefix>/content/titleinfo/<id>``,
-        ``.../structure/<id>``) or of the IIIF manifest (``/i3f/v20/<id>/``).
+        """Return the VLID of a title URL or of the IIIF manifest.
 
-        A ``pageview`` or ``zoom`` URL names a page, not the title: None.
+        Title URLs read ``/<prefix>/content/titleinfo/<id>`` or
+        ``.../structure/<id>``, the manifest ``/i3f/v20/<id>/``. A
+        ``pageview`` or ``zoom`` URL names a page, not the title: None.
         """
         if not on_hosts(url, self.hosts):
             return None

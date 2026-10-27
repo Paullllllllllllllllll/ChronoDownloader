@@ -321,9 +321,11 @@ class VerifyReport:
 
 @dataclass(frozen=True)
 class StatusRow:
-    """One work of a ``status`` listing; ``new`` works have no store entry
-    or no outcome yet. *selected* is ``provider:item`` of the selected
-    candidate; *retry_after* is ISO 8601."""
+    """One work of a ``status`` listing.
+
+    ``new`` works have no store entry or no outcome yet. *selected* is
+    ``provider:item`` of the selected candidate; *retry_after* is ISO 8601.
+    """
 
     entry_id: str
     title: str
@@ -416,9 +418,11 @@ type Report = InspectReport | VerifyReport | StatusReport | DropReport | Provide
 
 @dataclass(frozen=True)
 class RunResult:
-    """The outcome of a run; *rows* holds the candidates of a ``search``,
-    *report* the report of ``inspect``, ``verify``, ``status``, ``drop`` and
-    ``providers``."""
+    """The outcome of a run.
+
+    *rows* holds the candidates of a ``search``, *report* the report of
+    ``inspect``, ``verify``, ``status``, ``drop`` and ``providers``.
+    """
 
     counts: WorkCounts
     rows: tuple[SearchRow, ...] = ()

@@ -192,10 +192,12 @@ class HathiTrust:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return self._capabilities
 
     def search(
@@ -271,9 +273,12 @@ class HathiTrust:
         raise UnsupportedCapability(KEY, "pages")
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the htid of a reader or manifest URL (``babel.../cgi/pt?id=``,
-        ``.../cgi/imgsrv/manifest/<htid>``) or the record number of a
-        catalog URL (``catalog.hathitrust.org/Record/<n>``)."""
+        """Return the htid of a reader or manifest URL, or a catalog record number.
+
+        Reader and manifest URLs read ``babel.../cgi/pt?id=`` and
+        ``.../cgi/imgsrv/manifest/<htid>``, catalog URLs
+        ``catalog.hathitrust.org/Record/<n>``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return (

@@ -350,8 +350,10 @@ def is_annas_page(html: str) -> bool:
 
 @dataclass(frozen=True)
 class Md5Page:
-    """An MD5 page: its metadata and its download links in priority order
-    (direct files, then slow downloads, then mirror pages)."""
+    """An MD5 page: its metadata and its download links in priority order.
+
+    Direct files come first, then slow downloads, then mirror pages.
+    """
 
     metadata: Mapping[str, Any]
     links: tuple[str, ...]
@@ -583,10 +585,12 @@ class AnnasArchive:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return self._capabilities
 
     @property
@@ -775,8 +779,10 @@ class AnnasArchive:
 
 
 def _page_text(response: requests.Response) -> str:
-    """Return an HTML body as text; UTF-8 unless the response names a charset
-    (requests would assume ISO-8859-1 for ``text/html`` without one)."""
+    """Return an HTML body as text, UTF-8 unless the response names a charset.
+
+    Without a charset, requests would assume ISO-8859-1 for ``text/html``.
+    """
     if "charset" in response.headers.get("Content-Type", "").lower():
         return response.text
     return response.content.decode("utf-8", errors="replace")
@@ -862,8 +868,11 @@ def _stage_document(run: _Run, url: str) -> StagedFile:
 
 
 def build(settings: Settings) -> AnnasArchive:
-    """Build the adapter: mirror and quota from settings, the member key from
-    the environment variable ``api_keys.annas_archive`` names."""
+    """Build the adapter from settings and the environment.
+
+    Mirror and quota come from settings, the member key from the environment
+    variable ``api_keys.annas_archive`` names.
+    """
     block = settings.providers[KEY]
     base_url, quota = "", False
     if isinstance(block, AnnasArchiveSettings):

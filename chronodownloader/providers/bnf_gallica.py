@@ -196,8 +196,11 @@ class BnfGallica:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the ark name of an item URL (``/ark:/12148/bpt6k...``, with
-        ``.image`` or ``/f1.item`` after it, or the IIIF manifest)."""
+        """Return the ark name of an item URL or of the IIIF manifest.
+
+        Item URLs read ``/ark:/12148/bpt6k...``, possibly with ``.image`` or
+        ``/f1.item`` after it.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return path_match(url, _ARK)

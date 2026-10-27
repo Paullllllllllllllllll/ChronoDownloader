@@ -212,8 +212,7 @@ class RequestOptions(TypedDict, total=False):
 
 
 class DownloadOptions(TypedDict, total=False):
-    """Optional arguments of :meth:`Network.download`; as
-    :class:`RequestOptions`."""
+    """Optional arguments of :meth:`Network.download`, as in :class:`RequestOptions`."""
 
     params: Mapping[str, Any] | None
     headers: Mapping[str, str] | None
@@ -340,9 +339,12 @@ class _Call:
 
 @dataclass
 class _Admission:
-    """One call's breaker and quota state: the probes it was granted and the
-    breakers its own failure opened (each by provider key, with the time
-    the breaker reports), and whether a quota unit stayed charged."""
+    """One call's breaker and quota state.
+
+    Holds the probes the call was granted and the breakers its own failure
+    opened (each by provider key, with the time the breaker reports), and
+    whether a quota unit stayed charged.
+    """
 
     probes: dict[str, float | None] = field(default_factory=dict)
     tripped: dict[str, float | None] = field(default_factory=dict)
@@ -356,8 +358,11 @@ class _Done[T]:
 
 @dataclass(frozen=True)
 class _Outcome[T]:
-    """An attempt's result; ``credentialed`` covers every hop it sent;
-    ``call`` is the last hop's call, whose provider the result belongs to."""
+    """An attempt's result.
+
+    ``credentialed`` covers every hop it sent; ``call`` is the last hop's
+    call, whose provider the result belongs to.
+    """
 
     result: _Done[T] | Failure
     credentialed: bool
@@ -502,8 +507,11 @@ class Network:
         return key if key is not None and key in self._policies else origin
 
     def _for_hop(self, call: _Call, url: str) -> _Call:
-        """Return *call* as a hop to *url*: under its serving provider's key,
-        network block and session."""
+        """Return *call* as a hop to *url*.
+
+        The hop takes the key, network block and session of *url*'s serving
+        provider.
+        """
         key = self._resolve(url, call.origin)
         if key == call.provider:
             return call
@@ -921,8 +929,10 @@ class Network:
     def _final_answer(
         self, call: _Call, failure: Failure, attempt: int
     ) -> RequestFailed:
-        """Return the exception of an expected answer (``final_statuses``);
-        the provider answered, so the breaker counts a success."""
+        """Return the exception of an expected answer (``final_statuses``).
+
+        The provider answered, so the breaker counts a success.
+        """
         self._record_success(call)
         logger.info(
             "%s: HTTP %s for %s ends the call",
@@ -1031,11 +1041,14 @@ def _remove(path: Path) -> None:
 
 
 def _answer_text(response: requests.Response) -> str:
-    """Return what an expected refusal says, masked and short: the ``error``
-    field of a JSON body (read up to :data:`ANSWER_BODY_BYTES`, so a long
-    preamble before the field does not hide it), else the body's first
-    characters. The request's own credential values are masked before
-    anything is cut, so no prefix of an echoed key survives."""
+    """Return what an expected refusal says, masked and short.
+
+    That is the ``error`` field of a JSON body (read up to
+    :data:`ANSWER_BODY_BYTES`, so a long preamble before the field does not
+    hide it), else the body's first characters. The request's own credential
+    values are masked before anything is cut, so no prefix of an echoed key
+    survives.
+    """
     text = response.content[:ANSWER_BODY_BYTES].decode("utf-8", "replace")
     request = response.request
     if request is not None:

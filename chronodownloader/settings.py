@@ -187,8 +187,7 @@ _NETWORK_KEYS = frozenset(key for key, _ in _NETWORK_FLAT_KEYS) | {
 
 @dataclass(frozen=True)
 class ProviderSettings:
-    """One provider's page limit, download slots, search timeout floor and
-    network policy.
+    """One provider's page limit, slots, search timeout floor and network policy.
 
     ``max_pages`` 0 sets no page limit; ``slots`` None takes
     ``coordination.default_slots``; ``min_search_timeout_s`` raises the
@@ -529,8 +528,9 @@ class Settings:
     source: Path | None = None
 
     def state_directory(self) -> Path:
-        """Return the folder of the tool's state files: ``state_dir``, else
-        ``~/.chronodownloader``.
+        """Return the folder of the tool's state files.
+
+        It is ``state_dir``, else ``~/.chronodownloader``.
 
         Raises:
             SettingsError: ``state_dir`` is relative after ``~`` expansion.
@@ -668,8 +668,10 @@ def _bounded(
 def _score(
     reader: Reader, raw: Mapping[str, Any], key: str, default: float | None
 ) -> float | None:
-    """Return a text score total from 0 to :data:`TEXT_SCORE_MAX`; a missing
-    key keeps *default*, an explicit null switches the threshold off."""
+    """Return a text score total from 0 to :data:`TEXT_SCORE_MAX`.
+
+    A missing key keeps *default*; an explicit null switches the threshold off.
+    """
     if key not in raw:
         return default
     if raw[key] is None:

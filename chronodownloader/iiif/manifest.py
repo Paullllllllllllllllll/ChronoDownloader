@@ -77,8 +77,10 @@ class ManifestMetadata:
 
 
 def _unwrap_v2_choice(resource: Any) -> Any:
-    """Return the ``default`` alternative of an ``oa:Choice``, else the first
-    ``item``; any other resource unchanged."""
+    """Return the ``default`` alternative of an ``oa:Choice``, else its first item.
+
+    Any other resource is returned unchanged.
+    """
     if isinstance(resource, Mapping) and resource.get("@type") == "oa:Choice":
         default = resource.get("default")
         if isinstance(default, Mapping):
@@ -92,8 +94,7 @@ def _unwrap_v2_choice(resource: Any) -> Any:
 
 
 def _unwrap_v3_choice(body: Any) -> Any:
-    """Return the first ``items`` entry of a v3 ``Choice``; any other body
-    unchanged."""
+    """Return the first ``items`` entry of a v3 ``Choice``; any other body unchanged."""
     if isinstance(body, Mapping) and body.get("type") == "Choice":
         items = body.get("items")
         if isinstance(items, list) and items and isinstance(items[0], Mapping):
@@ -102,8 +103,7 @@ def _unwrap_v3_choice(body: Any) -> Any:
 
 
 def _first_mapping(value: Any) -> Json | None:
-    """Return ``value[0]`` when *value* is a non-empty list starting with a
-    mapping."""
+    """Return ``value[0]`` when *value* is a non-empty list starting with a mapping."""
     if isinstance(value, list) and value and isinstance(value[0], Mapping):
         return value[0]
     return None
@@ -339,8 +339,11 @@ def _attribution(raw: Any) -> str | None:
 
 
 def extract_manifest_metadata(manifest: Json) -> ManifestMetadata:
-    """Return the label, attribution (or v3 ``requiredStatement``) and the
-    ``metadata`` pairs of a manifest, each in its first language."""
+    """Return a manifest's label, attribution and ``metadata`` pairs.
+
+    The v3 ``requiredStatement`` stands in for the attribution; each value is
+    taken in its first language.
+    """
     pairs: dict[str, str] = {}
     raw_pairs = manifest.get("metadata") or []
     if isinstance(raw_pairs, list):

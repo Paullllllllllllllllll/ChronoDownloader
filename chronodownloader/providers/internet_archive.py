@@ -230,10 +230,12 @@ class InternetArchive:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities()
 
     def search(
@@ -517,9 +519,12 @@ class InternetArchive:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the identifier of an item URL (``/details/<id>``, with a
-        ``/page/...`` view after it, ``/download/``, ``/embed/``,
-        ``/stream/``, ``/metadata/``, or the IIIF manifest)."""
+        """Return the identifier of an item URL or of the IIIF manifest.
+
+        Item URLs read ``/details/<id>`` (possibly with a ``/page/...`` view
+        after it), ``/download/``, ``/embed/``, ``/stream/`` or
+        ``/metadata/``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return path_match(url, _ITEM_PATH) or path_match(url, _IIIF_PATH)

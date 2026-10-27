@@ -191,17 +191,22 @@ def image_url_of(details: Mapping[str, Any]) -> str | None:
 
 
 class LocProvider:
-    """The Library of Congress adapter; ``source_id`` is the item id (the
-    last segment of its ``/item/<id>/`` URL, such as an LCCN)."""
+    """The Library of Congress adapter.
+
+    ``source_id`` is the item id: the last segment of its ``/item/<id>/``
+    URL, such as an LCCN.
+    """
 
     hosts: ClassVar[frozenset[str]] = frozenset({"loc.gov"})
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities(iiif=True)
 
     def search(

@@ -61,8 +61,10 @@ def is_size_limit(option: Option) -> bool:
 
 
 def limit_text(settings: Settings, option: Option) -> str:
-    """Return the ``download_limits`` value a size-limit *option* falls back
-    to, such as ``100`` or ``stop``."""
+    """Return the ``download_limits`` value a size-limit *option* falls back to.
+
+    Values read like ``100`` or ``stop``.
+    """
     value: Any = settings.download_limits
     path = (option.default_help or "").removeprefix(_DOWNLOAD_LIMITS)
     for part in path.split("."):

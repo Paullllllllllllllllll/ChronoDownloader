@@ -75,8 +75,11 @@ _ITEM_PATH = re.compile(r"/items?/([0-9a-f]{32})(?:[/?#]|$)")
 
 
 def display_date(value: Any) -> str | None:
-    """Unwrap a ``sourceResource.date``: a list, a ``displayDate`` object
-    (``begin`` as fallback) or a bare string; None when empty."""
+    """Unwrap a ``sourceResource.date``; None when empty.
+
+    The date is a list, a ``displayDate`` object (``begin`` as fallback) or a
+    bare string.
+    """
     if isinstance(value, list):
         value = value[0] if value else None
     if isinstance(value, Mapping):
@@ -115,8 +118,10 @@ def find_manifest(doc: Mapping[str, Any]) -> str | None:
 
 
 def item_doc(details: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Return the item of a single-item answer (``{"count": 1, "docs": [...]}``);
-    a mapping without ``docs`` is the item itself."""
+    """Return the item of a single-item answer (``{"count": 1, "docs": [...]}``).
+
+    A mapping without ``docs`` is the item itself.
+    """
     docs = details.get("docs")
     if isinstance(docs, list) and docs and isinstance(docs[0], Mapping):
         return docs[0]
@@ -210,10 +215,12 @@ class DplaProvider:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities(iiif=True, api_key=KEY)
 
     def search(
@@ -340,8 +347,10 @@ class DplaProvider:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the item id of an item page (``dp.la/item/<id>``) or of an
-        API item URL (``api.dp.la/v2/items/<id>``)."""
+        """Return the item id of an item page or of an API item URL.
+
+        These read ``dp.la/item/<id>`` and ``api.dp.la/v2/items/<id>``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return path_match(url, _ITEM_PATH)

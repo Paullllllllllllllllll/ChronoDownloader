@@ -180,8 +180,11 @@ as the run takes it now, or None when it no longer fits the selection."""
 
 @dataclass(frozen=True)
 class MatchOptions:
-    """How a run matches: mode, edition policy, providers, research, and the
-    selection re-check at lease time (None: none)."""
+    """How a run matches works to candidates.
+
+    Holds the mode, edition policy, providers, research flag, and the
+    selection re-check at lease time (None: none).
+    """
 
     mode: policy.Mode
     edition_policy: policy.EditionPolicy
@@ -244,8 +247,7 @@ def describe_result(result: DownloadResult) -> str | None:
 
 
 def _bounded(reason: str | None) -> str | None:
-    """Return *reason* masked and cut to the store's error length; None when
-    empty."""
+    """Return *reason* masked and cut to the store's error length; None if empty."""
     return bounded_error(redact_text(reason)) if reason else None
 
 
@@ -479,8 +481,10 @@ class WorkLoop:
     # -- matching ----------------------------------------------------------------
 
     def _research(self, active: _Active) -> bool:
-        """Return True when the work is searched and judged anew: under
-        ``--research``, or because its input fields changed."""
+        """Return True when the work is searched and judged anew.
+
+        That happens under ``--research``, or when its input fields changed.
+        """
         assert self.matching is not None
         return self.matching.research or active.planned.changed
 
@@ -607,9 +611,12 @@ class WorkLoop:
         self._submit_download(active, item.record.provider, item.record.source_id)
 
     def _acceptable(self, outcome: policy.WorkOutcome) -> list[policy.Candidate]:
-        """Return the acceptable candidates in preference order: those of the
-        first decision group (accepted, not held by the edition policy) that
-        a download can fetch; under ``search`` every one of them."""
+        """Return the acceptable candidates in preference order.
+
+        These are the candidates of the first decision group (accepted, not
+        held by the edition policy) that a download can fetch; under
+        ``search`` every one of that group.
+        """
         if outcome.outcome != "accepted":
             return []
         found: list[policy.Candidate] = []
@@ -888,8 +895,11 @@ class WorkLoop:
 
     @staticmethod
     def _without_files(active: _Active, status: StoredStatus) -> StoredStatus:
-        """Return a work's status when no candidate yielded files:
-        ``needs_review`` when every one is metadata-only, else ``failed``."""
+        """Return a work's status when no candidate yielded files.
+
+        It is ``needs_review`` when every candidate is metadata-only, else
+        ``failed``.
+        """
         if len(active.tried) < 2:
             return status
         if all(tried == "needs_review" for tried, _text in active.tried):
@@ -898,8 +908,11 @@ class WorkLoop:
 
     @staticmethod
     def _tried_reason(active: _Active, reason: str) -> str | None:
-        """Return why a work has no files, bounded and masked: the one
-        download's reason, or each candidate tried and its reason."""
+        """Return why a work has no files, bounded and masked.
+
+        That is the one download's reason, or each candidate tried and its
+        reason.
+        """
         if len(active.tried) < 2:
             return _bounded(reason)
         statuses = {status for status, _text in active.tried}

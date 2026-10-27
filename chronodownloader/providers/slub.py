@@ -257,11 +257,11 @@ class Slub:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the PPN of a digital collections URL (``/id<PPN>``, a
-        ``PPN`` parameter) or of the IIIF manifest (``/iiif/2/<PPN>/...``).
+        """Return the PPN of a digital collections URL or of the IIIF manifest.
 
-        A ``werkansicht/dlf/<n>`` URL names the viewer's internal number,
-        not the PPN: None.
+        The PPN stands in ``/id<PPN>`` or a ``PPN`` parameter, or in the
+        manifest's ``/iiif/2/<PPN>/...``. A ``werkansicht/dlf/<n>`` URL names
+        the viewer's internal number, not the PPN: None.
         """
         if not on_hosts(url, self.hosts):
             return None

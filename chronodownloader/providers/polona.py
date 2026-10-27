@@ -203,8 +203,11 @@ class Polona:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the object UUID of a viewer URL (``/preview/<uuid>``,
-        ``/item-view/<uuid>``, ``/item/<uuid>``) or of the manifest."""
+        """Return the object UUID of a viewer URL or of the manifest.
+
+        Viewer URLs read ``/preview/<uuid>``, ``/item-view/<uuid>`` or
+        ``/item/<uuid>``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         found = path_match(url, _OBJECT_PATH)

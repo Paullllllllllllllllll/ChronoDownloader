@@ -1,5 +1,10 @@
 # Changelog
 
+- **v1.1.1** (27 October 2026) -- Ruff now checks docstrings with its
+  pydocstyle rules under the Google convention, outside tests. Every
+  docstring opens with a one-line summary, the provider, event-protocol and
+  parser methods that lacked a docstring have one, and docstrings with
+  backslashes are raw strings. Behavior is unchanged.
 - **v1.1.0** (24 October 2026) -- A provider block takes `min_search_timeout_s`,
   which raises the run's `--search-timeout` for that provider unless the run sets
   0. Gallica's built-in profile sets 180 s, since the searches of several runs queue

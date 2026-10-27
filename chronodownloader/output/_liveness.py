@@ -67,10 +67,10 @@ if sys.platform == "win32":
         return _created(_kernel32.GetCurrentProcess())
 
     def process_alive(pid: int, created: float | None = None) -> bool:
-        """Return True while *pid* runs as the process created at *created*
-        (epoch s, as :func:`own_creation` recorded it; None: not checked).
+        """Return True while *pid* runs as the process created at *created*.
 
-        A process this user may not query counts as running.
+        *created* is in epoch seconds, as :func:`own_creation` recorded it;
+        None skips the check. A process this user may not query counts as running.
         """
         handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:

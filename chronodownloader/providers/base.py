@@ -105,8 +105,11 @@ def page_item(index: int) -> str:
 
 
 def page_limit(requested: int, provider_max: int) -> int:
-    """Return the page limit that applies: the smaller nonzero of the run's
-    ``--max-pages`` and the provider's ``max_pages``; 0 for none."""
+    """Return the page limit that applies, 0 for none.
+
+    It is the smaller nonzero value of the run's ``--max-pages`` and the
+    provider's ``max_pages``.
+    """
     limits = [value for value in (requested, provider_max) if value > 0]
     return min(limits) if limits else 0
 
@@ -324,9 +327,12 @@ class DownloadResult:
 
 @dataclass(frozen=True)
 class PageRef:
-    """A canvas to sample: its item, 1-based position and label, the image
-    URLs at the reduced size (preferred first), and its Image API service
-    base when it has one (for the ``info.json`` fallback)."""
+    """A canvas to sample.
+
+    Holds its item, 1-based position and label, the image URLs at the reduced
+    size (preferred first), and its Image API service base when it has one
+    (for the ``info.json`` fallback).
+    """
 
     item: str
     index: int
@@ -344,8 +350,11 @@ class ProviderError(Exception):
 
 
 class UnsupportedCapability(ProviderError):
-    """The adapter does not offer *capability* (``download``, ``pages``),
-    for every item or, with *detail* saying why, for this one."""
+    """The adapter does not offer *capability* (``download``, ``pages``).
+
+    The capability is missing for every item or, with *detail* saying why, for
+    this one.
+    """
 
     def __init__(self, provider: str, capability: str, *, detail: str = "") -> None:
         text = f"{capability} is not supported"

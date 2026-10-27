@@ -168,8 +168,10 @@ def _binding_value(binding: Mapping[str, Any], name: str) -> str | None:
 
 
 def extract_digital_id(value: str | None) -> str | None:
-    """Return the lowercase BNE Digital UUID in *value* (a UUID or any BNE
-    Digital URL carrying one), or None."""
+    """Return the lowercase BNE Digital UUID in *value*, or None.
+
+    *value* is a UUID or any BNE Digital URL carrying one.
+    """
     if not value:
         return None
     match = _UUID_RE.search(str(value))
@@ -177,8 +179,10 @@ def extract_digital_id(value: str | None) -> str | None:
 
 
 def catalog_resource_id(value: str) -> str | None:
-    """Return the bare datos.bne.es resource id of a URI or id, or None when
-    it is foreign or unsafe to put into a query."""
+    """Return the bare datos.bne.es resource id of a URI or id.
+
+    Returns None when the value is foreign or unsafe to put into a query.
+    """
     candidate = str(value).strip()
     if candidate.startswith("http"):
         if "datos.bne.es" not in candidate:
@@ -323,10 +327,12 @@ class Bne:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities()
 
     def _sparql(
@@ -548,8 +554,11 @@ class Bne:
         raise UnsupportedCapability(KEY, "pages")
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the UUID of a BNE Digital card or viewer URL
-        (``bnedigital.bne.es/bd/card?id=<uuid>``, ``.../viewer?id=<uuid>``)."""
+        """Return the UUID of a BNE Digital card or viewer URL.
+
+        These read ``bnedigital.bne.es/bd/card?id=<uuid>`` and
+        ``.../viewer?id=<uuid>``.
+        """
         if not on_hosts(url, ("bnedigital.bne.es",)):
             return None
         return extract_digital_id(url)

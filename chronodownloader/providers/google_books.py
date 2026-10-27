@@ -175,14 +175,17 @@ class GoogleBooks:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities(api_key=KEY)
 
     @property
     def prefer(self) -> str:
+        """The preferred download format, lowercase; ``pdf`` when unset."""
         return str(self.options.prefer or "pdf").lower()
 
     def _params(self, query: str, flt: str | None, limit: int) -> dict[str, str]:
@@ -499,8 +502,10 @@ class GoogleBooks:
         raise UnsupportedCapability(KEY, "pages")
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the volume id of a books page (``books?id=<id>``) or of an
-        API volume URL (``/books/v1/volumes/<id>``)."""
+        """Return the volume id of a books page or of an API volume URL.
+
+        These read ``books?id=<id>`` and ``/books/v1/volumes/<id>``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         found = path_match(url, _VOLUME_PATH) or query_value(url, "id")
@@ -508,8 +513,10 @@ class GoogleBooks:
 
 
 def build(settings: Settings) -> GoogleBooks:
-    """Return the adapter with the Google Books block and the key from the
-    environment variable that ``api_keys`` names."""
+    """Return the adapter with the Google Books block and its key.
+
+    The key is read from the environment variable that ``api_keys`` names.
+    """
     block = settings.providers.get(KEY)
     options = block if isinstance(block, GoogleBooksSettings) else GoogleBooksSettings()
     api_key = os.environ.get(settings.api_key_env(KEY)) or None

@@ -144,8 +144,10 @@ def host_key(url: str) -> str | None:
 
 
 def serving_key(url: str, caller: str) -> str:
-    """Return the key of the provider that serves *url*'s host, else *caller*
-    (:func:`host_key`)."""
+    """Return the key of the provider serving *url*'s host, else *caller*.
+
+    The host is looked up with :func:`host_key`.
+    """
     return host_key(url) or caller
 
 

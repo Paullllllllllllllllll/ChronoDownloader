@@ -229,8 +229,11 @@ class Mdz:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the BSB id of a viewer, details or manifest URL
-        (``/view/bsb00027043``, ``/de/details/...``, ``.../v2/bsb.../manifest``)."""
+        """Return the BSB id of a viewer, details or manifest URL.
+
+        These read ``/view/bsb00027043``, ``/de/details/...`` and
+        ``.../v2/bsb.../manifest``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return path_match(url, _BSB_ID)

@@ -1,9 +1,9 @@
-"""The verify command: check the recorded files, and with ``--pages`` the
-first pages, of the works in an output root.
+"""The verify command: check the recorded files of an output root's works.
 
-The works are printed as a table, then the missing files and those of
-another size: on stdout, or on stderr with ``--json``. The page check is
-reported only; it never changes a status.
+With ``--pages`` the works' first pages are checked as well. The works are
+printed as a table, then the missing files and those of another size: on
+stdout, or on stderr with ``--json``. The page check is reported only; it
+never changes a status.
 """
 
 from __future__ import annotations

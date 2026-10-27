@@ -98,15 +98,20 @@ def build_manifest_url(euro_id: str, *, prefer_v3: bool = True) -> str | None:
 
 
 def gallica_manifest_url(euro_id: str) -> str | None:
-    """Return Gallica's own manifest URL for a Gallica record id
-    (``/794/ark__12148_bpt6k114423k``), else None."""
+    """Return Gallica's own manifest URL for a Gallica record id, else None.
+
+    Gallica record ids read ``/794/ark__12148_bpt6k114423k``.
+    """
     match = _GALLICA_RECORD.search(euro_id.strip())
     return GALLICA_MANIFEST_URL.format(ark_id=match.group(1)) if match else None
 
 
 def _is_own_manifest_host(parts: SplitResult) -> bool:
-    """Return True for an HTTPS URL on Europeana's own IIIF host: exact host
-    name, default port, no user information."""
+    """Return True for an HTTPS URL on Europeana's own IIIF host.
+
+    The URL must name the exact host, the default port and no user
+    information.
+    """
     try:
         port = parts.port
     except ValueError:
@@ -260,8 +265,10 @@ def record_media_urls(record: Any) -> list[str]:
 
 
 class EuropeanaProvider:
-    """The Europeana adapter; ``source_id`` is the record id
-    (``/794/ark__12148_bpt6k114423k``)."""
+    """The Europeana adapter.
+
+    ``source_id`` is the record id, such as ``/794/ark__12148_bpt6k114423k``.
+    """
 
     hosts: ClassVar[frozenset[str]] = frozenset({"europeana.eu"})
 
@@ -273,10 +280,12 @@ class EuropeanaProvider:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities(iiif=True, api_key=KEY)
 
     def search(
@@ -315,7 +324,9 @@ class EuropeanaProvider:
         return records
 
     def _manifest_url(self, record_or_id: SearchRecord | str) -> str:
-        """Return Gallica's manifest for a Gallica record, else the stored
+        """Return the manifest URL to download from.
+
+        That is Gallica's manifest for a Gallica record, else the stored
         manifest URL, else the one built from the id.
 
         Europeana's manifest of a Gallica record (``/794/ark__12148_...``)
@@ -338,8 +349,11 @@ class EuropeanaProvider:
         return built
 
     def manifest_url(self, url: str) -> str:
-        """Return *url* with the key appended on Europeana's own manifest host
-        (:func:`append_wskey`), as this adapter's downloads fetch it."""
+        """Return *url* as this adapter's downloads fetch it.
+
+        On Europeana's own manifest host the key is appended
+        (:func:`append_wskey`).
+        """
         return append_wskey(url, self._api_key)
 
     def _fetch_manifest(
@@ -408,17 +422,23 @@ class EuropeanaProvider:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the record id (``/<dataset>/<record>``) of an item page
-        (``www.europeana.eu/<lang>/item/<dataset>/<record>``) or of a
-        Manifest API URL (``iiif.europeana.eu/presentation/...``)."""
+        """Return the record id of an item page or of a Manifest API URL.
+
+        The id reads ``/<dataset>/<record>``; item pages read
+        ``www.europeana.eu/<lang>/item/<dataset>/<record>``, Manifest API URLs
+        ``iiif.europeana.eu/presentation/...``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         match = path_match(url, _RECORD_PATH)
         return f"/{match}" if match else None
 
     def item_manifest_url(self, item_id: str) -> str | None:
-        """Return Gallica's manifest for a Gallica record, else the record's
-        Manifest API URL, without the key."""
+        """Return the manifest URL without the key.
+
+        That is Gallica's manifest for a Gallica record, else the record's
+        Manifest API URL.
+        """
         return gallica_manifest_url(item_id) or build_manifest_url(item_id)
 
 

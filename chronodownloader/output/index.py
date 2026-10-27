@@ -1,9 +1,9 @@
-"""``index.csv``: the store's ``work_status`` view rendered for spreadsheets.
+r"""``index.csv``: the store's ``work_status`` view rendered for spreadsheets.
 
 The file is rendered from the store after each run and is never read back;
 the store stays the only status record. It holds one row per work, ordered
 by entry id, with the columns of :data:`INDEX_COLUMNS` (UTF-8, comma
-separated, ``\\n`` line ends). A root without a store gets no file.
+separated, ``\n`` line ends). A root without a store gets no file.
 """
 
 from __future__ import annotations

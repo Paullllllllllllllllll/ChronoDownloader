@@ -190,10 +190,12 @@ class DdbProvider:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities(iiif=True, api_key=KEY)
 
     def _params(self) -> dict[str, str] | None:
@@ -255,8 +257,11 @@ class DdbProvider:
     def _manifest_url(
         record_or_id: SearchRecord | str, meta: Mapping[str, Any]
     ) -> str | None:
-        """Return the record's manifest, else the one its holding library's
-        ``isShownAt`` link implies (for this same record)."""
+        """Return the record's manifest, else the one its holding library implies.
+
+        That manifest is derived from the holding library's ``isShownAt`` link
+        and belongs to this same record.
+        """
         manifest = meta.get("iiifManifest")
         if isinstance(manifest, str) and manifest:
             return manifest
@@ -272,8 +277,10 @@ class DdbProvider:
         staging_dir: Path,
         request: DownloadRequest,
     ) -> DownloadResult:
-        """Stage the record and the holding library's manifest files; else
-        the record's ``isShownBy`` image as a preview.
+        """Stage the record and the files of the holding library's manifest.
+
+        When no manifest yields files, the record's ``isShownBy`` image is
+        staged as a preview.
 
         Raises:
             ItemNotFound: The record or its manifest is unknown.
@@ -329,8 +336,10 @@ class DdbProvider:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the 32-character item id of an item page (``/item/<id>``)
-        or of an API item URL (``/items/<id>``)."""
+        """Return the 32-character item id of an item page or of an API item URL.
+
+        These read ``/item/<id>`` and ``/items/<id>``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return path_match(url, _ITEM_PATH)

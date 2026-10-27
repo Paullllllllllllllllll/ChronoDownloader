@@ -221,10 +221,12 @@ class BritishLibrary:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities(iiif=True)
 
     def _search_sru(
@@ -421,8 +423,11 @@ class BritishLibrary:
         return manifest_page_refs(manifest, first_n=first_n, max_px=max_px)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the ARK name of a viewer or manifest URL
-        (``access.bl.uk/item/viewer/ark:/81055/vdc_...``, viewer suffix kept)."""
+        """Return the ARK name of a viewer or manifest URL.
+
+        Viewer URLs read ``access.bl.uk/item/viewer/ark:/81055/vdc_...``; the
+        viewer suffix is kept.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return path_match(url, _SRU_ARK)

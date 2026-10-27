@@ -145,8 +145,10 @@ class DownloadRun:
     def stage_metadata(
         self, name: str, document: Mapping[str, Any], *, source_url: str = ""
     ) -> None:
-        """Stage *document* as ``metadata/<name>.json`` when the request
-        includes metadata and the budget allows it.
+        """Stage *document* as ``metadata/<name>.json``.
+
+        Nothing is staged unless the request includes metadata and the budget
+        allows it.
 
         Raises:
             OSError: The file could not be written.

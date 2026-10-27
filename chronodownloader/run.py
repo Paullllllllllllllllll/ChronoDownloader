@@ -328,8 +328,7 @@ def reselect(
     force: bool,
     clock: Callable[[], float],
 ) -> PlannedWork | None:
-    """Return *planned* as the run takes it now, or None when it no longer
-    fits the selection.
+    """Return *planned* as the run takes it now, or None if it left the selection.
 
     The run loop asks while it takes the work's lease: *row* is the work's
     ``work_status`` row read inside that acquisition (None: not stored). The
@@ -524,8 +523,10 @@ def plan(
     sources: Mapping[str, Source] | None = None,
     now: float | None = None,
 ) -> RunPlan:
-    """Plan a run of *spec* under *settings*; *sources* holds the source of
-    each spec field; *now* (epoch s) dates the deferred works' retry.
+    """Plan a run of *spec* under *settings*.
+
+    *sources* holds the source of each spec field; *now* (epoch s) dates the
+    deferred works' retry.
 
     Raises:
         PlanError: The run cannot be planned.
@@ -821,7 +822,9 @@ def run(
 
 
 def _dry_run(spec: CommandSpec) -> bool:
-    """Return True for a spec with ``--dry-run`` on (``drop`` keeps it at the
-    top level, the others under ``run``)."""
+    """Return True for a spec with ``--dry-run`` on.
+
+    ``drop`` keeps the flag at the top level, the other commands under ``run``.
+    """
     control = getattr(spec, "run", spec)
     return bool(getattr(control, "dry_run", False))

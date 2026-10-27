@@ -45,6 +45,7 @@ class SampledPage:
 
     @property
     def ok(self) -> bool:
+        """Whether the page was fetched."""
         return self.file is not None
 
 

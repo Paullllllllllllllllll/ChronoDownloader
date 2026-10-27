@@ -40,8 +40,10 @@ dead renderings cannot turn one file into hundreds of requests."""
 
 @dataclass(frozen=True)
 class Rendering:
-    """A rendering to download: URL, declared format (lowercase, '' when
-    none) and label."""
+    """A rendering to download: URL, declared format and label.
+
+    The format is lowercase, '' when none is declared.
+    """
 
     url: str
     format: str
@@ -58,8 +60,7 @@ def _entries(obj: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def collect_all_renderings(manifest: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """Return the manifest-level, then the v2 sequence-level ``rendering``
-    entries."""
+    """Return the manifest-level, then the v2 sequence-level ``rendering`` entries."""
     candidates = _entries(manifest)
     sequences = manifest.get("sequences")
     if isinstance(sequences, list):
@@ -70,8 +71,7 @@ def collect_all_renderings(manifest: Mapping[str, Any]) -> list[Mapping[str, Any
 
 
 def _rendering_format(value: Any) -> str:
-    """Return a ``format``/``type`` as a lowercase string; a list gives its
-    first string."""
+    """Return a ``format``/``type`` as a lowercase string; a list gives its first."""
     if isinstance(value, list):
         value = next((v for v in value if isinstance(v, str)), "")
     if not isinstance(value, str):
@@ -86,8 +86,7 @@ def _is_whitelisted(url: str, fmt: str, whitelist: Sequence[str]) -> bool:
 
 
 def _whitelist_rank(url: str, fmt: str, whitelist: Sequence[str]) -> int:
-    """Return the index of the whitelist entry a rendering matches, else the
-    whitelist's length."""
+    """Return the index of the whitelist entry a rendering matches, else its length."""
     if "/" in fmt:
         for index, allowed in enumerate(whitelist):
             if allowed in fmt:

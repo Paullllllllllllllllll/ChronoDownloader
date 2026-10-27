@@ -269,9 +269,9 @@ class JudgeUnavailable(JudgeError):
 
 
 class JudgeRefused(JudgeError):
-    """The endpoint answered with a refusal (invalid key, bad request,
-    spent credit); retrying later without a change does not help.
+    """The endpoint answered with a refusal that a later retry does not change.
 
+    Refusals are an invalid key, a bad request or spent credit.
     ``cause`` and ``status`` are those of the failed request, or of the
     refusals that opened the judge's breaker (``status`` None).
     """
@@ -287,8 +287,11 @@ class MalformedAnswer(JudgeError):
 
 
 def _plain(value: Any) -> Any:
-    """Return *value* as JSON data: mappings as dicts, sequences as lists,
-    anything else (a non-finite number included) as its text."""
+    """Return *value* as JSON data.
+
+    Mappings become dicts and sequences lists; anything else, a non-finite
+    number included, becomes its text.
+    """
     if isinstance(value, float) and not math.isfinite(value):
         return str(value)
     if isinstance(value, str | int | float | bool) or value is None:
@@ -461,8 +464,10 @@ def _payload(data: Any) -> tuple[Mapping[str, Any], str]:
 
 
 def judge_key(settings: Settings, environ: Mapping[str, str] | None = None) -> str:
-    """Return the decision model's key from *environ* (the process environment
-    by default); a planner checks it without building a client.
+    """Return the decision model's key from *environ*.
+
+    *environ* defaults to the process environment; a planner checks the key
+    without building a client.
 
     Raises:
         MissingJudgeKey: The key's environment variable is unset, empty or

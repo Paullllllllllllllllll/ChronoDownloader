@@ -107,8 +107,10 @@ _MAX_TITLE_WORDS = 6
 
 
 def _words(text: str) -> list[str]:
-    """Return the searchable words of *text*: lowercased, stopwords and
-    one- or two-letter words dropped, each once."""
+    """Return the searchable words of *text*, each once.
+
+    Words are lowercased; stopwords and one- or two-letter words are dropped.
+    """
     words = (word.lower() for word in _WORD.findall(text))
     kept = (word for word in words if len(word) > 2 and word not in _STOPWORDS)
     return list(dict.fromkeys(kept))
@@ -388,10 +390,12 @@ class SbbDigital:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities()
 
     def search(
@@ -571,8 +575,10 @@ class SbbDigital:
         return refs
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the ``PPN``-prefixed PPN of a viewer or content URL
-        (``werkansicht?PPN=PPN...``, ``.../dc/PPN.../...``)."""
+        """Return the ``PPN``-prefixed PPN of a viewer or content URL.
+
+        These read ``werkansicht?PPN=PPN...`` and ``.../dc/PPN.../...``.
+        """
         if not on_hosts(url, self.hosts):
             return None
         found = query_value(url, "PPN") or path_match(url, _PPN_PATH)

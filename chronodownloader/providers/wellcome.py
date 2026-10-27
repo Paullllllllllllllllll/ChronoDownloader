@@ -207,10 +207,12 @@ class Wellcome:
 
     @property
     def key(self) -> str:
+        """The provider key."""
         return KEY
 
     @property
     def capabilities(self) -> Capabilities:
+        """What the adapter offers."""
         return Capabilities(iiif=True, image_max_px=IMAGE_MAX_PX)
 
     def search(
@@ -380,8 +382,10 @@ class Wellcome:
         return manifest_page_refs(manifest, first_n=first_n, max_px=size)
 
     def item_id_from_url(self, url: str) -> str | None:
-        """Return the work id of a catalogue page (``/works/<id>``, with
-        ``/items`` after it)."""
+        """Return the work id of a catalogue page (``/works/<id>``).
+
+        The page URL may have ``/items`` after the id.
+        """
         if not on_hosts(url, self.hosts):
             return None
         return path_match(url, _WORK_PATH)

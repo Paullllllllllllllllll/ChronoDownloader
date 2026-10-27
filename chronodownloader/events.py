@@ -95,17 +95,23 @@ class StatusChanged:
 class RunEvents(Protocol):
     """The events a run reports."""
 
-    def work_started(self, event: WorkStarted) -> None: ...
+    def work_started(self, event: WorkStarted) -> None:
+        """Report that the run started a work."""
 
-    def candidate_found(self, event: CandidateFound) -> None: ...
+    def candidate_found(self, event: CandidateFound) -> None:
+        """Report a candidate a search found."""
 
-    def candidate_judged(self, event: CandidateJudged) -> None: ...
+    def candidate_judged(self, event: CandidateJudged) -> None:
+        """Report the decision on a candidate."""
 
-    def downloaded(self, event: Downloaded) -> None: ...
+    def downloaded(self, event: Downloaded) -> None:
+        """Report the files downloaded for a work."""
 
-    def status_changed(self, event: StatusChanged) -> None: ...
+    def status_changed(self, event: StatusChanged) -> None:
+        """Report the status a work reached."""
 
-    def warning(self, message: str) -> None: ...
+    def warning(self, message: str) -> None:
+        """Report a warning."""
 
 
 class NullEvents:

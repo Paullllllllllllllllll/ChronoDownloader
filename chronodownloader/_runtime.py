@@ -47,8 +47,10 @@ logger = logging.getLogger(__name__)
 
 
 class WorkJudge(Protocol):
-    """What the run asks the decision model: one candidate against a work,
-    and the page check over an item's first pages."""
+    """What the run asks the decision model.
+
+    It judges one candidate against a work, and checks an item's first pages.
+    """
 
     def judge_work(self, sought: SearchQuery, candidate: SearchRecord) -> WorkAnswer:
         """Return the model's answer on *candidate*."""

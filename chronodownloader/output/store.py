@@ -879,8 +879,10 @@ def _work_status_row(
 def _dead_holder(
     connection: sqlite3.Connection, entry_id: str, holder: str | None, now: float
 ) -> str | None:
-    """Return the run id holding the work's unexpired lease when that run's
-    process is dead on this host, else None (*holder*: this run, never dead).
+    """Return the run id of the work's lease holder when its process is dead.
+
+    Only an unexpired lease whose holder runs on this host counts; else None.
+    *holder* is this run, which is never dead.
 
     This is the one liveness rule of acquisition and reconciliation: a lease
     is live while it is unexpired and its holder is on another host, or its

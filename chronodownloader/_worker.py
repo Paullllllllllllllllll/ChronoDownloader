@@ -310,9 +310,9 @@ def _scored(
 def _provider_search(
     services: Services, job: MatchJob, key: str, query: SearchQuery
 ) -> list[SearchRecord]:
-    """Return one provider's records; a creator search that finds nothing is
-    repeated without the creator.
+    """Return one provider's records, searching again without the creator.
 
+    A creator search that finds nothing is repeated without the creator.
     Catalogs file a creator under forms the works CSV rarely gives (Gallica
     has "Taillevent" for Guillaume Tirel), so the creator clause can hide every
     copy; the judge still sees the creator in the full query. Both searches
@@ -342,8 +342,12 @@ def _provider_search(
 def _search(
     services: Services, job: MatchJob, query: SearchQuery
 ) -> tuple[list[Scored], list[str], list[str], int]:
-    """Search every provider; return candidates, notes, missing keys and the
-    number of providers whose search failed."""
+    """Search every provider.
+
+    Returns:
+        The candidates, notes, missing keys and the number of providers whose
+        search failed.
+    """
     found: list[Scored] = []
     notes: list[str] = []
     missing: list[str] = []
@@ -567,8 +571,11 @@ class DownloadOutcome:
 
 
 def _open_breakers(services: Services) -> str | None:
-    """Name the open breakers of the coordination database and when each
-    admits a probe again, or None when none is open or it cannot be read."""
+    """Name the open breakers and when each admits a probe again.
+
+    Returns None when no breaker of the coordination database is open or the
+    database cannot be read.
+    """
     try:
         snapshot = read_snapshot(
             services.settings.state_directory(), clock=services.wiring.clock

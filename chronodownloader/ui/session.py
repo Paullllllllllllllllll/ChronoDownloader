@@ -54,8 +54,10 @@ type Resolver = Callable[[Mapping[str, Any], Mapping[str, Any] | None], Resoluti
 
 @dataclass(frozen=True)
 class Session:
-    """The settings of a guided session and the ``--settings`` file they
-    came from (None: the default lookup)."""
+    """The settings of a guided session and the ``--settings`` file they came from.
+
+    The file is None when the settings came from the default lookup.
+    """
 
     settings: Settings
     settings_path: Path | None = None
@@ -136,8 +138,11 @@ class CommandSwitch(Exception):
 
 
 def command_step(current: str, titles: Mapping[str, str]) -> Step:
-    """Return the command step: DONE for *current*, CommandSwitch for another
-    of *titles* (command name to title, in menu order)."""
+    """Return the command step: DONE for *current*, else a CommandSwitch.
+
+    A CommandSwitch names another command of *titles* (command name to title,
+    in menu order).
+    """
 
     def ask(ctx: StepContext) -> Nav:
         answer = ctx.prompter.select(

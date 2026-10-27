@@ -397,8 +397,11 @@ def _with_quota(
 
 
 def run_providers(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> RunResult:
-    """List the providers; a coordination database that cannot be read is
-    reported as a warning, and the breakers then show closed."""
+    """List the providers with their breaker state.
+
+    A coordination database that cannot be read is reported as a warning, and
+    the breakers then show closed.
+    """
     settings = run_plan.settings
     try:
         snapshot = read_snapshot(

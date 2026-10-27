@@ -1,4 +1,4 @@
-"""The cores of ``inspect`` and ``verify``: page samples, page checks, files.
+r"""The cores of ``inspect`` and ``verify``: page samples, page checks, files.
 
 Inspect. ``--entry-ids`` takes the current stored candidates of these works
 in ``--output`` (with ``--providers``, only those of the named providers);
@@ -16,7 +16,7 @@ lists what is left.
 An item named by ``--provider``/``--id`` is checked against every work of
 ``--output`` whose current candidates include it, with its pages in that
 work's scratch folder. When no stored work names it, the pages go to
-:func:`scratch_root` (``%TEMP%\\chronodownloader\\inspect\\<provider>_<id>``)
+:func:`scratch_root` (``%TEMP%\chronodownloader\inspect\<provider>_<id>``)
 and no check is asked (outcome ``sampled``): without a sought work there is
 no question to ask.
 
@@ -274,8 +274,11 @@ def _stored_targets(
 
 
 def _item_targets(spec: InspectSpec, root: Path | None) -> list[InspectTarget]:
-    """Return the item of ``--provider``/``--id`` once per stored work naming
-    it, else once in the temporary scratch folder without a work."""
+    """Return the item of ``--provider``/``--id`` once per stored work naming it.
+
+    When no stored work names it, the item is returned once, in the temporary
+    scratch folder and without a work.
+    """
     assert spec.provider is not None and spec.id is not None
     provider, item_id = spec.provider, spec.id
     targets: list[InspectTarget] = []

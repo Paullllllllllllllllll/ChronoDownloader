@@ -54,9 +54,9 @@ def escape_sru_literal(value: str | None) -> str:
 
 
 def escape_sparql_string(value: str | None) -> str:
-    """Escape *value* for a quoted SPARQL literal.
+    r"""Escape *value* for a quoted SPARQL literal.
 
-    Backslashes, single and double quotes are escaped (``\\'`` and ``\\"``
+    Backslashes, single and double quotes are escaped (``\'`` and ``\"``
     are valid in both quoting styles); newlines, carriage returns and tabs
     become spaces. None gives an empty string.
     """

@@ -1,5 +1,4 @@
-"""Console entry point: dispatch the command; bare ``chronodownloader`` prints
-help.
+"""Console entry point: dispatch the command, or print help when none is given.
 
 Parsing, the import of the command's handler and the command run inside one
 boundary (:func:`chronodownloader.cli.command.guarded`), so an interrupt or
