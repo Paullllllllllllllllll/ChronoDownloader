@@ -1,5 +1,10 @@
 # Changelog
 
+- **v1.1.2** (27 October 2026) -- The cross-process pacing test no longer
+  fails under `pytest -n auto`. Its lower bounds on the arrival gap and span
+  equaled the lateness the coordinator allows and left no budget for connect
+  and accept latency at the test server; both asserts now subtract a 0.05 s
+  `ARRIVAL_SLACK`. No change to the package.
 - **v1.1.1** (27 October 2026) -- Ruff now checks docstrings with its
   pydocstyle rules under the Google convention, outside tests. Every
   docstring opens with a one-line summary, the provider, event-protocol and

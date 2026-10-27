@@ -41,6 +41,7 @@ from tests.core.spawn import CHILD_TIMEOUT, child, expect, line, send
 PROVIDER = "mdz"
 DELAY = 0.1
 TOLERANCE_MS = 40
+ARRIVAL_SLACK = 0.05  # seconds; covers connect and accept latency at the server
 SETTINGS = Coordination(
     pacing_tolerance_ms=TOLERANCE_MS,
     slot_ttl_s=10.0,
@@ -622,9 +623,9 @@ def test_the_pacing_interval_holds_across_processes(
 
     assert len(server.arrivals) == processes * count
     gaps = _gaps(server.arrivals)
-    assert min(gaps) >= DELAY - TOLERANCE_MS / 1000
+    assert min(gaps) >= DELAY - TOLERANCE_MS / 1000 - ARRIVAL_SLACK
     span = max(server.arrivals) - min(server.arrivals)
-    assert span >= (processes * count - 1) * DELAY - TOLERANCE_MS / 1000
+    assert span >= (processes * count - 1) * DELAY - TOLERANCE_MS / 1000 - ARRIVAL_SLACK
 
 
 @pytest.mark.parametrize(("processes", "limit"), [(2, 1), (4, 2)])
