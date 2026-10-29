@@ -1,4 +1,4 @@
-# ChronoDownloader v1.1.2
+# ChronoDownloader v1.1.3
 
 ChronoDownloader finds and downloads digitized historical sources from 17 digital
 libraries. Given a CSV of works, it searches the libraries, has a decision model
@@ -1022,6 +1022,7 @@ chronodownloader/
   output/       store.py (schema, views, leases), paths.py, index.py
   options/      option tables, wizard framework, prompts, settings loader
   process/      exit codes, summary line, heartbeat, interrupt, log setup
+  common/       decision-model dialects and page types, shared with ChronoTranscriber
   cli/          argparse from the option tables, reporter, summary
   ui/           guided wizard, review screen, progress
 ```

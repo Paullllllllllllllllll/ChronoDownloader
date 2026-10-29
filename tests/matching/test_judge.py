@@ -612,7 +612,7 @@ MALFORMED = [
     ),
     pytest.param(
         _json_reply(_malformed({"same_work": {"type": "choice", "choice": "yes"}})),
-        "same_work: expected a noul",
+        "same_work: expected a predicate answer",
         id="noul-type",
     ),
     pytest.param(
@@ -632,14 +632,14 @@ MALFORMED = [
                 }
             )
         ),
-        "probabilities must map the options",
+        "probabilities name unknown values",
         id="unknown-probability",
     ),
     pytest.param(
         _json_reply(
             {"model": "m", "answers": {"match": _work_payload()["answers"]["match"]}}
         ),
-        "same_work: expected a noul",
+        "same_work: no answer",
         id="missing-question",
     ),
 ]

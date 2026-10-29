@@ -1,5 +1,13 @@
 # Changelog
 
+- **v1.1.3** (29 October 2026) -- The decision-model judge builds its
+  questions and reads its answers through the OpenRouter dialect of the
+  decision modules shared with ChronoTranscriber, ChronoMiner and
+  AutoExcerpter, vendored unchanged in `chronodownloader/common/`. The work
+  request keeps its measured state object and the page check its parts, and
+  every recorded jev_eval answer parses as before. A choice answer now needs
+  probabilities that sum to at most 1, a declined question is a malformed
+  answer, and some malformed-answer messages read differently.
 - **v1.1.2** (27 October 2026) -- The cross-process pacing test no longer
   fails under `pytest -n auto`. Its lower bounds on the arrival gap and span
   equaled the lateness the coordinator allows and left no budget for connect

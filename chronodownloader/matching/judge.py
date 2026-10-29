@@ -32,13 +32,19 @@ query has a year), and which kind of page best shows the title
 (:data:`~chronodownloader.matching.answers.PAGE_TYPES`). The caller passes
 the image bytes; the client reads no file and fetches no image.
 
+Dialect. The questions are built and the answers read by the OpenRouter
+dialect of :mod:`chronodownloader.common.decisions`. Only the work request's
+state stays this module's own: it is sent as one JSON object, the shape the
+jev_eval run measured, where the dialect sends a list of parts.
+
 Errors. A missing or unusable key raises :class:`MissingJudgeKey` when the
 client is built; the CLI maps it to exit 2 and names ``--matching fuzzy``.
 A persistent outage (transient failures after the retries, an open breaker,
 a lost slot) raises :class:`JudgeUnavailable` with ``retry_after``; a
 request the endpoint refuses (an invalid key, a bad request, spent credit),
 and an open breaker that refusals opened, raise :class:`JudgeRefused`; an
-answer that does not fit the questions raises :class:`MalformedAnswer`. No
+answer that does not fit the questions, or that declines one, raises
+:class:`MalformedAnswer`. No
 error falls back to text scores. The key travels only in the Authorization
 header and appears in no message (an echo in an answer is masked), log line
 or repr.
@@ -51,18 +57,28 @@ production request itself.
 
 from __future__ import annotations
 
-import base64
-import contextlib
 import html
 import json
 import math
 import os
 import re
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, Final
 
+from chronodownloader.common import decisions
+from chronodownloader.common.decisions import (
+    Choice,
+    ChoiceAnswer,
+    DecisionResult,
+    Image,
+    Json,
+    Predicate,
+    PredicateAnswer,
+    Question,
+    Text,
+)
 from chronodownloader.coord import SlotLost
 from chronodownloader.net import JUDGE, BreakerOpen, Cause, Network, RequestFailed
 from chronodownloader.providers.base import SearchQuery, SearchRecord
@@ -89,6 +105,8 @@ __all__ = [
 
 KEY_SERVICE: Final = "openrouter"
 """The ``api_keys`` service whose environment variable holds the key."""
+
+_DIALECT: Final = "openrouter"
 
 WORK_QUESTIONS: Final[Mapping[str, Any]] = MappingProxyType(
     {
@@ -187,6 +205,21 @@ PAGE_QUESTIONS: Final[Mapping[str, Any]] = MappingProxyType(
 """The page questions: the per-page texts of the jev_eval page run, asked of
 the images together; ``imprint_year_matches`` only when the year is known."""
 
+
+def _questions(texts: Mapping[str, Any]) -> tuple[Question, ...]:
+    """Return *texts* (``noul`` and ``choice`` entries) as dialect questions."""
+    built: list[Question] = []
+    for name, entry in texts.items():
+        if entry["type"] == "noul":
+            built.append(Predicate(name, entry["instructions"]))
+        else:
+            built.append(Choice(name, entry["instructions"], entry["criteria"]))
+    return tuple(built)
+
+
+_WORK: Final = _questions(WORK_QUESTIONS)
+_PAGE: Final = _questions(PAGE_QUESTIONS)
+
 LIBRARY_NAMES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "mdz": "MDZ (Bayerische Staatsbibliothek)",
@@ -226,13 +259,6 @@ _RECORD_KEYS: Final = frozenset({"title", "creators", "creator", "date"})
 _TAG = re.compile(r"</?[a-zA-Z][^>]*>")
 _KEY_SHAPE = re.compile(r"[\x21-\x7e]+")
 """A usable key: visible ASCII only, so no header error can echo it."""
-
-_IMAGE_TYPES: Final = (
-    (b"\xff\xd8\xff", "image/jpeg"),
-    (b"\x89PNG\r\n\x1a\n", "image/png"),
-    (b"GIF87a", "image/gif"),
-    (b"GIF89a", "image/gif"),
-)
 
 
 class JudgeError(Exception):
@@ -368,16 +394,9 @@ def work_request(
         "sought_work": sought_work(query),
         "catalog_record": catalog_record(record),
     }
-    return {"model": model, "state": state, "questions": _plain(WORK_QUESTIONS)}
-
-
-def _image_type(data: bytes, index: int) -> str:
-    for magic, media_type in _IMAGE_TYPES:
-        if data.startswith(magic):
-            return media_type
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    raise ValueError(f"page image {index} is not a JPEG, PNG, GIF or WebP image")
+    body = decisions.request_body(_DIALECT, model, [Json(state)], _WORK)
+    body["state"] = state
+    return body
 
 
 def page_request(
@@ -390,77 +409,39 @@ def page_request(
     """
     if not page_images:
         raise ValueError("the page check needs at least one page image")
+    images = [Image(data) for data in page_images]
+    for index, image in enumerate(images, start=1):
+        try:
+            _ = image.media_type
+        except ValueError:
+            raise ValueError(
+                f"page image {index} is not a JPEG, PNG, GIF or WebP image"
+            ) from None
     text = json.dumps({"sought_work": sought_work(query)}, ensure_ascii=False)
-    state: list[dict[str, Any]] = [{"type": "text", "text": text}]
-    for index, data in enumerate(page_images, start=1):
-        media_type = _image_type(data, index)
-        encoded = base64.b64encode(data).decode("ascii")
-        state.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:{media_type};base64,{encoded}"},
-            }
-        )
-    questions = _plain(PAGE_QUESTIONS)
-    if query.year is None:
-        del questions["imprint_year_matches"]
-    return {"model": model, "state": state, "questions": questions}
+    questions = [
+        question
+        for question in _PAGE
+        if question.name != "imprint_year_matches" or query.year is not None
+    ]
+    return decisions.request_body(_DIALECT, model, [Text(text), *images], questions)
 
 
-def _probability(value: Any, where: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int | float)
-        or not math.isfinite(value)
-        or not 0.0 <= value <= 1.0
-    ):
-        raise MalformedAnswer(f"{where}: expected a probability, got {value!r}")
-    return float(value)
-
-
-def _entry(answers: Mapping[str, Any], key: str, kind: str) -> Mapping[str, Any]:
-    entry = answers.get(key)
-    if not isinstance(entry, Mapping) or entry.get("type") != kind:
-        raise MalformedAnswer(f"{key}: expected a {kind} answer")
-    return entry
-
-
-def _noul(answers: Mapping[str, Any], key: str) -> float:
-    return _probability(_entry(answers, key, "noul").get("noul"), key)
+def _predicate(result: DecisionResult, name: str) -> float:
+    answer = result.answers[name]
+    if not isinstance(answer, PredicateAnswer):
+        raise MalformedAnswer(f"{name}: the model declined the question")
+    return answer.probability
 
 
 def _choice[T: str](
-    answers: Mapping[str, Any], key: str, options: Sequence[T]
+    result: DecisionResult, name: str, options: Sequence[T]
 ) -> tuple[T, dict[str, float], float | None]:
-    """Return the choice, its probabilities and the confidence of *key*."""
-    entry = _entry(answers, key, "choice")
-    choice = next((option for option in options if option == entry.get("choice")), None)
-    if choice is None:
-        raise MalformedAnswer(f"{key}: unknown choice {entry.get('choice')!r}")
-    raw = entry.get("probabilities", {})
-    if not isinstance(raw, Mapping) or not set(raw) <= set(options):
-        raise MalformedAnswer(f"{key}: probabilities must map the options")
-    probabilities = {
-        str(name): _probability(value, f"{key}.{name}") for name, value in raw.items()
-    }
-    confidence = entry.get("confidence")
-    if confidence is not None:
-        confidence = _probability(confidence, f"{key}.confidence")
-    return choice, probabilities, confidence
-
-
-def _payload(data: Any) -> tuple[Mapping[str, Any], str]:
-    """Return the answers and the dated model id of a response body."""
-    if not isinstance(data, Mapping):
-        raise MalformedAnswer("the response is not a JSON object")
-    answers = data.get("answers")
-    if not isinstance(answers, Mapping):
-        error = data.get("error")
-        message = error.get("message") if isinstance(error, Mapping) else None
-        detail = f": {_trim(message, 200)}" if isinstance(message, str) else ""
-        raise MalformedAnswer(f"the response holds no answers{detail}")
-    model = data.get("model")
-    return answers, model if isinstance(model, str) else ""
+    """Return the choice, its probabilities and the confidence of *name*."""
+    answer = result.answers[name]
+    if not isinstance(answer, ChoiceAnswer):
+        raise MalformedAnswer(f"{name}: the model declined the question")
+    choice = next(option for option in options if option == answer.choice)
+    return choice, dict(answer.probabilities), answer.confidence
 
 
 def judge_key(settings: Settings, environ: Mapping[str, str] | None = None) -> str:
@@ -524,18 +505,16 @@ class JudgeClient:
             MalformedAnswer: The answer does not fit the questions.
         """
         model = self._judge.model
-        data = self._post(work_request(model, sought, candidate))
-        with self._masked():
-            answers, dated = _payload(data)
-            relation, probabilities, confidence = _choice(answers, "match", RELATIONS)
-            return WorkAnswer(
-                same_work=_noul(answers, "same_work"),
-                relation=relation,
-                relation_probabilities=probabilities,
-                confidence=confidence,
-                model=dated,
-                requested_model=model,
-            )
+        result = self._parse(self._post(work_request(model, sought, candidate)), _WORK)
+        relation, probabilities, confidence = _choice(result, "match", RELATIONS)
+        return WorkAnswer(
+            same_work=_predicate(result, "same_work"),
+            relation=relation,
+            relation_probabilities=probabilities,
+            confidence=confidence,
+            model=result.model,
+            requested_model=model,
+        )
 
     def judge_pages(
         self, sought: SearchQuery, page_images: Sequence[bytes]
@@ -551,36 +530,35 @@ class JudgeClient:
             MalformedAnswer: The answer does not fit the questions.
         """
         model = self._judge.page_model
-        data = self._post(page_request(model, sought, page_images))
-        with self._masked():
-            answers, dated = _payload(data)
-            kind, probabilities, _ = _choice(answers, "title_page_type", PAGE_TYPES)
-            year = None
-            if sought.year is not None:
-                year = _noul(answers, "imprint_year_matches")
-            return PageAnswer(
-                title_page=_noul(answers, "title_page_of_sought"),
-                imprint_year_matches=year,
-                title_page_type=kind,
-                page_type_probabilities=probabilities,
-                pages=len(page_images),
-                model=dated,
-                requested_model=model,
-            )
+        body = page_request(model, sought, page_images)
+        asked = [q for q in _PAGE if q.name in body["questions"]]
+        result = self._parse(self._post(body), asked)
+        kind, probabilities, _ = _choice(result, "title_page_type", PAGE_TYPES)
+        year = None
+        if sought.year is not None:
+            year = _predicate(result, "imprint_year_matches")
+        return PageAnswer(
+            title_page=_predicate(result, "title_page_of_sought"),
+            imprint_year_matches=year,
+            title_page_type=kind,
+            page_type_probabilities=probabilities,
+            pages=len(page_images),
+            model=result.model,
+            requested_model=model,
+        )
 
-    @contextlib.contextmanager
-    def _masked(self) -> Iterator[None]:
-        """Mask this client's key in a malformed answer's message.
+    def _parse(self, data: Any, questions: Sequence[Question]) -> DecisionResult:
+        """Return the answers of *data*, masking this client's key in an error.
 
         An answer's text is untrusted: an error envelope may echo the key. The
-        exception's own arguments are rewritten, so no copy of the unmasked
-        message stays in its chain.
+        error is raised outside the handler, so no unmasked message stays in
+        its chain.
         """
         try:
-            yield
-        except MalformedAnswer as exc:
-            exc.args = tuple(str(arg).replace(self._key, "***") for arg in exc.args)
-            raise
+            return decisions.parse_response(_DIALECT, data, questions)
+        except decisions.MalformedAnswer as exc:
+            message = str(exc).replace(self._key, "***")
+        raise MalformedAnswer(message)
 
     def _post(self, body: Mapping[str, Any]) -> Any:
         """Send *body* under a judge slot and return the decoded response."""
