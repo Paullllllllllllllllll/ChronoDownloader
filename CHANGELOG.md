@@ -1,5 +1,9 @@
 # Changelog
 
+- **v1.1.4** (29 October 2026) -- The security floor of urllib3, the
+  transitive dependency of requests, is raised from 2.7 to 2.8, the first
+  release outside the ranges of the current urllib3 advisories. The lock
+  already held 2.8.0.
 - **v1.1.3** (29 October 2026) -- The decision-model judge builds its
   questions and reads its answers through the OpenRouter dialect of the
   decision modules shared with ChronoTranscriber, ChronoMiner and

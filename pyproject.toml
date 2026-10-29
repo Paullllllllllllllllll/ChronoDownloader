@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chronodownloader"
-version = "1.1.3"
+version = "1.1.4"
 description = "Discover and download digitized historical sources from 17 digital libraries"
 readme = "README.md"
 license = "MIT"
@@ -15,7 +15,7 @@ authors = [
 dependencies = [
     # HTTP and parsing
     "requests>=2.34.2",
-    "urllib3>=2.7",  # security floor for the transitive dependency of requests
+    "urllib3>=2.8",  # security floor for the transitive dependency of requests
     "beautifulsoup4>=4.15",
     # Browser-fingerprint impersonation for providers behind Cloudflare
     # (Gallica, BNE), used where a provider sets network.impersonate
