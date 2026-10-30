@@ -44,11 +44,13 @@ from chronodownloader.output.store import (
     Store,
     StoreBusyError,
     StoreError,
+    TitlePageReading,
     UnreadableDatabaseError,
     VersionlessDatabaseError,
     WorkInput,
     read_page_labels,
     read_title_page_picks,
+    read_title_page_readings,
     read_work_candidates,
     read_work_status,
     unstored_folders,
@@ -157,7 +159,7 @@ def _staging_root(root: Path, entry_id: str) -> Path:
 # Opening and schema
 
 
-def test_opening_creates_schema_version_two_with_the_read_views(
+def test_opening_creates_schema_version_three_with_the_read_views(
     opened: Callable[..., Store], root: Path
 ) -> None:
     store = opened()
@@ -169,6 +171,7 @@ def test_opening_creates_schema_version_two_with_the_read_views(
         "meta",
         "page_labels",
         "runs",
+        "title_pages",
         "works",
     ]
     views = sqlite_module.read(
@@ -180,7 +183,12 @@ def test_opening_creates_schema_version_two_with_the_read_views(
             )
         ],
     )
-    assert views == ["title_page_picks", "work_candidates", "work_status"]
+    assert views == [
+        "title_page_picks",
+        "title_page_readings",
+        "work_candidates",
+        "work_status",
+    ]
     assert sqlite_module.read_rows(store.path, "meta") == [
         {"key": "schema_version", "value": str(SCHEMA_VERSION)}
     ]
@@ -195,11 +203,11 @@ def test_a_newer_database_is_refused_and_left_as_it_is(
 ) -> None:
     opened().close()
     with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
-        connection.execute("UPDATE meta SET value = '3'")
+        connection.execute("UPDATE meta SET value = '4'")
         connection.commit()
     before = (root / DATABASE_NAME).read_bytes()
 
-    with pytest.raises(NewerSchemaError, match="version 3") as raised:
+    with pytest.raises(NewerSchemaError, match="version 4") as raised:
         Store(root, clock=clock)
     assert raised.value.exit_code == ExitCode.USAGE == 2
     assert (root / DATABASE_NAME).read_bytes() == before
@@ -1322,53 +1330,58 @@ def _pick(root: Path, entry_id: str = "e1") -> dict[str, Any]:
     return row
 
 
-def test_a_version_one_store_is_migrated_in_place(root: Path, clock: FakeClock) -> None:
+def _older_store(root: Path, version: int, lease_until: float | None = None) -> None:
+    """Write a store of schema *version* with work e1, leased until *lease_until*."""
     root.mkdir()
+    statements = [*store_module._SCHEMA_V1]
+    for step in range(2, version + 1):
+        statements += store_module._MIGRATIONS[step]
     with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
-        for statement in store_module._SCHEMA_V1:
+        for statement in statements:
             connection.execute(statement)
-        connection.execute("INSERT INTO meta VALUES ('schema_version', '1')")
-        connection.execute(
-            "INSERT INTO works (entry_id, title, folder, created_at, updated_at) "
-            "VALUES ('e1', 'Kochbuch', 'e1_kochbuch', 't', 't')"
-        )
-        connection.commit()
-
-    assert read_page_labels(root, "e1") == []
-    assert read_title_page_picks(root) == []
-    with Store(root, clock=clock, reconcile=False, migrate=False):
-        assert store_module.check_schema(root / DATABASE_NAME) == 1
-    with Store(root, clock=clock) as store:
-        assert store_module.check_schema(store.path) == SCHEMA_VERSION == 2
-        assert "page_labels" in sqlite_module.table_names(store.path)
-        assert [row["entry_id"] for row in read_work_status(root)] == ["e1"]
-        assert store.page_labels("e1") == []
-
-
-def test_a_version_one_store_under_an_older_runs_lease_is_not_migrated(
-    root: Path, clock: FakeClock
-) -> None:
-    root.mkdir()
-    with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
-        for statement in store_module._SCHEMA_V1:
-            connection.execute(statement)
-        connection.execute("INSERT INTO meta VALUES ('schema_version', '1')")
+        connection.execute("INSERT INTO meta VALUES ('schema_version', ?)", (version,))
         connection.execute(
             "INSERT INTO works (entry_id, title, folder, lease_holder, "
             "lease_expires_at, created_at, updated_at) "
-            "VALUES ('e1', 'Kochbuch', 'e1_kochbuch', 'old-run', ?, 't', 't')",
-            (clock() + 60,),
+            "VALUES ('e1', 'Kochbuch', 'e1_kochbuch', ?, ?, 't', 't')",
+            (None if lease_until is None else "old-run", lease_until),
         )
         connection.commit()
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_an_older_store_is_migrated_in_place(
+    root: Path, clock: FakeClock, version: int
+) -> None:
+    _older_store(root, version)
+
+    assert read_title_page_readings(root) == []
+    if version == 1:
+        assert (read_page_labels(root, "e1"), read_title_page_picks(root)) == ([], [])
+    with Store(root, clock=clock, reconcile=False, migrate=False):
+        assert store_module.check_schema(root / DATABASE_NAME) == version
+    with Store(root, clock=clock) as store:
+        assert store_module.check_schema(store.path) == SCHEMA_VERSION == 3
+        tables = sqlite_module.table_names(store.path)
+        assert {"page_labels", "title_pages"} <= set(tables)
+        assert [row["entry_id"] for row in read_work_status(root)] == ["e1"]
+        assert (store.page_labels("e1"), store.title_page("e1")) == ([], None)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_an_older_store_under_an_older_runs_lease_is_not_migrated(
+    root: Path, clock: FakeClock, version: int
+) -> None:
+    _older_store(root, version, lease_until=clock() + 60)
 
     with pytest.raises(StoreBusyError, match="older chronodownloader") as raised:
         Store(root, clock=clock)
     assert raised.value.exit_code == ExitCode.USAGE
-    assert store_module.check_schema(root / DATABASE_NAME) == 1
+    assert store_module.check_schema(root / DATABASE_NAME) == version
 
     clock.advance(61)
     with Store(root, clock=clock) as store:
-        assert store_module.check_schema(store.path) == 2
+        assert store_module.check_schema(store.path) == 3
 
 
 def test_a_label_lands_only_while_its_file_keeps_the_attempt(
@@ -1412,6 +1425,86 @@ def test_replacing_removing_missing_and_dropped_files_lose_their_labels(
     assert [label.path for label in store.page_labels("e1")] == ["objects/p00004.jpg"]
     store.drop(["e1"])
     assert store.page_labels("e1") == []
+
+
+def _reading(
+    file: FileRow, index: int = 0, title: str = "Kochbuch"
+) -> TitlePageReading:
+    return TitlePageReading(
+        file.path,
+        file.attempt_id,
+        index,
+        True,
+        title,
+        "Nürnberg",
+        1691,
+        "M DC XCI",
+        "anthropic/claude-haiku-5.5",
+        "v1",
+    )
+
+
+def _read_title(store: Store, lease: Lease) -> FileRow:
+    """Label two pages (the first a title page) and store a reading of it."""
+    _labelled(store, lease, [0.9, 0.1])
+    first = min(store.files(lease.entry_id), key=lambda row: row.item)
+    assert store.record_title_page(lease, _reading(first))
+    return first
+
+
+@pytest.mark.parametrize("how", ["replace", "remove", "missing", "drop"])
+def test_a_reading_goes_with_its_file(
+    opened: Callable[..., Store], root: Path, how: str
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    first = _read_title(store, lease)
+    if how == "replace":
+        store.commit_download(lease, *_stage(store, lease, {"p00001": b"again"}))
+    elif how == "remove":
+        store.remove_files(lease, [first.path])
+    store.release(lease)
+    if how == "missing":
+        (root / folder_of("e1") / first.path).unlink()
+        opened()
+    elif how == "drop":
+        store.drop(["e1"])
+
+    assert store.title_page("e1") is None
+
+
+def test_the_readings_view_shows_only_a_reading_of_the_current_pick(
+    opened: Callable[..., Store], root: Path
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    first = _read_title(store, lease)
+    (row,) = read_title_page_readings(root)
+    assert (row["path"], row["page_index"], row["title"]) == (first.path, 0, "Kochbuch")
+    assert (row["is_title_page"], row["year"], row["place"]) == (1, 1691, "Nürnberg")
+    stale = replace(_reading(first), attempt_id=first.attempt_id + 1)
+    assert not store.record_title_page(lease, stale)
+
+    second = max(store.files("e1"), key=lambda file: file.item)
+    store.record_page_labels(lease, [_label(second, 1, 0.95)])
+    assert read_title_page_readings(root) == []
+    store.record_page_labels(lease, [_label(second, 1, 0.05)])
+    assert len(read_title_page_readings(root)) == 1
+
+    # A process of an older version replaces the file without the reading.
+    with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
+        connection.execute(
+            "UPDATE files SET attempt_id = attempt_id + 100 WHERE path = ?",
+            (first.path,),
+        )
+        connection.execute(
+            "UPDATE page_labels SET attempt_id = attempt_id + 100 WHERE path = ?",
+            (first.path,),
+        )
+        connection.commit()
+    assert _pick(root)["path"] == first.path
+    assert read_title_page_readings(root) == []
+    assert store.title_page("e1") is not None
 
 
 @pytest.mark.parametrize(

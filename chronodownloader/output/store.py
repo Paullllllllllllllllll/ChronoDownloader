@@ -3,12 +3,13 @@
 The store is the only status record of an output root. It holds the runs, the
 works with their input fields and status, the candidates found for each work
 with their scores and judgments, every download attempt with its completeness,
-the files each work's folder holds and the page type of each page image.
-External readers use the views ``work_status``, ``work_candidates`` and
-``title_page_picks`` (the read contract); the tables behind them may change in
-a later schema version.
+the files each work's folder holds, the page type of each page image and a
+chat model's reading of each work's title page. External readers use the views
+``work_status``, ``work_candidates``, ``title_page_picks`` and
+``title_page_readings`` (the read contract); the tables behind them may change
+in a later schema version.
 
-Schema (version 2, ``meta.schema_version``)::
+Schema (version 3, ``meta.schema_version``)::
 
     meta       (key TEXT PRIMARY KEY, value TEXT)  -- schema_version,
                                                    -- generation_floor
@@ -48,6 +49,10 @@ Schema (version 2, ``meta.schema_version``)::
                 model, dialect, fingerprint,  -- of the decision request
                 run_id -> runs, created_at,
                 PRIMARY KEY (entry_id, path))  -- version 2
+    title_pages (entry_id TEXT PRIMARY KEY, path, attempt_id, page_index,
+                is_title_page (0|1), title, place, year INTEGER,
+                year_as_printed,              -- the model's reading
+                model, prompt_version, run_id -> runs, created_at)  -- version 3
 
     work_status     one row per work: the works columns, ``status``
                     (``blocked`` while a run holds an unexpired lease by the
@@ -77,6 +82,15 @@ Schema (version 2, ``meta.schema_version``)::
                     ``pages_labelled`` below ``pages_leading`` marks a
                     leading page missing on disk or not yet classified, not
                     a work without a title page.
+    title_page_readings one row per work whose stored reading is current:
+                    its ``path`` is the work's pick in ``title_page_picks``
+                    and its ``attempt_id`` that files row's. ``entry_id``,
+                    ``path``, ``page_index``, ``is_title_page`` (the
+                    model's own check, 0 or 1), ``title``, ``place``,
+                    ``year``, ``year_as_printed``, ``model``,
+                    ``created_at``. Every field from ``is_title_page`` to
+                    ``year_as_printed`` is a chat model's reading of the
+                    page image, not catalog data.
 
 Page index. A page's ``page_index`` is its position in the source: item
 ``pNNNNN`` is page NNNNN - 1, so a partial download keeps the gaps of the
@@ -91,8 +105,9 @@ transaction. :meth:`Store.record_page_labels` inserts a label only while the
 row still carries the attempt the label was asked for. A label of a row an
 older process replaced stays in the table but is stale, so no reader takes it
 for current. The table has no foreign keys to ``works``, ``attempts`` or
-``files``, so that a version 1 process still open on a migrated store can
-delete those rows.
+``files``, so that an older process still open on a migrated store can
+delete those rows. A title-page reading (``title_pages``) follows the same
+rules, through :meth:`Store.record_title_page`.
 
 Times are ISO 8601 UTC text (``2026-10-23T12:00:00.000Z``) except
 ``retry_after`` and ``lease_expires_at``, which are epoch seconds from the
@@ -111,12 +126,12 @@ masked; error texts are cut to :data:`ERROR_TEXT_LIMIT` characters.
 Opening. A database with tables but no schema version, one with a newer
 version and one SQLite cannot read raise a :class:`StoreError` (exit code
 2) and are left as they are; only a missing or empty database is created. A
-version 1 store is migrated in place, in the opening's write transaction: the
-version 2 table and view are created and ``meta.schema_version`` becomes 2.
-While a work of it is under an unexpired lease, which only a version 1
-process can hold, the opening refuses with :class:`StoreBusyError` and
-migrates nothing.
-The read-only functions read a version 1 store as one without page labels.
+version 1 or 2 store is migrated in place, in the opening's write
+transaction: the tables and views of the later versions are created and
+``meta.schema_version`` becomes 3. While a work of it is under an unexpired
+lease, which only a process of the older version can hold, the opening
+refuses with :class:`StoreBusyError` and migrates nothing. The read-only
+functions read an older store as one without the later tables' rows.
 
 Writers and leases. Every write is one short ``BEGIN IMMEDIATE`` transaction
 through :func:`chronodownloader.sqlite.transact` (rollback journal, bounded
@@ -250,6 +265,7 @@ __all__ = [
     "StoreBusyError",
     "StoreError",
     "StoredStatus",
+    "TitlePageReading",
     "UnreadableDatabaseError",
     "VersionlessDatabaseError",
     "WorkInput",
@@ -260,6 +276,7 @@ __all__ = [
     "read_files",
     "read_page_labels",
     "read_title_page_picks",
+    "read_title_page_readings",
     "read_work_candidates",
     "read_work_status",
     "unstored_folders",
@@ -270,7 +287,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 DATABASE_NAME: Final = "chronodownloader.sqlite"
-SCHEMA_VERSION: Final = 2
+SCHEMA_VERSION: Final = 3
 PICK_THRESHOLD: Final = 0.5
 PICK_SEARCH: Final = 10
 """The ``title_page_picks`` rule; equal to ``page_types.TITLE_PAGE_THRESHOLD``
@@ -535,6 +552,40 @@ WHERE position = 1""",
 )
 """The tables and views version 2 adds; a version 1 store is migrated by them."""
 
+_SCHEMA_V3: Final = (
+    """CREATE TABLE title_pages (
+    entry_id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    page_index INTEGER NOT NULL CHECK (page_index >= 0),
+    is_title_page INTEGER NOT NULL CHECK (is_title_page IN (0, 1)),
+    title TEXT,
+    place TEXT,
+    year INTEGER,
+    year_as_printed TEXT,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES runs (run_id),
+    created_at TEXT NOT NULL
+)""",
+    """CREATE VIEW title_page_readings AS
+SELECT
+    t.entry_id, t.path, p.page_index, t.is_title_page, t.title, t.place,
+    t.year, t.year_as_printed, t.model, t.created_at
+FROM title_pages AS t
+JOIN title_page_picks AS p ON p.entry_id = t.entry_id AND p.path = t.path
+JOIN files AS f
+    ON f.entry_id = t.entry_id AND f.path = t.path
+    AND f.attempt_id = t.attempt_id""",
+)
+"""The table and view version 3 adds."""
+
+_MIGRATIONS: Final = {2: _SCHEMA_V2, 3: _SCHEMA_V3}
+"""The statements that bring a store to each version from the one before."""
+
+_PATH_TABLES: Final = ("page_labels", "title_pages")
+"""The tables whose rows go with the ``files`` row of their path."""
+
 _GENERATION_FLOOR = (
     "COALESCE((SELECT CAST(value AS INTEGER) FROM meta "
     "WHERE key = 'generation_floor'), 0)"
@@ -631,6 +682,26 @@ ON CONFLICT (entry_id, path) DO UPDATE SET
     created_at = excluded.created_at
 """
 """Lands only while the files row still carries the label's attempt."""
+_UPSERT_READING = """
+INSERT INTO title_pages (
+    entry_id, path, attempt_id, page_index, is_title_page, title, place, year,
+    year_as_printed, model, prompt_version, run_id, created_at
+)
+SELECT :entry_id, :path, :attempt_id, :page_index, :is_title_page, :title,
+    :place, :year, :year_as_printed, :model, :prompt_version, :run_id, :stamp
+WHERE EXISTS (
+    SELECT 1 FROM files WHERE entry_id = :entry_id AND path = :path
+    AND attempt_id = :attempt_id AND kind = 'image'
+)
+ON CONFLICT (entry_id) DO UPDATE SET
+    path = excluded.path, attempt_id = excluded.attempt_id,
+    page_index = excluded.page_index, is_title_page = excluded.is_title_page,
+    title = excluded.title, place = excluded.place, year = excluded.year,
+    year_as_printed = excluded.year_as_printed, model = excluded.model,
+    prompt_version = excluded.prompt_version, run_id = excluded.run_id,
+    created_at = excluded.created_at
+"""
+"""Lands only while the files row still carries the reading's attempt."""
 
 
 # Errors
@@ -647,7 +718,7 @@ class NewerSchemaError(StoreError):
 
 
 class StoreBusyError(StoreError):
-    """A version 1 store awaits migration while an older run holds works."""
+    """An older store awaits migration while an older run holds works."""
 
 
 class VersionlessDatabaseError(StoreError):
@@ -848,6 +919,30 @@ class PageLabel:
 
 
 @dataclass(frozen=True)
+class TitlePageReading:
+    """A chat model's reading of a work's picked title page.
+
+    Every field from *is_title_page* to *year_as_printed* is the model's
+    reading of the page image, not catalog data; *path* and *attempt_id*
+    key it to the ``files`` row read. A reading read back carries *run_id*
+    and *created_at*.
+    """
+
+    path: str
+    attempt_id: int
+    page_index: int
+    is_title_page: bool
+    title: str | None
+    place: str | None
+    year: int | None
+    year_as_printed: str | None
+    model: str
+    prompt_version: str
+    run_id: str | None = None
+    created_at: str | None = None
+
+
+@dataclass(frozen=True)
 class Reconciliation:
     """What :meth:`Store.reconcile` repaired.
 
@@ -1028,14 +1123,14 @@ def check_schema(
 def _initialize(
     connection: sqlite3.Connection, path: Path, now: float, *, migrate: bool = True
 ) -> None:
-    """Create a missing schema or migrate a version 1 store, in one transaction.
+    """Create a missing schema or migrate an older store, in one transaction.
 
-    Without *migrate* an existing store stays at its version. A version 1
-    store is not migrated while a work's lease is unexpired at *now*: only a
-    version 1 process can hold it, and it keeps writing as version 1.
+    Without *migrate* an existing store stays at its version. An older store
+    is not migrated while a work's lease is unexpired at *now*: only a
+    process of that older version can hold it, and it keeps writing as such.
 
     Raises:
-        StoreBusyError: A version 1 store has a work under an unexpired lease.
+        StoreBusyError: An older store has a work under an unexpired lease.
     """
     version = _schema_version(connection, path)
     if version == SCHEMA_VERSION or (version is not None and not migrate):
@@ -1057,8 +1152,9 @@ def _initialize(
         connection.execute(
             "INSERT INTO meta (key, value) VALUES ('schema_version', '1')"
         )
-    for statement in _SCHEMA_V2:
-        connection.execute(statement)
+    for step in range((version or 1) + 1, SCHEMA_VERSION + 1):
+        for statement in _MIGRATIONS[step]:
+            connection.execute(statement)
     connection.execute(
         "UPDATE meta SET value = ? WHERE key = 'schema_version'",
         (str(SCHEMA_VERSION),),
@@ -1755,6 +1851,55 @@ class Store:
 
         return self._leased(lease, write)
 
+    def record_title_page(self, lease: Lease, reading: TitlePageReading) -> bool:
+        """Store the work's title-page reading, replacing its earlier one.
+
+        The reading lands only while its path's ``files`` row is a page image
+        that still carries its ``attempt_id``; returns whether it landed.
+
+        Raises:
+            LeaseLostError: The lease expired or passed to another holder;
+                nothing was written.
+        """
+        run_id = self._require_run()
+
+        def write(connection: sqlite3.Connection) -> bool:
+            cursor = connection.execute(
+                _UPSERT_READING,
+                {
+                    "entry_id": lease.entry_id,
+                    "path": reading.path,
+                    "attempt_id": reading.attempt_id,
+                    "page_index": reading.page_index,
+                    "is_title_page": int(reading.is_title_page),
+                    "title": reading.title,
+                    "place": reading.place,
+                    "year": reading.year,
+                    "year_as_printed": reading.year_as_printed,
+                    "model": reading.model,
+                    "prompt_version": reading.prompt_version,
+                    "run_id": run_id,
+                    "stamp": _iso(self.clock()),
+                },
+            )
+            return cursor.rowcount > 0
+
+        return self._leased(lease, write)
+
+    def drop_title_page(self, lease: Lease) -> int:
+        """Delete the work's title-page reading; return how many rows went.
+
+        Raises:
+            LeaseLostError: The lease expired or passed to another holder.
+        """
+
+        def write(connection: sqlite3.Connection) -> int:
+            return connection.execute(
+                "DELETE FROM title_pages WHERE entry_id = ?", (lease.entry_id,)
+            ).rowcount
+
+        return self._leased(lease, write)
+
     def remove_files(self, lease: Lease, paths: Sequence[str]) -> tuple[str, ...]:
         """Delete recorded files of the work and their rows; return the paths.
 
@@ -1779,10 +1924,7 @@ class Store:
                 )
                 if cursor.rowcount:
                     removed.append(path)
-            connection.executemany(
-                "DELETE FROM page_labels WHERE entry_id = ? AND path = ?",
-                [(lease.entry_id, path) for path in removed],
-            )
+            _delete_path_rows(connection, lease.entry_id, removed)
             for path in removed:
                 (work_dir / _promotion.final_path(path)).unlink(missing_ok=True)
             return tuple(removed)
@@ -1855,10 +1997,7 @@ class Store:
                 _INSERT_ATTEMPT, {**attempt, "finished_at": stamp}
             )
             attempt_id = int(cursor.lastrowid or 0)
-            connection.executemany(
-                "DELETE FROM page_labels WHERE entry_id = ? AND path = ?",
-                [(lease.entry_id, move.final) for move in moves],
-            )
+            _delete_path_rows(connection, lease.entry_id, [m.final for m in moves])
             connection.executemany(
                 _UPSERT_FILE,
                 [
@@ -2011,11 +2150,11 @@ class Store:
             )
             if not (work_dir / str(row[0])).is_file()
         ]
-        for table in ("page_labels", "files"):
-            connection.executemany(
-                f"DELETE FROM {table} WHERE entry_id = ? AND path = ?",  # noqa: S608
-                [(entry_id, path) for path in missing],
-            )
+        _delete_path_rows(connection, entry_id, missing)
+        connection.executemany(
+            "DELETE FROM files WHERE entry_id = ? AND path = ?",
+            [(entry_id, path) for path in missing],
+        )
         if missing and status == "complete":
             connection.execute(
                 "UPDATE works SET status = 'partial', status_reason = ?, "
@@ -2178,6 +2317,18 @@ class Store:
         rows = self._query(_LABELS, (entry_id,))
         return [_page_label(row) for row in rows]
 
+    def title_page(self, entry_id: str) -> TitlePageReading | None:
+        """Return the work's stored title-page reading, current or not."""
+        rows = self._query(_READING, (entry_id,))
+        return _reading(rows[0]) if rows else None
+
+    def title_page_pick(self, entry_id: str) -> dict[str, Any] | None:
+        """Return the work's ``title_page_picks`` row, or None without images."""
+        rows = self._query(
+            "SELECT * FROM title_page_picks WHERE entry_id = ?", (entry_id,)
+        )
+        return dict(rows[0]) if rows else None
+
     def present_items(self, entry_id: str) -> frozenset[str]:
         """Return the page and rendering items the work's files hold."""
         rows = self._query(
@@ -2185,6 +2336,17 @@ class Store:
             (entry_id,),
         )
         return frozenset(str(row["item"]) for row in rows)
+
+
+def _delete_path_rows(
+    connection: sqlite3.Connection, entry_id: str, paths: Sequence[str]
+) -> None:
+    """Delete the page labels and title-page readings of the work's *paths*."""
+    for table in _PATH_TABLES:
+        connection.executemany(
+            f"DELETE FROM {table} WHERE entry_id = ? AND path = ?",  # noqa: S608
+            [(entry_id, path) for path in paths],
+        )
 
 
 type _Doomed = tuple[str, Path, list[Path]]
@@ -2208,7 +2370,7 @@ def _delete_works(connection: sqlite3.Connection, entry_ids: Sequence[str]) -> N
     connection.execute(
         f"UPDATE works SET selected_candidate = NULL WHERE {selected}", ids
     )
-    for table in ("page_labels", "files", "attempts", "candidates", "works"):
+    for table in (*_PATH_TABLES, "files", "attempts", "candidates", "works"):
         connection.execute(f"DELETE FROM {table} WHERE {selected}", ids)  # noqa: S608
 
 
@@ -2322,6 +2484,19 @@ def _page_label(row: Mapping[str, Any]) -> PageLabel:
     values = dict(row)
     values["probabilities"] = MappingProxyType(json.loads(values["probabilities"]))
     return PageLabel(**values)
+
+
+_READING = (
+    "SELECT path, attempt_id, page_index, is_title_page, title, place, year, "
+    "year_as_printed, model, prompt_version, run_id, created_at "
+    "FROM title_pages WHERE entry_id = ?"
+)
+
+
+def _reading(row: Mapping[str, Any]) -> TitlePageReading:
+    values = dict(row)
+    values["is_title_page"] = bool(values["is_title_page"])
+    return TitlePageReading(**values)
 
 
 # Read-only access for other processes and commands
@@ -2473,6 +2648,27 @@ def read_title_page_picks(
         sql += " WHERE entry_id IN (SELECT value FROM json_each(?))"
         params = (json.dumps(list(entry_ids)),)
     return _read_view(root, sql + " ORDER BY entry_id", params, busy_timeout, since=2)
+
+
+def read_title_page_readings(
+    root: Path,
+    entry_ids: Sequence[str] | None = None,
+    *,
+    busy_timeout: float = DEFAULT_BUSY_TIMEOUT,
+) -> list[dict[str, Any]]:
+    """Return the ``title_page_readings`` rows of *root* by entry id, never writing.
+
+    *entry_ids* limits the rows; a store older than version 3 gives none.
+
+    Raises:
+        StoreError: The database is versionless, newer or unreadable.
+    """
+    sql = "SELECT * FROM title_page_readings"
+    params: tuple[str, ...] = ()
+    if entry_ids is not None:
+        sql += " WHERE entry_id IN (SELECT value FROM json_each(?))"
+        params = (json.dumps(list(entry_ids)),)
+    return _read_view(root, sql + " ORDER BY entry_id", params, busy_timeout, since=3)
 
 
 def unstored_folders(

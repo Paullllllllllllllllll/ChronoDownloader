@@ -29,6 +29,7 @@ from chronodownloader.settings import (
     PerWorkLimits,
     Settings,
     SettingsError,
+    TitlePages,
     TotalLimits,
     load,
     provider_key,
@@ -126,6 +127,9 @@ def test_every_block_parses(settings_paths: Path) -> None:
         "decisions:\n  model: gpt-6-luna-decisions\n  provider: openai\n"
         "  endpoint: https://proxy.example/v1/decisions\n  image_max_px: 512\n"
         "  pages_per_request: 10\n  profile: culinary\n  timeout_s: 30\n"
+        "title_pages:\n  model: google/gemini-4-flash\n"
+        "  endpoint: https://proxy.example/chat\n  image_max_px: 1200\n"
+        "  effort: minimal\n  timeout_s: 60\n"
         "coordination:\n  default_slots: 3\n  slot_ttl_s: 90\n"
         "providers:\n"
         "  google_books:\n    prefer: epub\n    max_files: 1000\n"
@@ -157,6 +161,13 @@ def test_every_block_parses(settings_paths: Path) -> None:
         timeout_s=30.0,
     )
     assert value.api_key_env("openai") == "OPENAI_API_KEY"
+    assert value.title_pages == TitlePages(
+        model="google/gemini-4-flash",
+        endpoint="https://proxy.example/chat",
+        image_max_px=1200,
+        effort="minimal",
+        timeout_s=60.0,
+    )
     assert value.coordination == Coordination(default_slots=3, slot_ttl_s=90.0)
     books = value.providers["google_books"]
     assert isinstance(books, GoogleBooksSettings)
@@ -213,6 +224,12 @@ def test_an_explicit_null_switches_a_text_threshold_off(
     thresholds = value.judge.thresholds
     assert (thresholds.text_accept, thresholds.text_prefilter) == (115.0, None)
     assert thresholds.text_reject == JudgeThresholds().text_reject
+
+
+def test_a_null_title_model_turns_the_reading_off(settings_paths: Path) -> None:
+    value = _load_text(settings_paths, "title_pages:\n  model: null\n")
+    assert value.title_pages == TitlePages(model=None)
+    assert _load_text(settings_paths, "title_pages: {}\n").title_pages == TitlePages()
 
 
 def test_code_profile_values_fill_unset_network_keys() -> None:
@@ -291,6 +308,7 @@ def test_a_missing_settings_flag_file_is_an_error(settings_paths: Path) -> None:
         "api_keys:\n  anthropic: ANTHROPIC_API_KEY\n",
         "judge:\n  temperature: 0\n",
         "decisions:\n  thresholds: {}\n",
+        "title_pages:\n  author: true\n",
         "judge:\n  thresholds:\n    min_title_score: 35\n",
         "judge:\n  network:\n    headers: {}\n",
         "coordination:\n  slots: 2\n",
@@ -328,6 +346,10 @@ def test_unknown_keys_at_every_level_are_errors(
         "decisions:\n  profile: legal\n",
         "decisions:\n  pages_per_request: 401\n",
         "decisions:\n  image_max_px: 0\n",
+        "title_pages:\n  model: ''\n",
+        "title_pages:\n  endpoint: ''\n",
+        "title_pages:\n  effort: extreme\n",
+        "title_pages:\n  image_max_px: 0\n",
         "coordination:\n  default_slots: two\n",
         "coordination:\n  pacing_tolerance_ms: 2.5\n",
         "providers:\n  mdz: 3\n",

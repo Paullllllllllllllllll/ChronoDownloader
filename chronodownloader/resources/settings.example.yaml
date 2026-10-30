@@ -51,6 +51,16 @@ decisions:
   profile: general          # page types: general | culinary
   timeout_s: 120            # request timeout
 
+# Chat model that transcribes each work's picked title page (classify, through
+# OpenRouter with api_keys.openrouter); its readings are model output, not
+# catalog data.
+title_pages:
+  model: anthropic/claude-haiku-5.5  # null turns the transcription off
+  endpoint: https://openrouter.ai/api/v1/chat/completions
+  image_max_px: 1500        # longer side of the page sent
+  effort: low               # reasoning effort: minimal | low | medium | high
+  timeout_s: 120            # request timeout
+
 # Machine-wide coordination of providers and the judge across agents; the
 # database is <state_dir>/coordination.sqlite.
 coordination:

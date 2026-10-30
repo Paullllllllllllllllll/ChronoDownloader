@@ -1,4 +1,4 @@
-# ChronoDownloader v1.2.0
+# ChronoDownloader v1.3.0
 
 ChronoDownloader finds and downloads digitized historical sources from 17 digital
 libraries. Given a CSV of works, it searches the libraries, has a decision model
@@ -305,6 +305,22 @@ only is skipped. The view `title_page_picks` names each work's title page from
 the labels, and the summary carries the requests' token usage. `classify` never
 changes a status.
 
+Once a work's leading pages are all labelled and the view picks a title page, a
+chat model reads that page (`title_pages.model`, by default
+`anthropic/claude-haiku-5.5` through OpenRouter's chat endpoint with
+`OPENROUTER_API_KEY`), sent alone at `title_pages.image_max_px` (1,500 pixels) on
+the longer side. It answers in a fixed JSON schema: whether the page is the
+book's title page, the title as printed, the place, the year as an integer and
+the date as printed; author and printer are not asked. The reading is stored in
+`title_pages` and shown through the view `title_page_readings`, which holds only
+the reading of the current pick and file. Every field there is a model reading,
+not catalog data. A rerun reads a page again only when the pick, its file, the
+model or the prompt version changed, or under `--force`; a work whose pick is
+gone loses its reading. A reading that fails or does not fit the schema fails the
+work, and an outage defers it. `title_pages.model: null` turns the step off. This
+route has not yet been measured through OpenRouter; the measured run sent the
+same prompt to the Anthropic API.
+
 ### status
 
 | Flag | Description | Default | In `defaults:` |
@@ -387,7 +403,7 @@ where nothing ran.
 | `search` | `items_accepted` |
 | `inspect` | `pages_sampled` |
 | `verify` | `files_checked`, `files_missing`, `files_mismatched`, `pages_checked` |
-| `classify` | `pages_total`, `pages_asked`, `pages_current`, `pages_labelled`, `pages_stale`, `pages_failed`, `title_pages`, `decision_requests`, `decision_input_tokens`, `decision_output_tokens`, `decision_cached_tokens`, `decision_cache_write_tokens`, `decision_cost` |
+| `classify` | `pages_total`, `pages_asked`, `pages_current`, `pages_labelled`, `pages_stale`, `pages_failed`, `title_pages`, `decision_requests`, `decision_input_tokens`, `decision_output_tokens`, `decision_cached_tokens`, `decision_cache_write_tokens`, `decision_cost`, `title_pages_transcribed`, `title_requests`, `title_input_tokens`, `title_output_tokens`, `title_cost` |
 | `status` | `items_new`, `unstored_folders`, `inspect_leftovers` |
 | `drop` | `files_deleted`, `files_kept` |
 | `providers` | `breakers_open`, `keys_missing` |
@@ -490,6 +506,16 @@ decisions:
   image_max_px: 768         # longer side of a page sent
   pages_per_request: 20     # pages per request, at most 400
   profile: general          # page types: general | culinary
+  timeout_s: 120            # request timeout
+
+# Chat model that transcribes each work's picked title page (classify, through
+# OpenRouter with api_keys.openrouter); its readings are model output, not
+# catalog data.
+title_pages:
+  model: anthropic/claude-haiku-5.5  # null turns the transcription off
+  endpoint: https://openrouter.ai/api/v1/chat/completions
+  image_max_px: 1500        # longer side of the page sent
+  effort: low               # reasoning effort: minimal | low | medium | high
   timeout_s: 120            # request timeout
 
 # Machine-wide coordination of providers and the judge across agents; the
@@ -901,16 +927,18 @@ Every output root holds one `chronodownloader.sqlite`, written by `download`,
 (command, tool version, process, effective spec, start and end, exit code), the
 works with their input fields, status and lease, every candidate with its text
 score and judgment, every download attempt with its completeness per part, every
-file of every work folder and the page type of each page image. Readers outside
-the tool use the three views, which stay stable; the tables behind them (`meta`,
-`runs`, `works`, `candidates`, `attempts`, `files`, `page_labels`) may change in
-a later schema version.
+file of every work folder, the page type of each page image and a chat model's
+reading of each work's title page. Readers outside the tool use the four views,
+which stay stable; the tables behind them (`meta`, `runs`, `works`,
+`candidates`, `attempts`, `files`, `page_labels`, `title_pages`) may change in a
+later schema version.
 
 | View | One row per | Columns |
 | --- | --- | --- |
 | `work_status` | work | `entry_id`, `title`, `creator`, `year`, `place`, `publisher`, `language`, `edition`, `link`, `folder`, `status`, `stored_status`, `status_reason`, `retry_after`, `lease_holder`, `lease_expires_at`, `selected_provider`, `selected_source_id`, `selected_item_url`, `last_attempt_id`, `last_provider`, `last_source_id`, `last_format`, `last_outcome`, `last_stopped`, `last_attempt_at`, `pages_expected`, `pages_present`, `file_count`, `file_bytes`, `first_run_id`, `last_run_id`, `created_at`, `updated_at` |
 | `work_candidates` | candidate, history included | `candidate_id`, `entry_id`, `folder`, `origin`, `rank`, `provider`, `source_id`, `title`, `creators`, `date`, `year`, `place`, `publisher`, `language`, `item_url`, `iiif_manifest`, `text_score`, `judge_probabilities`, `judge_decision`, `judge_model`, `judge_model_version`, `judged_at`, `selected`, `current`, `superseded_at`, `run_id`, `created_at`, `updated_at` |
 | `title_page_picks` | work with page images | `entry_id`, `pages_total`, `pages_leading`, `pages_labelled`, `path`, `page_index`, `probability` |
+| `title_page_readings` | work with a current reading | `entry_id`, `path`, `page_index`, `is_title_page`, `title`, `place`, `year`, `year_as_printed`, `model`, `created_at` |
 
 In `work_status`, `status` is the read status: `blocked` while a run holds an
 unexpired lease on the work, else the stored status, or `new` for a work without
@@ -929,9 +957,12 @@ if it reaches .5 (`path` and `page_index`, else null); only labels written for
 the page's current file count. `pages_leading` is the number of leading pages a
 complete work has (the smaller of 10 and the highest `page_index` plus one), and
 `pages_labelled` below it marks a leading page missing on disk or not yet
-classified rather than a work without a title page. Times are ISO 8601 UTC text.
-URLs and raw fields carry credentials masked, and error texts are cut to 2,000
-characters.
+classified rather than a work without a title page. `title_page_readings` shows
+a work's stored reading only while its page is the current pick and its file
+row is the one read; `is_title_page` is the chat model's own check (0 or 1), and
+every field from it to `year_as_printed` is a model reading of the page image,
+not catalog data. Times are ISO 8601 UTC text. URLs and raw fields carry
+credentials masked, and error texts are cut to 2,000 characters.
 
 | Status | Meaning | Taken by default |
 | --- | --- | --- |
@@ -975,9 +1006,9 @@ the staging folder. On opening, the store also removes stale staging folders,
 deletes the records of files missing on disk and turns a `complete` work that
 lost a file into `partial`. A database that holds tables but no schema version,
 a newer schema or an unreadable file is refused with exit 2 and left unchanged; a
-store of schema version 1 is migrated to version 2 in place when a command that
-writes opens it, unless a run of an older version still holds a work's lease,
-which is refused with exit 2 until that run ends.
+store of schema version 1 or 2 is migrated to version 3 in place when a command
+that writes opens it, unless a run of an older version still holds a work's
+lease, which is refused with exit 2 until that run ends.
 
 ## Coordination Across Runs
 
@@ -1088,7 +1119,7 @@ chronodownloader/
   iiif/         manifests v2 and v3, canvases, image sizes, renderings
   pages.py      page samples for inspect and verify
   matching/     fuzzy.py (text score), judge.py (decision model), policy.py,
-                classifier.py (page types)
+                classifier.py (page types), title_pages.py (title-page reading)
   output/       store.py (schema, views, leases), paths.py, index.py
   options/      option tables, wizard framework, prompts, settings loader
   process/      exit codes, summary line, heartbeat, interrupt, log setup

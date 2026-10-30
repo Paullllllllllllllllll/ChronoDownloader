@@ -19,8 +19,9 @@ check; ``skipped``: no recorded files); ``classify`` counts works
 (``complete``: every page image carries a current label; ``failed``: a page
 could not be read or classified; ``deferred``: the decision model is
 unavailable; ``blocked``: another run holds the work; ``skipped``: no page
-images) and adds the pages and the decision usage, ``decision_cost`` null
-where the dialect reports no cost; ``status`` counts the listed works
+images) and adds the pages, the decision usage, ``decision_cost`` null
+where the dialect reports no cost, and the title-page readings with their
+usage; ``status`` counts the listed works
 by status (``items_new`` for works without an outcome); ``drop`` counts the
 works dropped as ``complete``, those another run holds as ``blocked`` and
 unknown entry ids as ``skipped``; ``providers`` counts the providers.
@@ -81,6 +82,11 @@ COMMAND_FIELDS: Mapping[str, Mapping[str, int | float | None]] = MappingProxyTyp
             "decision_cached_tokens": 0,
             "decision_cache_write_tokens": 0,
             "decision_cost": None,
+            "title_pages_transcribed": 0,
+            "title_requests": 0,
+            "title_input_tokens": 0,
+            "title_output_tokens": 0,
+            "title_cost": None,
         },
         "status": {"items_new": 0, "unstored_folders": 0, "inspect_leftovers": 0},
         "drop": {"files_deleted": 0, "files_kept": 0},
@@ -117,6 +123,11 @@ def _classify_fields(report: ClassifyReport) -> dict[str, int | float | None]:
         "decision_cached_tokens": usage.cached_tokens,
         "decision_cache_write_tokens": usage.cache_write_tokens,
         "decision_cost": usage.cost,
+        "title_pages_transcribed": sum(1 for work in works if work.transcribed),
+        "title_requests": report.title_usage.requests,
+        "title_input_tokens": report.title_usage.input_tokens,
+        "title_output_tokens": report.title_usage.output_tokens,
+        "title_cost": report.title_usage.cost,
     }
 
 

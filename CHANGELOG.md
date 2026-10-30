@@ -1,5 +1,29 @@
 # Changelog
 
+- **v1.3.0** (30 October 2026) -- `classify` now has a chat model read the
+  title page it picks. Once a work's leading pages all carry current labels and
+  `title_page_picks` names a page, that page alone goes at 1,500 pixels on the
+  longer side to `anthropic/claude-haiku-5.5` through OpenRouter's chat
+  endpoint, with low reasoning effort and a strict JSON schema, under the
+  work's lease and the `classify` network key. The model answers whether the
+  page is the title page and gives the title as printed, the place, the year as
+  an integer and the date as printed; author and printer are not asked until a
+  holdout shows they can be trusted. The prompt is the measured title pipeline's
+  without those two fields; on its 47 evaluation pages the OpenRouter route
+  matched the direct Anthropic API on years (38 of 39 exact, 3 invented on 8
+  undated pages) and came close on titles (median token-set similarity 97
+  against 98) and places (39 of 43 against 42), at USD 0.00025 a page. The
+  readings go to the new `title_pages` table and the read-contract view
+  `title_page_readings`, which shows a reading only while its page is the
+  current pick and its file the one read; every field is a model reading, not
+  catalog data. A rerun reads a page again only when the pick, its file, the
+  model or the prompt version changed, or under `--force`, and a work whose pick
+  is gone loses its reading. A failed or off-schema reading fails the work, and
+  an outage defers it. The new `title_pages:` settings block sets the model
+  (null turns the step off), endpoint, image size, effort and timeout, and the
+  JSON summary adds the readings and their usage. The store moves to schema
+  version 3: version 1 and 2 stores are migrated in place, and a reading is
+  deleted with its file as page labels are.
 - **v1.2.0** (30 October 2026) -- The new `classify` command asks a decision
   model for the page type of every page image the store records, under the
   shared page taxonomy of `common/page_types.py`, and stores one label per

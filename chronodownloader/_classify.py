@@ -28,8 +28,17 @@ and counted stale (:meth:`~chronodownloader.output.store.Store.
 record_page_labels`). A page that cannot be read or decoded, a refused
 request, a malformed answer and a declined question fail their pages; an
 outage of the decision model defers them. The work's status is never
-changed. The report closes with the title page that the store's
-``title_page_picks`` view picks for each work.
+changed.
+
+Title page. Once a work's leading pages all carry current labels
+(``pages_labelled`` equals ``pages_leading`` in ``title_page_picks``) and the
+view picks a page, the chat model ``title_pages.model`` reads that page
+(:class:`~chronodownloader.matching.title_pages.TitleReader`), still under
+the work's lease, unless the stored reading is for the same path, attempt,
+model and prompt version (``--force`` reads it again). A work the view picks
+no page for loses its stored reading. A failed reading fails the work as a
+failed page does; an outage defers it. ``title_pages.model`` null turns the
+step off. The report closes with each work's pick and current reading.
 """
 
 from __future__ import annotations
@@ -61,6 +70,12 @@ from chronodownloader.matching.judge import (
     JudgeUnavailable,
     MalformedAnswer,
 )
+from chronodownloader.matching.title_pages import (
+    PROMPT_VERSION,
+    TitleAnswer,
+    TitleReader,
+    title_key,
+)
 from chronodownloader.net.credentials import redact_text
 from chronodownloader.options.options import Source
 from chronodownloader.output.store import (
@@ -71,10 +86,12 @@ from chronodownloader.output.store import (
     PageLabel,
     Store,
     StoreError,
+    TitlePageReading,
     WorkInput,
     read_files,
     read_page_labels,
     read_title_page_picks,
+    read_title_page_readings,
 )
 from chronodownloader.process.contract import ExitCode
 from chronodownloader.settings import Settings
@@ -187,14 +204,15 @@ def _target(spec: ClassifySpec, settings: Settings) -> DecisionTarget:
 def _with_picks(
     root: Path, works: Sequence[ClassifiedWork]
 ) -> tuple[ClassifiedWork, ...]:
-    """Return *works* with the title page the store's view picks for each."""
+    """Return *works* with the store's title-page pick and current reading."""
     wanted = [work.entry_id for work in works if work.pages]
-    picks = {
-        str(row["entry_id"]): row
-        for row in (
-            _read(lambda: read_title_page_picks(root, wanted)) if wanted else []
-        )
-    }
+    picks: dict[str, dict[str, Any]] = {}
+    readings: dict[str, dict[str, Any]] = {}
+    if wanted:
+        rows = _read(lambda: read_title_page_picks(root, wanted))
+        picks = {str(row["entry_id"]): row for row in rows}
+        rows = _read(lambda: read_title_page_readings(root, wanted))
+        readings = {str(row["entry_id"]): row for row in rows}
     picked: list[ClassifiedWork] = []
     for work in works:
         row = picks.get(work.entry_id)
@@ -205,6 +223,9 @@ def _with_picks(
                 probability=row["probability"],
                 labelled_leading=int(row["pages_labelled"] or 0),
             )
+        reading = readings.get(work.entry_id)
+        if reading is not None:
+            work = replace(work, title=reading["title"])
         picked.append(work)
     return tuple(picked)
 
@@ -224,6 +245,8 @@ def plan_classify(
     target = _target(spec, settings)
     try:
         decision_key(settings, target.dialect)
+        if settings.title_pages.model is not None:
+            title_key(settings)
     except MissingDecisionKey as exc:
         raise PlanError(str(exc)) from exc
     root = spec.output
@@ -264,6 +287,7 @@ def plan_classify(
         endpoint=target.endpoint,
         profile=settings.decisions.profile,
         fingerprint=key,
+        title_model=settings.title_pages.model,
         dry_run=True,
     )
     skipped = sum(1 for work in works if work.outcome == "skipped")
@@ -353,9 +377,63 @@ def _ask_group(
     return _Answered(tuple(labels), tuple(failed), usage=types.usage, sent=True)
 
 
+@dataclass(frozen=True)
+class _Pick:
+    """The page a work's title-page reading is asked of."""
+
+    path: str
+    attempt_id: int
+    page_index: int
+
+
+@dataclass(frozen=True)
+class _Read:
+    """The outcome of one title-page reading, as :class:`_Answered` is."""
+
+    reading: TitlePageReading | None = None
+    failed: str | None = None
+    deferred: str | None = None
+    usage: DecisionUsage | None = None
+    sent: bool = False
+
+
+def _read_title(reader: TitleReader, work_dir: Path, pick: _Pick) -> _Read:
+    """Read the picked page's file and ask the chat model for it (worker side)."""
+    try:
+        data = (work_dir / pick.path).read_bytes()
+        answer: TitleAnswer = reader.read(data)
+    except JudgeUnavailable as exc:
+        return _Read(deferred=f"title page: {exc.reason}")
+    except (JudgeRefused, MalformedAnswer, OSError, ValueError) as exc:
+        sent = isinstance(exc, MalformedAnswer) or (
+            isinstance(exc, JudgeRefused) and exc.status is not None
+        )
+        return _Read(failed=f"title page: {exc}", sent=sent)
+    reading = answer.reading
+    return _Read(
+        TitlePageReading(
+            path=pick.path,
+            attempt_id=pick.attempt_id,
+            page_index=pick.page_index,
+            is_title_page=reading.is_title_page,
+            title=reading.title,
+            place=reading.place,
+            year=reading.year,
+            year_as_printed=reading.year_as_printed,
+            model=reader.model,
+            prompt_version=PROMPT_VERSION,
+        ),
+        usage=answer.usage,
+        sent=True,
+    )
+
+
 @dataclass
 class _InFlight:
-    """A work whose groups are out: its lease and what came back so far."""
+    """A work whose requests are out: its lease and what came back so far.
+
+    *reading* is True once the labels are in and the title page is asked.
+    """
 
     planned: PlannedWork
     lease: Lease
@@ -367,6 +445,10 @@ class _InFlight:
     failed: int = 0
     deferred: int = 0
     lost: bool = False
+    reading: bool = False
+    title_failed: bool = False
+    title_deferred: bool = False
+    transcribed: bool = False
     notes: list[str] = field(default_factory=list)
 
     def finished(self) -> ClassifiedWork:
@@ -381,6 +463,7 @@ class _InFlight:
             labelled=self.labelled,
             stale=self.stale,
             failed=self.failed + self.deferred,
+            transcribed=self.transcribed,
         )
         if self.stale:
             self.notes.append(f"{self.stale} label(s) stale: their files changed")
@@ -389,9 +472,9 @@ class _InFlight:
             return replace(
                 work, outcome="blocked", note="the lease passed to another run"
             )
-        if self.failed or self.stale:
+        if self.failed or self.stale or self.title_failed:
             return replace(work, outcome="failed", note=note)
-        if self.deferred:
+        if self.deferred or self.title_deferred:
             return replace(work, outcome="deferred", note=note)
         return work
 
@@ -434,6 +517,7 @@ class _Classifier:
         store: Store,
         services: Services,
         classifier: PageClassifier,
+        reader: TitleReader | None,
         *,
         force: bool,
         window: int,
@@ -441,10 +525,13 @@ class _Classifier:
         self.store = store
         self.services = services
         self.classifier = classifier
+        self.reader = reader
         self.force = force
         self.window = window
         self.usage = _Usage()
-        self._pending: dict[Future[_Answered], tuple[_InFlight, int]] = {}
+        self.title_usage = _Usage()
+        # A group of labels carries its page count; a title-page reading None.
+        self._pending: dict[Future[Any], tuple[_InFlight, int | None]] = {}
         self._active: dict[str, _InFlight] = {}
         self._done: dict[str, ClassifiedWork] = {}
 
@@ -459,11 +546,100 @@ class _Classifier:
             done, _ = wait(list(self._pending), POLL_S, FIRST_COMPLETED)
             for future in done:
                 job, size = self._pending.pop(future)
-                self._settle(job, size, future)
+                if size is None:
+                    self._settle_title(job, future)
+                else:
+                    self._settle(job, size, future)
                 job.pending -= 1
                 if job.pending == 0:
-                    self._finish(job)
+                    self._next(job)
         return [self._done[planned.work.entry_id] for planned in works]
+
+    def _next(self, job: _InFlight) -> None:
+        """Ask the title page of a work whose labels are in, else finish it."""
+        if job.reading or job.lost or self.reader is None:
+            self._finish(job)
+            return
+        job.reading = True
+        try:
+            pick = self._pick(job)
+        except LeaseLostError:
+            job.lost = True
+            pick = None
+        if pick is None:
+            self._finish(job)
+            return
+        work_dir = self.store.root / job.lease.folder
+        future = self.services.pool.submit(
+            functools.partial(_read_title, self.reader, work_dir, pick)
+        )
+        self._pending[future] = (job, None)
+        job.pending += 1
+
+    def _pick(self, job: _InFlight) -> _Pick | None:
+        """Return the page to read, or None; drop a reading with no pick left.
+
+        Raises:
+            LeaseLostError: The lease passed to another run.
+        """
+        assert self.reader is not None
+        entry_id = job.planned.work.entry_id
+        row = self.store.title_page_pick(entry_id)
+        if row is None or row["path"] is None:
+            self.store.drop_title_page(job.lease)
+            return None
+        if row["pages_labelled"] != row["pages_leading"]:
+            return None
+        path = str(row["path"])
+        attempt = next(
+            (
+                file.attempt_id
+                for file in self.store.files(entry_id)
+                if file.path == path
+            ),
+            None,
+        )
+        if attempt is None:
+            return None
+        stored = self.store.title_page(entry_id)
+        current = stored is not None and (
+            stored.path,
+            stored.attempt_id,
+            stored.model,
+            stored.prompt_version,
+        ) == (path, attempt, self.reader.model, PROMPT_VERSION)
+        if current and not self.force:
+            return None
+        return _Pick(path, attempt, int(row["page_index"]))
+
+    def _settle_title(self, job: _InFlight, future: Future[_Read]) -> None:
+        try:
+            read = future.result()
+        # The crash boundary of one reading, as of one group of labels.
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("title page of %s failed", job.planned.work.entry_id)
+            read = _Read(failed=redact_text(f"error: {type(exc).__name__}: {exc}"))
+        self.title_usage.requests += read.sent
+        if read.usage is not None:
+            self.title_usage.add(read.usage)
+        if read.failed is not None:
+            job.title_failed = True
+            job.notes.append(read.failed)
+        if read.deferred is not None:
+            job.title_deferred = True
+            job.notes.append(read.deferred)
+        if read.reading is None or job.lost:
+            return
+        try:
+            landed = self.store.record_title_page(job.lease, read.reading)
+        except LeaseLostError:
+            job.lost = True
+            return
+        if landed:
+            job.transcribed = True
+        else:
+            job.title_failed = True
+            job.notes.append("title page reading stale: its file changed")
 
     def _start(self, planned: PlannedWork) -> None:
         entry_id = planned.work.entry_id
@@ -500,13 +676,14 @@ class _Classifier:
             context = {name: getattr(stored, name) for name in CONTEXT_FIELDS}
             self._submit(job, ask, context)
             return
-        self.store.release(lease)
         if pages:
-            self._done[entry_id] = job.finished()
-        else:
-            self._done[entry_id] = ClassifiedWork(
-                entry_id, lease.folder, "skipped", note=NO_IMAGES
-            )
+            self._active[entry_id] = job
+            self._next(job)
+            return
+        self.store.release(lease)
+        self._done[entry_id] = ClassifiedWork(
+            entry_id, lease.folder, "skipped", note=NO_IMAGES
+        )
 
     def _submit(
         self, job: _InFlight, ask: Sequence[_Page], context: Mapping[str, Any]
@@ -590,6 +767,9 @@ def run_classify(run_plan: RunPlan, wiring: Wiring) -> RunResult:
             classifier = PageClassifier(
                 services.network, settings, target, clock=wiring.clock
             )
+            reader = None
+            if settings.title_pages.model is not None:
+                reader = TitleReader(services.network, settings, clock=wiring.clock)
         except MissingDecisionKey as exc:
             raise PlanError(str(exc)) from exc
         store = open_store(spec.output, wiring.clock)
@@ -603,7 +783,7 @@ def run_classify(run_plan: RunPlan, wiring: Wiring) -> RunResult:
                 tool_version=tool_version(),
             )
             loop = _Classifier(
-                store, services, classifier, force=spec.force, window=window
+                store, services, classifier, reader, force=spec.force, window=window
             )
             with store.keeper(on_lost=_lost):
                 classified = {work.entry_id: work for work in loop.run(run_plan.works)}
@@ -620,6 +800,7 @@ def run_classify(run_plan: RunPlan, wiring: Wiring) -> RunResult:
         planned,
         works=_with_picks(spec.output, works),
         usage=loop.usage.totals(),
+        title_usage=loop.title_usage.totals(),
         dry_run=False,
     )
     return RunResult(_counts(report.works), report=report)

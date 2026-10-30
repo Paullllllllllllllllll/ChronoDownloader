@@ -62,6 +62,7 @@ __all__ = [
     "ProviderSettings",
     "Settings",
     "SettingsError",
+    "TitlePages",
     "TotalLimits",
     "load",
     "provider_key",
@@ -459,6 +460,27 @@ class Decisions:
     timeout_s: float = 120.0
 
 
+TITLE_PAGE_EFFORTS = ("minimal", "low", "medium", "high")
+"""The reasoning efforts OpenRouter's chat endpoint takes."""
+
+
+@dataclass(frozen=True)
+class TitlePages:
+    """The chat model that transcribes each work's picked title page.
+
+    ``model`` None turns the transcription off; ``endpoint`` is an
+    OpenRouter-compatible chat completions URL. The page goes at most
+    ``image_max_px`` on its longer side; ``effort`` is the reasoning effort
+    and ``timeout_s`` bounds each request.
+    """
+
+    model: str | None = "anthropic/claude-haiku-5.5"
+    endpoint: str = "https://openrouter.ai/api/v1/chat/completions"
+    image_max_px: int = 1500
+    effort: str = "low"
+    timeout_s: float = 120.0
+
+
 @dataclass(frozen=True)
 class Coordination:
     """Machine-wide coordination of providers and the judge across agents."""
@@ -541,6 +563,7 @@ class Settings:
     api_keys: Mapping[str, str] = field(default_factory=lambda: DEFAULT_API_KEYS)
     judge: Judge = field(default_factory=Judge)
     decisions: Decisions = field(default_factory=Decisions)
+    title_pages: TitlePages = field(default_factory=TitlePages)
     coordination: Coordination = field(default_factory=Coordination)
     providers: Mapping[str, ProviderSettings] = field(
         default_factory=_default_providers
@@ -621,6 +644,7 @@ class Settings:
             api_keys=_api_keys(reader, data.get("api_keys")),
             judge=_judge(reader, data.get("judge")),
             decisions=_decisions(reader, data.get("decisions")),
+            title_pages=_title_pages(reader, data.get("title_pages")),
             coordination=_coordination(reader, data.get("coordination")),
             providers=_providers(reader, data.get("providers")),
             download_limits=_download_limits(reader, data.get("download_limits")),
@@ -637,6 +661,7 @@ _TOP_KEYS = frozenset(
         "api_keys",
         "judge",
         "decisions",
+        "title_pages",
         "coordination",
         "providers",
         "download_limits",
@@ -811,6 +836,32 @@ def _decisions(reader: Reader, raw: Any) -> Decisions:
         image_max_px=reader.positive(section, "image_max_px", base.image_max_px, path),
         pages_per_request=per_request,
         profile=reader.choice(section, "profile", base.profile, path, PROFILES),
+        timeout_s=reader.number(section, "timeout_s", base.timeout_s, path),
+    )
+
+
+def _title_pages(reader: Reader, raw: Any) -> TitlePages:
+    keys = frozenset({"model", "endpoint", "image_max_px", "effort", "timeout_s"})
+    section = reader.section(raw, "title_pages", keys)
+    path = "title_pages."
+    base = TitlePages()
+    model = base.model
+    if "model" in section:
+        model = (
+            None
+            if section["model"] is None
+            else reader.text(section, "model", "", path)
+        )
+        if model == "":
+            raise reader.fail(path + "model", "must not be empty; null turns it off")
+    endpoint = reader.text(section, "endpoint", base.endpoint, path)
+    if not endpoint:
+        raise reader.fail(path + "endpoint", "must not be empty")
+    return TitlePages(
+        model=model,
+        endpoint=endpoint,
+        image_max_px=reader.positive(section, "image_max_px", base.image_max_px, path),
+        effort=reader.choice(section, "effort", base.effort, path, TITLE_PAGE_EFFORTS),
         timeout_s=reader.number(section, "timeout_s", base.timeout_s, path),
     )
 

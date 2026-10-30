@@ -98,6 +98,7 @@ __all__ = [
     "MissingJudgeKey",
     "catalog_record",
     "judge_key",
+    "mask_key",
     "page_request",
     "parse_masked",
     "post_decision",
@@ -589,7 +590,7 @@ def parse_masked(
     Raises:
         MalformedAnswer: The response does not answer *questions*.
     """
-    data = _masked(data, key)
+    data = mask_key(data, key)
     try:
         return decisions.parse_response(dialect, data, questions)
     except decisions.MalformedAnswer as exc:
@@ -597,14 +598,14 @@ def parse_masked(
     raise MalformedAnswer(message)
 
 
-def _masked(value: Any, key: str) -> Any:
-    """Return *value* with *key* replaced by ``***`` in every string."""
+def mask_key(value: Any, key: str) -> Any:
+    """Return decoded JSON *value* with *key* replaced by ``***`` in every string."""
     if isinstance(value, str):
         return value.replace(key, "***")
     if isinstance(value, Mapping):
-        return {item: _masked(entry, key) for item, entry in value.items()}
+        return {item: mask_key(entry, key) for item, entry in value.items()}
     if isinstance(value, list):
-        return [_masked(entry, key) for entry in value]
+        return [mask_key(entry, key) for entry in value]
     return value
 
 

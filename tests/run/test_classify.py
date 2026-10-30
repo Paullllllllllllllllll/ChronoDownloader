@@ -36,9 +36,10 @@ from chronodownloader.output.store import (
     read_files,
     read_page_labels,
     read_title_page_picks,
+    read_title_page_readings,
     read_work_status,
 )
-from chronodownloader.settings import Decisions, Settings
+from chronodownloader.settings import Decisions, Settings, TitlePages
 from chronodownloader.spec import resolve_classify, resolve_download
 from tests.net.support import response
 from tests.run.support import (
@@ -66,28 +67,78 @@ def _image(url: str) -> Image.Image:
     return Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
 
 
+CHAT = "https://openrouter.ai/api/v1/chat/completions"
+READ = {
+    "is_title_page": True,
+    "title": "Le cuisinier françois",
+    "place": "Paris",
+    "year": 1651,
+    "year_as_printed": "M. DC. LI.",
+}
+
+
+def _json(payload: Any, url: str, status: int = 200) -> requests.Response:
+    headers = {"Content-Type": "application/json"}
+    return response(status, [json.dumps(payload).encode()], headers, url=url)()
+
+
 @dataclass
 class DecisionSession(requests.Session):
-    """Answers decision requests by the colour of each image.
+    """Answers decision and title-page requests by the colour of each image.
 
-    A red image is a title page. ``calls`` records url, headers and body;
-    *status* other than 200 refuses every request; *before* runs on each
-    request before it is answered.
+    A red image is a title page. ``calls`` records url, headers and body of
+    the decision requests, ``chats`` those of the chat endpoint; *status*
+    other than 200 refuses every decision request and *chat_status* every
+    chat request; *raw* and *chat_raw* replace the answers; *before* runs on
+    each decision request before it is answered.
     """
 
     status: int = 200
     before: Callable[[], None] | None = None
     raw: Any = None
+    chat_status: int = 200
+    chat_raw: Any = None
     calls: list[dict[str, Any]] = field(default_factory=list)
+    chats: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         super().__init__()
+
+    def _chat(self, url: str, body: Any) -> requests.Response:
+        if self.chat_status != 200:
+            return response(self.chat_status, [b"down"], url=url)()
+        if self.chat_raw is not None:
+            return _json(self.chat_raw, url)
+        (part,) = body["messages"][1]["content"]
+        red = _image(part["image_url"]["url"]).getpixel((0, 0))[1] < 100
+        answer = READ if red else dict.fromkeys(READ) | {"is_title_page": False}
+        return _json(
+            {
+                "model": body["model"],
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": json.dumps(answer)},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1500,
+                    "completion_tokens": 60,
+                    "cost": 0.002,
+                },
+            },
+            url,
+        )
 
     def request(  # type: ignore[override]
         self, method: str, url: str, **kwargs: Any
     ) -> requests.Response:
         body = kwargs["json"]
-        self.calls.append({"url": url, "headers": kwargs["headers"], "body": body})
+        call = {"url": url, "headers": kwargs["headers"], "body": body}
+        if url == CHAT:
+            self.chats.append(call)
+            return self._chat(url, body)
+        self.calls.append(call)
         if self.before is not None:
             self.before()
         if self.status != 200:
@@ -238,7 +289,21 @@ def test_classify_labels_every_page_and_picks_the_title_page(
         "decision_cached_tokens": 10,
         "decision_cache_write_tokens": 2,
         "decision_cost": 0.25,
+        "title_pages_transcribed": 1,
+        "title_requests": 1,
+        "title_input_tokens": 1500,
+        "title_output_tokens": 60,
+        "title_cost": 0.002,
     }
+    assert e1.title == "Le cuisinier françois"
+    (chat,) = session.chats
+    assert chat["headers"]["Authorization"] == "Bearer sk-or-test-key"
+    (part,) = chat["body"]["messages"][1]["content"]
+    assert max(_image(part["image_url"]["url"]).size) == 1500
+    (reading,) = read_title_page_readings(out, ["E1"])
+    assert {key: reading[key] for key in READ} == READ | {"is_title_page": 1}
+    assert (reading["path"], reading["page_index"]) == (path_of(out, "p00002"), 1)
+    assert reading["model"] == "anthropic/claude-haiku-5.5"
     (row,) = read_work_status(out, ["E1"])
     assert row["status"] == "complete"
 
@@ -490,3 +555,91 @@ def test_a_malformed_answer_counts_as_a_request(
     assert isinstance(result.report, core.ClassifyReport)
     assert result.report.usage.requests == 1
     assert result.report.usage.input_tokens == 0
+
+
+def _readings(out: Path) -> int:
+    with contextlib.closing(sqlite3.connect(out / DATABASE_NAME)) as connection:
+        return int(connection.execute("SELECT count(*) FROM title_pages").fetchone()[0])
+
+
+def test_a_rerun_keeps_the_reading_and_force_reads_again(
+    tmp_path: Path, settings: Settings, out: Path
+) -> None:
+    downloaded(tmp_path, settings, out)
+    classify(settings, DecisionSession(), output=out)
+
+    again = DecisionSession()
+    rerun = classify(settings, again, output=out)
+    assert (again.calls, again.chats) == ([], [])
+    assert isinstance(rerun.report, core.ClassifyReport)
+    assert rerun.report.works[0].title == READ["title"]
+    assert not rerun.report.works[0].transcribed
+
+    forced = DecisionSession()
+    classify(settings, forced, output=out, force=True)
+    assert len(forced.chats) == 1
+
+
+def test_a_work_whose_pick_is_gone_loses_its_reading(
+    tmp_path: Path, settings: Settings, out: Path
+) -> None:
+    downloaded(tmp_path, settings, out)
+    classify(settings, DecisionSession(), output=out, entry_ids=("E1",))
+    assert _readings(out) == 1
+    title = _folder(out, "E1") / path_of(out, "p00002")
+    title.write_bytes(jpeg(WHITE))
+
+    session = DecisionSession()
+    result = classify(settings, session, output=out, entry_ids=("E1",), force=True)
+
+    assert result.counts == core.WorkCounts(total=1, complete=1)
+    assert session.chats == []
+    assert (_readings(out), read_title_page_readings(out)) == (0, [])
+
+
+def test_an_outage_of_the_title_model_defers_the_work(
+    tmp_path: Path, settings: Settings, out: Path
+) -> None:
+    downloaded(tmp_path, settings, out)
+
+    down = classify(
+        settings, DecisionSession(chat_status=503), output=out, entry_ids=("E1",)
+    )
+
+    assert down.counts == core.WorkCounts(total=1, deferred=1)
+    assert len(read_page_labels(out, "E1")) == 4
+    assert _readings(out) == 0
+
+
+def test_a_reading_off_the_schema_fails_the_work(
+    tmp_path: Path, settings: Settings, out: Path
+) -> None:
+    downloaded(tmp_path, settings, out)
+    bad = {"choices": [{"message": {"content": '{"title": "x"}'}}]}
+    result = classify(
+        settings, DecisionSession(chat_raw=bad), output=out, entry_ids=("E1",)
+    )
+    assert result.counts == core.WorkCounts(total=1, failed=1)
+    assert isinstance(result.report, core.ClassifyReport)
+    assert result.report.title_usage.requests == 1
+    assert result.report.works[0].note is not None
+    assert "schema" in result.report.works[0].note
+
+
+def test_a_null_title_model_turns_transcription_off(
+    tmp_path: Path, settings: Settings, out: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    downloaded(tmp_path, settings, out)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    with pytest.raises(core.PlanError, match="title_pages.model"):
+        classify(settings, DecisionSession(), output=out, decision_model="gpt-6-luna")
+
+    off = replace(settings, title_pages=TitlePages(model=None))
+    session = DecisionSession()
+    result = classify(off, session, output=out, decision_model="gpt-6-luna")
+
+    assert result.counts.complete == 1
+    assert session.chats == []
+    assert isinstance(result.report, core.ClassifyReport)
+    assert result.report.title_model is None

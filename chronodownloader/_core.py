@@ -390,6 +390,9 @@ class ClassifiedWork:
     not classified. *title_page* is the path the ``title_page_picks`` rule
     picks (None: no pick) with its *probability*; *labelled_leading* counts
     the current labels among the leading pages that rule reads.
+    *transcribed* marks a title-page reading written in this run; *title* is
+    the title of the work's current reading (a model reading, not catalog
+    data), None without one.
     """
 
     entry_id: str
@@ -404,6 +407,8 @@ class ClassifiedWork:
     title_page: str | None = None
     probability: float | None = None
     labelled_leading: int = 0
+    transcribed: bool = False
+    title: str | None = None
     note: str | None = None
 
 
@@ -426,8 +431,9 @@ class DecisionTotals:
 class ClassifyReport:
     """The works of a ``classify`` with the model asked and the usage.
 
-    *fingerprint* is the request fingerprint the labels carry; *dry_run*
-    marks a plan that sent and wrote nothing.
+    *fingerprint* is the request fingerprint the labels carry; *title_model*
+    the chat model that reads title pages (None: off), *title_usage* its
+    requests; *dry_run* marks a plan that sent and wrote nothing.
     """
 
     works: tuple[ClassifiedWork, ...] = ()
@@ -437,6 +443,8 @@ class ClassifyReport:
     profile: str = ""
     fingerprint: str = ""
     usage: DecisionTotals = DecisionTotals()
+    title_model: str | None = None
+    title_usage: DecisionTotals = DecisionTotals()
     dry_run: bool = False
 
 
