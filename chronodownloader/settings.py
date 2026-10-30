@@ -27,6 +27,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from chronodownloader.common.decisions import DIALECTS, MAX_QUESTIONS
+from chronodownloader.common.page_types import DEFAULT_PROFILE, PROFILES
 from chronodownloader.options.options import OptionTable
 from chronodownloader.options.settings_loader import SettingsError, load_settings
 from chronodownloader.options.settings_schema import (
@@ -48,6 +50,7 @@ __all__ = [
     "AnnasArchiveSettings",
     "AnnasQuota",
     "Coordination",
+    "Decisions",
     "DownloadLimits",
     "GoogleBooksSettings",
     "Judge",
@@ -103,6 +106,7 @@ DEFAULT_API_KEYS: Mapping[str, str] = MappingProxyType(
         "hathitrust": "HATHI_API_KEY",
         "annas_archive": "ANNAS_ARCHIVE_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
+        "openai": "OPENAI_API_KEY",
     }
 )
 """The environment variable holding each service's key."""
@@ -436,6 +440,26 @@ class Judge:
 
 
 @dataclass(frozen=True)
+class Decisions:
+    """The decision model that classifies page images (``classify``).
+
+    ``provider`` None takes the dialect the model id implies (``vendor/model``:
+    OpenRouter, else OpenAI); ``endpoint`` None takes that provider's
+    Decisions endpoint. Pages go at most ``image_max_px`` on their longer
+    side and at most ``pages_per_request`` to a request, classified under
+    the page-type ``profile``; ``timeout_s`` bounds each request.
+    """
+
+    model: str = "typesafe/jev-1.14"
+    provider: str | None = None
+    endpoint: str | None = None
+    image_max_px: int = 768
+    pages_per_request: int = 20
+    profile: str = DEFAULT_PROFILE
+    timeout_s: float = 120.0
+
+
+@dataclass(frozen=True)
 class Coordination:
     """Machine-wide coordination of providers and the judge across agents."""
 
@@ -516,6 +540,7 @@ class Settings:
 
     api_keys: Mapping[str, str] = field(default_factory=lambda: DEFAULT_API_KEYS)
     judge: Judge = field(default_factory=Judge)
+    decisions: Decisions = field(default_factory=Decisions)
     coordination: Coordination = field(default_factory=Coordination)
     providers: Mapping[str, ProviderSettings] = field(
         default_factory=_default_providers
@@ -595,6 +620,7 @@ class Settings:
         return cls(
             api_keys=_api_keys(reader, data.get("api_keys")),
             judge=_judge(reader, data.get("judge")),
+            decisions=_decisions(reader, data.get("decisions")),
             coordination=_coordination(reader, data.get("coordination")),
             providers=_providers(reader, data.get("providers")),
             download_limits=_download_limits(reader, data.get("download_limits")),
@@ -610,6 +636,7 @@ _TOP_KEYS = frozenset(
     {
         "api_keys",
         "judge",
+        "decisions",
         "coordination",
         "providers",
         "download_limits",
@@ -735,6 +762,57 @@ def _judge_network(reader: Reader, raw: Any) -> JudgeNetwork:
     section = reader.section(raw, "judge.network", allowed)
     base = JudgeNetwork()
     return JudgeNetwork(**reader.flat(section, keys, base, "judge.network."))
+
+
+def _optional_text(
+    reader: Reader,
+    raw: Mapping[str, Any],
+    key: str,
+    choices: tuple[str, ...] | None = None,
+) -> str | None:
+    """Return a string of the decisions block; null or '' gives None."""
+    value = reader.text(raw, key, "", "decisions.")
+    if not value:
+        return None
+    if choices is not None and value not in choices:
+        raise reader.fail("decisions." + key, f"must be one of {', '.join(choices)}")
+    return value
+
+
+def _decisions(reader: Reader, raw: Any) -> Decisions:
+    keys = frozenset(
+        {
+            "model",
+            "provider",
+            "endpoint",
+            "image_max_px",
+            "pages_per_request",
+            "profile",
+            "timeout_s",
+        }
+    )
+    section = reader.section(raw, "decisions", keys)
+    path = "decisions."
+    base = Decisions()
+    model = reader.text(section, "model", base.model, path)
+    if not model:
+        raise reader.fail(path + "model", "must not be empty")
+    per_request = reader.positive(
+        section, "pages_per_request", base.pages_per_request, path
+    )
+    if per_request > MAX_QUESTIONS:
+        raise reader.fail(
+            path + "pages_per_request", f"must be at most {MAX_QUESTIONS}"
+        )
+    return Decisions(
+        model=model,
+        provider=_optional_text(reader, section, "provider", DIALECTS),
+        endpoint=_optional_text(reader, section, "endpoint"),
+        image_max_px=reader.positive(section, "image_max_px", base.image_max_px, path),
+        pages_per_request=per_request,
+        profile=reader.choice(section, "profile", base.profile, path, PROFILES),
+        timeout_s=reader.number(section, "timeout_s", base.timeout_s, path),
+    )
 
 
 def _coordination(reader: Reader, raw: Any) -> Coordination:

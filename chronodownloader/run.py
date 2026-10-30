@@ -32,27 +32,30 @@ After a run that wrote a store, ``index.csv`` is rendered from it.
 
 Checks and listings. ``inspect`` and ``verify`` are planned and run by
 :mod:`chronodownloader._review` (page samples, page checks, the files of
-the store); ``status``, ``drop`` and ``providers`` by
+the store); ``classify`` by :mod:`chronodownloader._classify` (the page
+types of the stored page images); ``status``, ``drop`` and ``providers`` by
 :mod:`chronodownloader._listing`. Their results carry a report
 (:data:`Report`) beside the counts; the plan of ``status`` is its report,
-and the plans of ``inspect``, ``verify`` and ``drop`` hold what their dry
-runs report.
+and the plans of ``inspect``, ``verify``, ``classify`` and ``drop`` hold
+what their dry runs report.
 """
 
 from __future__ import annotations
 
 import functools
 import logging
-import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
 from chronodownloader._budget import SizeBudget
+from chronodownloader._classify import plan_classify, run_classify
 from chronodownloader._core import (
+    ClassifiedWork,
+    ClassifyReport,
+    DecisionTotals,
     FetchTarget,
     InspectReport,
     Leftover,
@@ -72,7 +75,10 @@ from chronodownloader._core import (
     WorkCounts,
     check_judge_key,
     check_store,
+    close_store,
+    open_store,
     read_statuses,
+    tool_version,
 )
 from chronodownloader._listing import plan_drop, plan_status, run_drop, run_providers
 from chronodownloader._loop import DownloadOptions, MatchOptions, Tally, WorkLoop
@@ -88,7 +94,6 @@ from chronodownloader.matching.policy import (
 )
 from chronodownloader.net.credentials import redact_text
 from chronodownloader.options.options import Source
-from chronodownloader.output.index import write_index
 from chronodownloader.output.paths import work_folder_name
 from chronodownloader.output.store import (
     DropReport,
@@ -104,6 +109,7 @@ from chronodownloader.providers.base import FORMATS, item_id_from_url
 from chronodownloader.providers.registry import Registry, host_key
 from chronodownloader.settings import Naming, Settings
 from chronodownloader.spec import (
+    ClassifySpec,
     CommandSpec,
     DownloadSpec,
     DropSpec,
@@ -122,6 +128,9 @@ from chronodownloader.spec import (
 )
 
 __all__ = [
+    "ClassifiedWork",
+    "ClassifyReport",
+    "DecisionTotals",
     "DropReport",
     "FetchTarget",
     "InspectReport",
@@ -150,13 +159,6 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 NEW = "new"
-
-
-def _tool_version() -> str | None:
-    try:
-        return version("chronodownloader")
-    except PackageNotFoundError:
-        return None
 
 
 # -- planning -------------------------------------------------------------------
@@ -544,6 +546,8 @@ def plan(
         return plan_inspect(spec, settings, sources)
     if isinstance(spec, VerifySpec):
         return plan_verify(spec, settings, sources)
+    if isinstance(spec, ClassifySpec):
+        return plan_classify(spec, settings, sources)
     if isinstance(spec, StatusSpec):
         return plan_status(spec, settings, sources)
     if isinstance(spec, DropSpec):
@@ -557,32 +561,8 @@ def plan(
 # -- running ----------------------------------------------------------------------
 
 
-def _open_store(root: Path, wiring: Wiring) -> Store:
-    try:
-        return Store(root, clock=wiring.clock)
-    except StoreError as exc:
-        raise PlanError(str(exc)) from exc
-
-
 def _lost(lease: Lease) -> None:
     logger.warning("The lease on work %s expired or passed to another run.", lease)
-
-
-def _close_store(store: Store, exit_code: int, *, settle: bool) -> None:
-    """Record the run's end, close the store and render ``index.csv``.
-
-    Without *settle* the released leases keep their staging folders.
-    """
-    try:
-        if store.run_id is not None:
-            store.end_run(exit_code)
-    except sqlite3.Error as exc:
-        logger.warning("Could not record the run end in %s: %s", store.path, exc)
-    store.close(settle=settle)
-    try:
-        write_index(store.root)
-    except (StoreError, sqlite3.Error, OSError) as exc:
-        logger.warning("index.csv not written in %s: %s", store.root, exc)
 
 
 def _matching(
@@ -653,7 +633,7 @@ def _loop_over(
     """Run *build*'s loop under a store of *root* (None: no store)."""
     if root is None:
         return build(None).run(run_plan.works)
-    store = _open_store(root, services.wiring)
+    store = open_store(root, services.wiring.clock)
     exit_code: int = ExitCode.FAILURE
     settle = False
     try:
@@ -661,7 +641,7 @@ def _loop_over(
             command,
             run_id=services.run_id,
             spec=effective_spec(run_plan.spec, run_plan.sources),
-            tool_version=_tool_version(),
+            tool_version=tool_version(),
         )
         with store.keeper(on_lost=_lost):
             loop = build(store)
@@ -678,7 +658,7 @@ def _loop_over(
     finally:
         # An interrupt or an escaping error may leave workers writing into
         # staging folders: release the leases without touching those files.
-        _close_store(store, exit_code, settle=settle)
+        close_store(store, exit_code, settle=settle)
 
 
 def _run_download(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> Tally:
@@ -802,6 +782,7 @@ def run(
     reported: dict[str, Callable[[], RunResult]] = {
         "inspect": lambda: run_inspect(run_plan, wired),
         "verify": lambda: run_verify(run_plan, wired),
+        "classify": lambda: run_classify(run_plan, wired),
         "status": lambda: RunResult(run_plan.counts, report=run_plan.report),
         "drop": lambda: run_drop(run_plan, wired),
         "providers": lambda: run_providers(run_plan, events, wired),

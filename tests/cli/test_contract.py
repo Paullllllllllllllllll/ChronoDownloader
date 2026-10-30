@@ -39,6 +39,7 @@ VALID: dict[str, list[str]] = {
     "search": ["--title", "Le cuisinier francois"],
     "inspect": ["--provider", "mdz", "--id", "bsb00000001"],
     "verify": [],
+    "classify": [],
     "status": [],
     "drop": ["--output", "out", "--all"],
     "providers": [],
@@ -46,7 +47,7 @@ VALID: dict[str, list[str]] = {
 }
 """A valid command line of each command, without --json."""
 
-DRY_RUN = ("download", "fetch", "search", "inspect", "verify", "drop")
+DRY_RUN = ("download", "fetch", "search", "inspect", "verify", "classify", "drop")
 """The commands that take --dry-run."""
 
 JSON_COMMANDS = [command for command in COMMANDS if command != "ui"]
@@ -92,6 +93,7 @@ USAGE_ERRORS = [
     pytest.param(["fetch", "--entry-id", "E1"], id="no-item"),
     pytest.param(["drop", "--output", "out"], id="no-selection"),
     pytest.param(["verify", "--first", "3"], id="first-without-pages"),
+    pytest.param(["classify", "--decision-provider", "anthropic"], id="dialect"),
 ]
 
 

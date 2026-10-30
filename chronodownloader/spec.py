@@ -1,4 +1,4 @@
-"""The run specifications of the nine commands and the option tables behind them.
+"""The run specifications of the ten commands and the option tables behind them.
 
 Each command has a module-level :class:`~chronodownloader.options.options.
 OptionTable`, from which the CLI parser, the settings ``defaults:`` check and
@@ -10,7 +10,9 @@ The ``defaults:`` block of the settings is validated against
 :data:`DOWNLOAD_OPTIONS`. The other commands take the defaults of the options
 they share with ``download`` by name, as long as their own row is settable:
 ``search`` takes the matching options but not ``output``; ``inspect`` takes
-``providers`` and ``output``.
+``providers`` and ``output``. The decision-model flags of ``classify`` take
+no default from ``defaults:``; the settings' ``decisions`` block fills them
+when the run is planned.
 
 Selectors that only work together (``--provider`` with ``--id``) or exclude
 a pair (``--url`` against ``--provider``/``--id``) are checked in the
@@ -46,7 +48,9 @@ from chronodownloader.options.standard_options import (
 from chronodownloader.settings import provider_key
 
 __all__ = [
+    "CLASSIFY_OPTIONS",
     "COMMANDS",
+    "DECISION_PROVIDERS",
     "DEFAULT_ONLY",
     "DEFAULT_PROVIDERS",
     "DOWNLOAD_OPTIONS",
@@ -64,7 +68,9 @@ __all__ = [
     "TABLES",
     "UI_OPTIONS",
     "VERIFY_OPTIONS",
+    "ClassifySpec",
     "CommandSpec",
+    "DecisionModel",
     "DownloadControl",
     "DownloadSpec",
     "DropSpec",
@@ -87,6 +93,7 @@ __all__ = [
     "WorkSelection",
     "command_of",
     "effective_spec",
+    "resolve_classify",
     "resolve_download",
     "resolve_drop",
     "resolve_fetch",
@@ -140,12 +147,16 @@ COMMANDS = (
     "search",
     "inspect",
     "verify",
+    "classify",
     "status",
     "drop",
     "providers",
     "ui",
 )
 """The commands in the order the help lists them."""
+
+DECISION_PROVIDERS = ("openai", "openrouter")
+"""The ``--decision-provider`` values: the decision dialects."""
 
 
 class SpecError(ValueError):
@@ -357,6 +368,29 @@ class VerifySpec:
 
 
 @dataclass(frozen=True)
+class DecisionModel:
+    """The decision model of a run; None takes the settings' ``decisions``."""
+
+    model: str | None
+    provider: str | None
+    endpoint: str | None
+
+
+@dataclass(frozen=True)
+class ClassifySpec:
+    """One ``classify`` of the works in ``output``; ``entry_ids`` empty takes all.
+
+    ``force`` asks every page again, current labels included.
+    """
+
+    entry_ids: tuple[str, ...]
+    force: bool
+    decision: DecisionModel
+    output: Path
+    run: RunControl
+
+
+@dataclass(frozen=True)
 class StatusSpec:
     """One ``status`` listing of ``output``, against the works CSV ``input``."""
 
@@ -397,6 +431,7 @@ type CommandSpec = (
     | SearchSpec
     | InspectSpec
     | VerifySpec
+    | ClassifySpec
     | StatusSpec
     | DropSpec
     | ProvidersSpec
@@ -415,6 +450,8 @@ _GROUP_TITLES = {
     "download": "download",
     "limits": "size limits",
     "pages": "page check",
+    "classify": "pages",
+    "decision": "decision model",
     "drop": "works to drop (exactly one)",
     "output": "output",
     "run": "run control",
@@ -875,6 +912,58 @@ VERIFY_OPTIONS = OptionTable(
     group_titles=_GROUP_TITLES,
 )
 
+
+def _decision(name: str, help: str, **extra: Any) -> Option:
+    return Option(
+        name,
+        "--" + name.replace("_", "-"),
+        help,
+        group="decision",
+        target=f"decision.{name.removeprefix('decision_')}",
+        settable=False,
+        **extra,
+    )
+
+
+CLASSIFY_OPTIONS = OptionTable(
+    [
+        replace(_STORE_ENTRY_IDS, help="only these works", default_help="all works"),
+        flag_option(
+            "force",
+            "ask every page again, current labels included",
+            group="classify",
+            target="force",
+        ),
+        _decision(
+            "decision_model",
+            "decision model id; vendor/model ids go to OpenRouter",
+            type=_text,
+            metavar="ID",
+            default_help="decisions.model",
+        ),
+        _decision(
+            "decision_provider",
+            "dialect and key of the decision model",
+            choices=DECISION_PROVIDERS,
+            default_help="from the model id",
+        ),
+        _decision(
+            "decision_endpoint",
+            "Decisions endpoint URL",
+            type=_text,
+            metavar="URL",
+            default_help="the provider's endpoint",
+        ),
+        _output("output root to classify"),
+        dry_run_option(
+            "run.dry_run", "list the pages to ask without requests or writes"
+        ),
+        _JSON,
+        _SETTINGS,
+    ],
+    group_titles=_GROUP_TITLES,
+)
+
 STATUS_OPTIONS = OptionTable(
     [
         replace(_INPUT, help="works CSV; rows without a store entry count as new"),
@@ -939,6 +1028,7 @@ TABLES: Mapping[str, OptionTable] = {
     "search": SEARCH_OPTIONS,
     "inspect": INSPECT_OPTIONS,
     "verify": VERIFY_OPTIONS,
+    "classify": CLASSIFY_OPTIONS,
     "status": STATUS_OPTIONS,
     "drop": DROP_OPTIONS,
     "providers": PROVIDERS_OPTIONS,
@@ -952,6 +1042,7 @@ _SPECS: Mapping[type, str] = {
     SearchSpec: "search",
     InspectSpec: "inspect",
     VerifySpec: "verify",
+    ClassifySpec: "classify",
     StatusSpec: "status",
     DropSpec: "drop",
     ProvidersSpec: "providers",
@@ -1163,6 +1254,21 @@ def resolve_verify(
         entry_ids=values["entry_ids"],
         pages=values["pages"],
         first=values["first"],
+        output=values["output"],
+        run=RunControl(**_part(values, "run")),
+    )
+    return Resolution(spec, sources)
+
+
+def resolve_classify(
+    flags: Mapping[str, Any], defaults: Mapping[str, Any] | None = None
+) -> Resolution[ClassifySpec]:
+    """Resolve the classify options; the decision flags left unset stay None."""
+    values, sources = _resolve_table(CLASSIFY_OPTIONS, flags, defaults)
+    spec = ClassifySpec(
+        entry_ids=values["entry_ids"],
+        force=values["force"],
+        decision=DecisionModel(**_part(values, "decision")),
         output=values["output"],
         run=RunControl(**_part(values, "run")),
     )

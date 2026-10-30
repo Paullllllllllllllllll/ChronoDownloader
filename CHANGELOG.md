@@ -1,5 +1,33 @@
 # Changelog
 
+- **v1.2.0** (30 October 2026) -- The new `classify` command asks a decision
+  model for the page type of every page image the store records, under the
+  shared page taxonomy of `common/page_types.py`, and stores one label per
+  page in the new `page_labels` table. Pages go in source order at 768 pixels
+  on the longer side, up to 20 to a request, with the work's stored input
+  fields as context, through the run's network as provider `classify`, which
+  takes the policy and slot limit of `judge.network` but keeps its own pacing
+  and breaker, so a refused classify model never defers a download. The
+  model, provider, endpoint, image size, grouping, profile and
+  timeout come from the new `decisions:` settings block or the
+  `--decision-model`, `--decision-provider` and `--decision-endpoint` flags; a
+  `vendor/model` id goes to OpenRouter and any other to OpenAI, whose key
+  variable `api_keys.openai` is new. A label records the attempt of its file
+  and the request fingerprint, so a rerun asks only pages without a current
+  label (`--force` asks all), a work's labels of other request settings are
+  deleted before its pages are asked again, and a label whose file was
+  replaced while it was asked never lands. `classify` holds each work's lease
+  while it asks, never changes a status or an input field, and reports the
+  requests and their token usage in its JSON summary. The store moves to
+  schema version 2: a version 1 store is migrated in place when opened, or
+  refused with exit 2 while a run of an older version holds a work's lease;
+  the labels of replaced, removed, missing and dropped files are deleted with
+  their rows; and the view `title_page_picks` names each work's title page by
+  the shared rule (the highest `title_page` probability among the first ten
+  source pages, if it reaches .5), counting only labels of the current files,
+  with `pages_leading` against `pages_labelled` to show a gap or an
+  unfinished run. The judge masks its key in every string of a response
+  before parsing it. Pillow is a new dependency.
 - **v1.1.4** (29 October 2026) -- The security floor of urllib3, the
   transitive dependency of requests, is raised from 2.7 to 2.8, the first
   release outside the ranges of the current urllib3 advisories. The lock

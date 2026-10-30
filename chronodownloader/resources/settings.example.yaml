@@ -14,6 +14,7 @@ api_keys:
   hathitrust: HATHI_API_KEY      # read but unused: HathiTrust is metadata-only
   annas_archive: ANNAS_ARCHIVE_API_KEY  # optional member key for fast downloads
   openrouter: OPENROUTER_API_KEY  # judge and page model; --matching fuzzy needs none
+  openai: OPENAI_API_KEY          # classify through the OpenAI Decisions API
 
 # Decision model that judges candidates and pages (OpenRouter Decisions API).
 judge:
@@ -38,6 +39,17 @@ judge:
     max_backoff_s: 60.0
     timeout_s: 300
     slots: 4                # concurrent requests on this machine
+
+# Decision model that classifies page images (classify); its requests take
+# judge.network's policy and slot limit, with pacing and a breaker of their own.
+decisions:
+  model: typesafe/jev-1.14  # vendor/model ids go to OpenRouter, others to OpenAI
+  provider: null            # openai | openrouter; null: from the model id
+  endpoint: null            # null: the provider's Decisions endpoint
+  image_max_px: 768         # longer side of a page sent
+  pages_per_request: 20     # pages per request, at most 400
+  profile: general          # page types: general | culinary
+  timeout_s: 120            # request timeout
 
 # Machine-wide coordination of providers and the judge across agents; the
 # database is <state_dir>/coordination.sqlite.

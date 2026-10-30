@@ -13,9 +13,11 @@ from chronodownloader.options.options import Source
 from chronodownloader.spec import (
     DOWNLOAD_OPTIONS,
     TABLES,
+    DecisionModel,
     Resolution,
     SpecError,
     effective_spec,
+    resolve_classify,
     resolve_download,
     resolve_drop,
     resolve_fetch,
@@ -34,6 +36,7 @@ RESOLVERS: Mapping[str, Callable[..., Resolution[Any]]] = {
     "search": resolve_search,
     "inspect": resolve_inspect,
     "verify": resolve_verify,
+    "classify": resolve_classify,
     "status": resolve_status,
     "drop": resolve_drop,
     "providers": resolve_providers,
@@ -85,6 +88,15 @@ def test_the_defaults_block_is_checked_against_the_download_table() -> None:
     inspect = _resolve(["inspect", "--provider", "mdz", "--id", "b1"], defaults)
     assert inspect.spec.providers == ("wellcome", "mdz")
     assert inspect.spec.output == Path("store")
+
+
+def test_classify_leaves_unset_decision_flags_to_the_settings() -> None:
+    defaults = DOWNLOAD_OPTIONS.check_defaults({"output": "store"})
+    spec = _resolve(["classify"], defaults).spec
+    assert spec.decision == DecisionModel(None, None, None)
+    assert (spec.output, spec.force, spec.entry_ids) == (Path("store"), False, ())
+    given = _resolve(["classify", "--decision-model", "a/b"]).spec
+    assert given.decision.model == "a/b"
 
 
 SPEC_ERRORS = [
@@ -156,6 +168,18 @@ ROUND_TRIPS = [
     ["search", "--input", "w.csv", "--output", "out", "--max-candidates", "2"],
     ["inspect", "--entry-ids", "E1", "--output", "out", "--first", "4"],
     ["verify", "--pages", "--first", "3", "--dry-run"],
+    [
+        "classify",
+        "--entry-ids",
+        "E1",
+        "--force",
+        "--decision-model",
+        "gpt-6-luna",
+        "--decision-provider",
+        "openrouter",
+        "--decision-endpoint",
+        "https://proxy.example/decisions",
+    ],
     ["status", "--input", "w.csv", "--only", "needs_review", "--json"],
     ["drop", "--output", "out", "--only", "failed,no_match", "--dry-run"],
     ["providers", "--json"],

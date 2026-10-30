@@ -16,12 +16,14 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from chronodownloader import sqlite as sqlite_module
+from chronodownloader.common import page_types
 from chronodownloader.output import _promotion
 from chronodownloader.output import store as store_module
 from chronodownloader.output._liveness import own_creation, process_alive
@@ -31,17 +33,22 @@ from chronodownloader.output.store import (
     LEASE_TTL,
     SCHEMA_VERSION,
     CandidateInput,
+    FileRow,
     FolderConflictError,
     Judgment,
     Lease,
     LeaseLostError,
     NewerSchemaError,
+    PageLabel,
     Promotion,
     Store,
+    StoreBusyError,
     StoreError,
     UnreadableDatabaseError,
     VersionlessDatabaseError,
     WorkInput,
+    read_page_labels,
+    read_title_page_picks,
     read_work_candidates,
     read_work_status,
     unstored_folders,
@@ -150,7 +157,7 @@ def _staging_root(root: Path, entry_id: str) -> Path:
 # Opening and schema
 
 
-def test_opening_creates_schema_version_one_with_the_read_views(
+def test_opening_creates_schema_version_two_with_the_read_views(
     opened: Callable[..., Store], root: Path
 ) -> None:
     store = opened()
@@ -160,6 +167,7 @@ def test_opening_creates_schema_version_one_with_the_read_views(
         "candidates",
         "files",
         "meta",
+        "page_labels",
         "runs",
         "works",
     ]
@@ -172,7 +180,7 @@ def test_opening_creates_schema_version_one_with_the_read_views(
             )
         ],
     )
-    assert views == ["work_candidates", "work_status"]
+    assert views == ["title_page_picks", "work_candidates", "work_status"]
     assert sqlite_module.read_rows(store.path, "meta") == [
         {"key": "schema_version", "value": str(SCHEMA_VERSION)}
     ]
@@ -187,11 +195,11 @@ def test_a_newer_database_is_refused_and_left_as_it_is(
 ) -> None:
     opened().close()
     with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
-        connection.execute("UPDATE meta SET value = '2'")
+        connection.execute("UPDATE meta SET value = '3'")
         connection.commit()
     before = (root / DATABASE_NAME).read_bytes()
 
-    with pytest.raises(NewerSchemaError, match="version 2") as raised:
+    with pytest.raises(NewerSchemaError, match="version 3") as raised:
         Store(root, clock=clock)
     assert raised.value.exit_code == ExitCode.USAGE == 2
     assert (root / DATABASE_NAME).read_bytes() == before
@@ -1272,3 +1280,237 @@ def test_a_drop_keeps_unrecorded_files_and_refuses_another_runs_lease(
     assert note.is_file()
     assert not _final(root, "e1", "p00001.jpg").exists()
     assert other.work("e2") is not None
+
+
+# Page labels and the title-page view
+
+
+def _label(file: FileRow, index: int, title_page: float) -> PageLabel:
+    probabilities = {"title_page": title_page, "body_text": 1.0 - title_page}
+    page_type = "title_page" if title_page >= 0.5 else "body_text"
+    return PageLabel(
+        file.path,
+        file.attempt_id,
+        index,
+        page_type,
+        probabilities,
+        page_types.VERSION,
+        "general",
+        "typesafe/jev-1.14",
+        "openrouter",
+        "fp",
+    )
+
+
+def _pages(count: int) -> dict[str, bytes]:
+    return {f"p{number:05d}": b"page" for number in range(1, count + 1)}
+
+
+def _labelled(store: Store, lease: Lease, title_pages: Sequence[float]) -> None:
+    """Commit one page image per probability and label each with it."""
+    store.commit_download(lease, *_stage(store, lease, _pages(len(title_pages))))
+    files = sorted(store.files(lease.entry_id), key=lambda row: row.item)
+    labels = [
+        _label(file, index, value)
+        for index, (file, value) in enumerate(zip(files, title_pages, strict=True))
+    ]
+    assert store.record_page_labels(lease, labels) == (len(labels), 0)
+
+
+def _pick(root: Path, entry_id: str = "e1") -> dict[str, Any]:
+    (row,) = read_title_page_picks(root, [entry_id])
+    return row
+
+
+def test_a_version_one_store_is_migrated_in_place(root: Path, clock: FakeClock) -> None:
+    root.mkdir()
+    with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
+        for statement in store_module._SCHEMA_V1:
+            connection.execute(statement)
+        connection.execute("INSERT INTO meta VALUES ('schema_version', '1')")
+        connection.execute(
+            "INSERT INTO works (entry_id, title, folder, created_at, updated_at) "
+            "VALUES ('e1', 'Kochbuch', 'e1_kochbuch', 't', 't')"
+        )
+        connection.commit()
+
+    assert read_page_labels(root, "e1") == []
+    assert read_title_page_picks(root) == []
+    with Store(root, clock=clock, reconcile=False, migrate=False):
+        assert store_module.check_schema(root / DATABASE_NAME) == 1
+    with Store(root, clock=clock) as store:
+        assert store_module.check_schema(store.path) == SCHEMA_VERSION == 2
+        assert "page_labels" in sqlite_module.table_names(store.path)
+        assert [row["entry_id"] for row in read_work_status(root)] == ["e1"]
+        assert store.page_labels("e1") == []
+
+
+def test_a_version_one_store_under_an_older_runs_lease_is_not_migrated(
+    root: Path, clock: FakeClock
+) -> None:
+    root.mkdir()
+    with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
+        for statement in store_module._SCHEMA_V1:
+            connection.execute(statement)
+        connection.execute("INSERT INTO meta VALUES ('schema_version', '1')")
+        connection.execute(
+            "INSERT INTO works (entry_id, title, folder, lease_holder, "
+            "lease_expires_at, created_at, updated_at) "
+            "VALUES ('e1', 'Kochbuch', 'e1_kochbuch', 'old-run', ?, 't', 't')",
+            (clock() + 60,),
+        )
+        connection.commit()
+
+    with pytest.raises(StoreBusyError, match="older chronodownloader") as raised:
+        Store(root, clock=clock)
+    assert raised.value.exit_code == ExitCode.USAGE
+    assert store_module.check_schema(root / DATABASE_NAME) == 1
+
+    clock.advance(61)
+    with Store(root, clock=clock) as store:
+        assert store_module.check_schema(store.path) == 2
+
+
+def test_a_label_lands_only_while_its_file_keeps_the_attempt(
+    opened: Callable[..., Store],
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    store.commit_download(lease, *_stage(store, lease, {"p00001": b"old"}))
+    (asked,) = store.files("e1")
+    # The file is replaced between the question and the answer's commit.
+    store.commit_download(lease, *_stage(store, lease, {"p00001": b"new"}))
+    unknown = replace(_label(asked, 1, 0.9), path="objects/p00009.jpg")
+
+    assert store.record_page_labels(lease, [_label(asked, 0, 0.9), unknown]) == (0, 2)
+    assert store.page_labels("e1") == []
+
+    (current,) = store.files("e1")
+    assert store.record_page_labels(lease, [_label(current, 0, 0.9)]) == (1, 0)
+    (label,) = store.page_labels("e1")
+    assert (label.attempt_id, label.run_id) == (current.attempt_id, "a")
+    assert dict(label.probabilities) == pytest.approx(
+        {"title_page": 0.9, "body_text": 0.1}
+    )
+    store.release(lease)
+    with pytest.raises(LeaseLostError):
+        store.record_page_labels(lease, [_label(current, 0, 0.9)])
+
+
+def test_replacing_removing_missing_and_dropped_files_lose_their_labels(
+    opened: Callable[..., Store], root: Path
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    _labelled(store, lease, [0.9, 0.1, 0.1, 0.1])
+    store.commit_download(lease, *_stage(store, lease, {"p00001": b"again"}))
+    store.remove_files(lease, ["objects/p00002.jpg"])
+    store.release(lease)
+    _final(root, "e1", "p00003.jpg").unlink()
+
+    opened()
+    assert [label.path for label in store.page_labels("e1")] == ["objects/p00004.jpg"]
+    store.drop(["e1"])
+    assert store.page_labels("e1") == []
+
+
+@pytest.mark.parametrize(
+    "title_pages",
+    [
+        [0.1, 0.8, 0.3],
+        [0.2, 0.7, 0.7, 0.1],
+        [0.1, 0.5, 0.4999],
+        [0.1, 0.49, 0.2],
+        [0.0] * 10 + [0.99],
+        [0.1] * 9 + [0.6, 0.95],
+        [0.9],
+    ],
+    ids=["clear", "tie", "threshold", "below", "eleventh", "tenth", "single"],
+)
+def test_the_title_page_view_follows_the_shared_rule(
+    opened: Callable[..., Store], root: Path, title_pages: list[float]
+) -> None:
+    assert store_module.PICK_THRESHOLD == page_types.TITLE_PAGE_THRESHOLD
+    assert store_module.PICK_SEARCH == page_types.TITLE_PAGE_SEARCH
+    store = opened("a")
+    _labelled(store, _acquire(store), title_pages)
+
+    expected = page_types.title_page_index([{"title_page": p} for p in title_pages])
+    row = _pick(root)
+    assert row["page_index"] == expected
+    assert (row["pages_total"], row["pages_labelled"]) == (
+        len(title_pages),
+        min(len(title_pages), page_types.TITLE_PAGE_SEARCH),
+    )
+    if expected is None:
+        assert (row["path"], row["probability"]) == (None, None)
+    else:
+        assert row["path"] == f"objects/p{expected + 1:05d}.jpg"
+        assert row["probability"] == pytest.approx(title_pages[expected])
+
+
+def test_a_partial_download_keeps_source_positions_and_shows_the_gap(
+    opened: Callable[..., Store], root: Path
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    items = ("p00001", "p00002", "p00004", "p00005")
+    store.commit_download(lease, *_stage(store, lease, dict.fromkeys(items, b"page")))
+    by_item = {row.item: row for row in store.files("e1")}
+    labels = [
+        _label(by_item[item], int(item[1:]) - 1, 0.9 if item == "p00004" else 0.1)
+        for item in items
+    ]
+    store.record_page_labels(lease, labels)
+
+    row = _pick(root)
+    assert (row["pages_total"], row["pages_leading"], row["pages_labelled"]) == (
+        4,
+        5,
+        4,
+    )
+    assert (row["path"], row["page_index"]) == ("objects/p00004.jpg", 3)
+
+
+def test_items_not_of_page_form_are_numbered_in_item_order(
+    opened: Callable[..., Store], root: Path
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    store.commit_download(lease, *_stage(store, lease, {"p00002": b"1", "x": b"2"}))
+    by_item = {row.item: row for row in store.files("e1")}
+    store.record_page_labels(
+        lease, [_label(by_item["p00002"], 0, 0.1), _label(by_item["x"], 1, 0.8)]
+    )
+
+    row = _pick(root)
+    assert (row["pages_leading"], row["pages_labelled"], row["page_index"]) == (
+        2,
+        2,
+        1,
+    )
+
+
+def test_the_view_counts_only_current_labels_and_shows_an_incomplete_run(
+    opened: Callable[..., Store], root: Path
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    store.commit_download(lease, *_stage(store, lease, _pages(3)))
+    files = sorted(store.files("e1"), key=lambda row: row.item)
+    store.record_page_labels(lease, [_label(files[0], 0, 0.2)])
+    assert (_pick(root)["pages_labelled"], _pick(root)["path"]) == (1, None)
+
+    store.record_page_labels(lease, [_label(files[2], 2, 0.9)])
+    assert _pick(root)["path"] == "objects/p00003.jpg"
+    # A process of version 1 replaces the file without deleting its label.
+    with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
+        connection.execute(
+            "UPDATE files SET attempt_id = attempt_id + 100 WHERE path = ?",
+            ("objects/p00003.jpg",),
+        )
+        connection.commit()
+
+    row = _pick(root)
+    assert (row["pages_total"], row["pages_labelled"], row["path"]) == (3, 1, None)
+    assert len(store.page_labels("e1")) == 2

@@ -2,7 +2,8 @@
 
 A run builds one :class:`Network` from its settings and the machine-wide
 coordinator and closes it at the end. Every call names its provider key
-(``judge`` for the decision endpoint). A call
+(``judge`` for the judge's decision requests, ``classify`` for those of
+``classify``). A call
 
 1. asks the coordinator's breaker; an open breaker raises
    :class:`~chronodownloader.net.errors.BreakerOpen` and nothing is sent;
@@ -107,12 +108,15 @@ from .payload import (
 from .ports import CoordinatorPort
 from .session import build_session
 
-__all__ = ["JUDGE", "DownloadOutcome", "Network", "RequestOptions"]
+__all__ = ["CLASSIFY", "JUDGE", "DownloadOutcome", "Network", "RequestOptions"]
 
 logger = logging.getLogger(__name__)
 
 JUDGE = "judge"
 """The provider key of the decision endpoint."""
+CLASSIFY = "classify"
+"""The provider key of ``classify``'s decision requests: the policy and slot
+limit of ``judge.network``, with pacing, slots and breaker of its own."""
 
 CHUNK_BYTES = 64 * 1024
 PART_SUFFIX = ".part"
@@ -406,9 +410,10 @@ class Network:
     ) -> None:
         policies = {key: block.network for key, block in settings.providers.items()}
         policies[JUDGE] = settings.judge.network.network_settings()
+        policies[CLASSIFY] = policies[JUDGE]
         self._policies: Mapping[str, NetworkSettings] = MappingProxyType(policies)
         slot_limits = {key: settings.slots(key) for key in settings.providers}
-        slot_limits[JUDGE] = settings.judge.network.slots
+        slot_limits[JUDGE] = slot_limits[CLASSIFY] = settings.judge.network.slots
         self._slot_limits: Mapping[str, int] = MappingProxyType(slot_limits)
         self._host_key = host_key
         self._quotas: Mapping[str, AnnasQuota] = MappingProxyType(

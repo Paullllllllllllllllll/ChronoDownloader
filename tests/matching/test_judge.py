@@ -673,6 +673,10 @@ class TestSecrecy:
                 _json_reply({"error": {"message": f"bad key {KEY}"}}), id="echoed"
             ),
             pytest.param(
+                _json_reply({"error": {"message": "x" * 190 + KEY}}),
+                id="echoed-across-the-cut",
+            ),
+            pytest.param(
                 _json_reply(
                     _malformed({"match": {"type": "choice", "choice": f"x{KEY}"}})
                 ),
@@ -696,8 +700,8 @@ class TestSecrecy:
             chain.append(error)
             error = error.__cause__ or error.__context__
         for raised in chain:
-            assert KEY not in str(raised)
-            assert KEY not in repr(raised)
+            assert KEY[:10] not in str(raised)
+            assert KEY[:10] not in repr(raised)
         assert KEY not in caplog.text
         assert KEY not in repr(client)
 

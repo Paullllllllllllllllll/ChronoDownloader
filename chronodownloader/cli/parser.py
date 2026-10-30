@@ -8,6 +8,7 @@ from typing import Any, NoReturn
 
 from chronodownloader.options.options import HelpFormatter, OptionTable
 from chronodownloader.spec import (
+    CLASSIFY_OPTIONS,
     DOWNLOAD_OPTIONS,
     DROP_OPTIONS,
     FETCH_OPTIONS,
@@ -142,6 +143,31 @@ Exit codes:
 """
     + INTERRUPTED
     + JSON_LINE
+)
+
+CLASSIFY_EPILOG = (
+    PRECEDENCE
+    + """\
+The decision model and its request settings come from the settings'
+decisions: block; the --decision-* flags win over it.
+
+Exit codes:
+  0    no work failed; works left deferred or blocked are open, not failed;
+       a dry run that planned
+  1    a page could not be read or classified, or a label went stale
+  2    usage or configuration error: an invalid option or settings file, a
+       store the tool refuses, or an unset key of the decision provider
+"""
+    + INTERRUPTED
+    + JSON_LINE
+    + """
+Examples:
+  Classify every page image of an output root:
+    chronodownloader classify --output out
+  Ask two works again through OpenAI, every page included:
+    chronodownloader classify --output out --entry-ids E0001,E0002 --force
+      --decision-model gpt-6-luna-decisions --decision-provider openai
+"""
 )
 
 STATUS_EPILOG = (
@@ -342,6 +368,24 @@ def add_verify_command(commands: Commands) -> argparse.ArgumentParser:
     )
 
 
+def add_classify_command(commands: Commands) -> argparse.ArgumentParser:
+    """Add the classify subcommand."""
+    return _add_command(
+        commands,
+        "classify",
+        CLASSIFY_OPTIONS,
+        help="classify the stored page images by page type",
+        description=(
+            "Ask the decision model for the page type of every page image the "
+            "store records (title page, preface, body text and others) and "
+            "store the labels. A page whose label is current for the file and "
+            "the request settings is not asked again; the title page each work "
+            "shows is picked from the labels."
+        ),
+        epilog=CLASSIFY_EPILOG,
+    )
+
+
 def add_status_command(commands: Commands) -> argparse.ArgumentParser:
     """Add the status subcommand."""
     return _add_command(
@@ -412,6 +456,7 @@ SUBCOMMANDS: tuple[Callable[[Commands], argparse.ArgumentParser], ...] = (
     add_search_command,
     add_inspect_command,
     add_verify_command,
+    add_classify_command,
     add_status_command,
     add_drop_command,
     add_providers_command,

@@ -99,7 +99,10 @@ __all__ = [
     "catalog_record",
     "judge_key",
     "page_request",
+    "parse_masked",
+    "post_decision",
     "sought_work",
+    "usable_key",
     "work_request",
 ]
 
@@ -458,9 +461,14 @@ def judge_key(settings: Settings, environ: Mapping[str, str] | None = None) -> s
     key = (os.environ if environ is None else environ).get(env_var, "").strip()
     if not key:
         raise MissingJudgeKey(env_var)
-    if not _KEY_SHAPE.fullmatch(key):
+    if not usable_key(key):
         raise MissingJudgeKey(env_var, unusable=True)
     return key
+
+
+def usable_key(key: str) -> bool:
+    """Return True for a key of visible ASCII characters only."""
+    return _KEY_SHAPE.fullmatch(key) is not None
 
 
 class JudgeClient:
@@ -548,49 +556,104 @@ class JudgeClient:
         )
 
     def _parse(self, data: Any, questions: Sequence[Question]) -> DecisionResult:
-        """Return the answers of *data*, masking this client's key in an error.
-
-        An answer's text is untrusted: an error envelope may echo the key. The
-        error is raised outside the handler, so no unmasked message stays in
-        its chain.
-        """
-        try:
-            return decisions.parse_response(_DIALECT, data, questions)
-        except decisions.MalformedAnswer as exc:
-            message = str(exc).replace(self._key, "***")
-        raise MalformedAnswer(message)
+        """Return the answers of *data*, masking this client's key in an error."""
+        return parse_masked(_DIALECT, data, questions, self._key)
 
     def _post(self, body: Mapping[str, Any]) -> Any:
         """Send *body* under a judge slot and return the decoded response."""
-        try:
-            with self._network.hold_slot(JUDGE) as slot:
-                response = self._network.request(
-                    JUDGE,
-                    "POST",
-                    self._judge.endpoint,
-                    json=body,
-                    headers=self._authorization,
-                    slot=slot,
-                )
-        except BreakerOpen as exc:
-            # Refusals (401, 403) count as breaker failures too: an open
-            # breaker they opened stays a refusal, not an outage.
-            if exc.cause == Cause.BLOCKED:
-                raise JudgeRefused(exc) from exc
-            raise self._unavailable(str(exc), exc.until) from exc
-        except SlotLost as exc:
-            raise self._unavailable("the judge slot was lost", None) from exc
-        except RequestFailed as exc:
-            if exc.cause in (Cause.TRANSIENT, Cause.DNS, Cause.SSL):
-                raise self._unavailable(str(exc), None) from exc
-            raise JudgeRefused(exc) from exc
-        try:
-            return response.json()
-        except ValueError as exc:
-            raise MalformedAnswer("the response is not JSON") from exc
+        return post_decision(
+            self._network,
+            self._judge.endpoint,
+            body,
+            self._authorization,
+            unavailable=self._unavailable,
+        )
 
     def _unavailable(self, reason: str, until: float | None) -> JudgeUnavailable:
         retry_after = self._clock() + self._judge.retry_after_minutes * 60.0
         if until is not None:
             retry_after = max(retry_after, until)
         return JudgeUnavailable(reason, retry_after)
+
+
+def parse_masked(
+    dialect: decisions.Dialect, data: Any, questions: Sequence[Question], key: str
+) -> DecisionResult:
+    """Return the answers of *data*, masking *key* in an error.
+
+    An answer's text is untrusted: an error envelope may echo the key. Every
+    string of *data* is masked before parsing, since the parser cuts error
+    texts and a key across the cut would leave a prefix; the error is raised
+    outside the handler, so no unmasked message stays in its chain.
+
+    Raises:
+        MalformedAnswer: The response does not answer *questions*.
+    """
+    data = _masked(data, key)
+    try:
+        return decisions.parse_response(dialect, data, questions)
+    except decisions.MalformedAnswer as exc:
+        message = str(exc).replace(key, "***")
+    raise MalformedAnswer(message)
+
+
+def _masked(value: Any, key: str) -> Any:
+    """Return *value* with *key* replaced by ``***`` in every string."""
+    if isinstance(value, str):
+        return value.replace(key, "***")
+    if isinstance(value, Mapping):
+        return {item: _masked(entry, key) for item, entry in value.items()}
+    if isinstance(value, list):
+        return [_masked(entry, key) for entry in value]
+    return value
+
+
+def post_decision(
+    network: Network,
+    endpoint: str,
+    body: Mapping[str, Any],
+    headers: Mapping[str, str],
+    *,
+    unavailable: Callable[[str, float | None], JudgeUnavailable],
+    timeout_s: float | None = None,
+    key: str = JUDGE,
+) -> Any:
+    """Send *body* to *endpoint* under a slot of *key*; return the decoded response.
+
+    The call is paced, breaker-checked and retried as provider *key*
+    (``judge``, or ``classify``) under ``judge.network``; *timeout_s* None
+    keeps ``judge.network.timeout_s``. *unavailable* builds the deferral
+    from a reason and the time an open breaker admits a probe.
+
+    Raises:
+        JudgeUnavailable: The endpoint stays unreachable.
+        JudgeRefused: The endpoint refused the request.
+        MalformedAnswer: The response is not JSON.
+    """
+    try:
+        with network.hold_slot(key) as slot:
+            response = network.request(
+                key,
+                "POST",
+                endpoint,
+                json=body,
+                headers=headers,
+                slot=slot,
+                timeout_s=timeout_s,
+            )
+    except BreakerOpen as exc:
+        # Refusals (401, 403) count as breaker failures too: an open
+        # breaker they opened stays a refusal, not an outage.
+        if exc.cause == Cause.BLOCKED:
+            raise JudgeRefused(exc) from exc
+        raise unavailable(str(exc), exc.until) from exc
+    except SlotLost as exc:
+        raise unavailable("the judge slot was lost", None) from exc
+    except RequestFailed as exc:
+        if exc.cause in (Cause.TRANSIENT, Cause.DNS, Cause.SSL):
+            raise unavailable(str(exc), None) from exc
+        raise JudgeRefused(exc) from exc
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise MalformedAnswer("the response is not JSON") from exc

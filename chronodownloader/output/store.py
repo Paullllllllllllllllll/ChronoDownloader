@@ -3,11 +3,12 @@
 The store is the only status record of an output root. It holds the runs, the
 works with their input fields and status, the candidates found for each work
 with their scores and judgments, every download attempt with its completeness,
-and the files each work's folder holds. External readers use the views
-``work_status`` and ``work_candidates`` (the read contract); the tables behind
-them may change in a later schema version.
+the files each work's folder holds and the page type of each page image.
+External readers use the views ``work_status``, ``work_candidates`` and
+``title_page_picks`` (the read contract); the tables behind them may change in
+a later schema version.
 
-Schema (version 1, ``meta.schema_version``)::
+Schema (version 2, ``meta.schema_version``)::
 
     meta       (key TEXT PRIMARY KEY, value TEXT)  -- schema_version,
                                                    -- generation_floor
@@ -40,6 +41,13 @@ Schema (version 1, ``meta.schema_version``)::
                 source_url, label, declared_format,
                 attempt_id -> attempts, recorded_at,
                 PRIMARY KEY (entry_id, path))
+    page_labels (entry_id, path,              -- the files row labelled
+                attempt_id,                   -- that row's attempt when asked
+                page_index,                   -- source position (Page index)
+                page_type, probabilities JSON, taxonomy_version, profile,
+                model, dialect, fingerprint,  -- of the decision request
+                run_id -> runs, created_at,
+                PRIMARY KEY (entry_id, path))  -- version 2
 
     work_status     one row per work: the works columns, ``status``
                     (``blocked`` while a run holds an unexpired lease by the
@@ -52,6 +60,39 @@ Schema (version 1, ``meta.schema_version``)::
                     ``retry_after`` and ``lease_expires_at`` are ISO 8601.
     work_candidates one row per candidate, history included, with the work's
                     ``folder``, ``selected`` and ``current`` (0 or 1).
+    title_page_picks one row per work with page images: ``entry_id``,
+                    ``pages_total`` (its image files), ``pages_leading``
+                    (the leading pages a complete work has: the smaller of
+                    10 and the highest ``page_index`` plus one),
+                    ``pages_labelled`` (current labels among the pages of
+                    ``page_index`` below 10) and the title page the shared
+                    rule picks
+                    (:func:`~chronodownloader.common.page_types.title_page_index`):
+                    among the pages of ``page_index`` below 10, the labelled
+                    page of the highest ``title_page`` probability (the
+                    earlier one on a tie), if it reaches .5; ``path``,
+                    ``page_index`` and ``probability`` of that page, else
+                    NULL. A label is current when its ``attempt_id`` is the
+                    files row's; a stale one never counts.
+                    ``pages_labelled`` below ``pages_leading`` marks a
+                    leading page missing on disk or not yet classified, not
+                    a work without a title page.
+
+Page index. A page's ``page_index`` is its position in the source: item
+``pNNNNN`` is page NNNNN - 1, so a partial download keeps the gaps of the
+pages it lacks. When any image item of a work is not of that form (``p``
+and a number from 1), the work's images are numbered 0, 1, ... in item order
+instead. ``page_labels.page_index`` stores the same number.
+
+Page labels. A label keys to its ``files`` row and the attempt that wrote
+the row; the commit that replaces the row, the reconciliation that deletes it,
+:meth:`Store.remove_files` and :meth:`Store.drop` delete the label in the same
+transaction. :meth:`Store.record_page_labels` inserts a label only while the
+row still carries the attempt the label was asked for. A label of a row an
+older process replaced stays in the table but is stale, so no reader takes it
+for current. The table has no foreign keys to ``works``, ``attempts`` or
+``files``, so that a version 1 process still open on a migrated store can
+delete those rows.
 
 Times are ISO 8601 UTC text (``2026-10-23T12:00:00.000Z``) except
 ``retry_after`` and ``lease_expires_at``, which are epoch seconds from the
@@ -69,7 +110,13 @@ masked; error texts are cut to :data:`ERROR_TEXT_LIMIT` characters.
 
 Opening. A database with tables but no schema version, one with a newer
 version and one SQLite cannot read raise a :class:`StoreError` (exit code
-2) and are left as they are; only a missing or empty database is created.
+2) and are left as they are; only a missing or empty database is created. A
+version 1 store is migrated in place, in the opening's write transaction: the
+version 2 table and view are created and ``meta.schema_version`` becomes 2.
+While a work of it is under an unexpired lease, which only a version 1
+process can hold, the opening refuses with :class:`StoreBusyError` and
+migrates nothing.
+The read-only functions read a version 1 store as one without page labels.
 
 Writers and leases. Every write is one short ``BEGIN IMMEDIATE`` transaction
 through :func:`chronodownloader.sqlite.transact` (rollback journal, bounded
@@ -194,9 +241,13 @@ __all__ = [
     "LeaseLostError",
     "NewerSchemaError",
     "NotSelectedError",
+    "PICK_SEARCH",
+    "PICK_THRESHOLD",
+    "PageLabel",
     "Promotion",
     "Reconciliation",
     "Store",
+    "StoreBusyError",
     "StoreError",
     "StoredStatus",
     "UnreadableDatabaseError",
@@ -207,6 +258,8 @@ __all__ = [
     "check_schema",
     "read_candidates",
     "read_files",
+    "read_page_labels",
+    "read_title_page_picks",
     "read_work_candidates",
     "read_work_status",
     "unstored_folders",
@@ -217,7 +270,12 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 DATABASE_NAME: Final = "chronodownloader.sqlite"
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
+PICK_THRESHOLD: Final = 0.5
+PICK_SEARCH: Final = 10
+"""The ``title_page_picks`` rule; equal to ``page_types.TITLE_PAGE_THRESHOLD``
+and ``TITLE_PAGE_SEARCH``, but fixed here, since a stored view keeps its SQL
+and a change needs a schema version."""
 LEASE_TTL: Final = 600.0
 """Seconds a work lease lasts after its acquisition or last renewal."""
 LEASE_RENEW_INTERVAL: Final = 60.0
@@ -407,6 +465,76 @@ FROM candidates AS c
 JOIN works AS w ON w.entry_id = c.entry_id""",
 )
 
+_PICKED = f"labelled AND page_index < {PICK_SEARCH} AND probability >= {PICK_THRESHOLD}"
+
+_SCHEMA_V2: Final = (
+    """CREATE TABLE page_labels (
+    entry_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    page_index INTEGER NOT NULL CHECK (page_index >= 0),
+    page_type TEXT NOT NULL,
+    probabilities TEXT NOT NULL,
+    taxonomy_version TEXT NOT NULL,
+    profile TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dialect TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES runs (run_id),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (entry_id, path)
+)""",
+    f"""CREATE VIEW title_page_picks AS
+WITH images AS (
+    SELECT f.entry_id, f.path, f.attempt_id, f.item,
+        f.item GLOB 'p[0-9]*' AND substr(f.item, 2) NOT GLOB '*[^0-9]*'
+            AND CAST(substr(f.item, 2) AS INTEGER) > 0 AS sourced,
+        row_number() OVER (PARTITION BY f.entry_id ORDER BY f.item, f.path) - 1
+            AS position,
+        count(*) OVER (PARTITION BY f.entry_id) AS pages_total
+    FROM files AS f
+    WHERE f.kind = 'image'
+),
+pages AS (
+    SELECT entry_id, path, attempt_id, pages_total,
+        CASE WHEN min(sourced) OVER (PARTITION BY entry_id)
+            THEN CAST(substr(item, 2) AS INTEGER) - 1 ELSE position END
+            AS page_index
+    FROM images
+),
+leading AS (
+    SELECT p.entry_id, p.path, p.page_index, p.pages_total,
+        max(p.page_index) OVER (PARTITION BY p.entry_id) AS last_index,
+        l.entry_id IS NOT NULL AS labelled,
+        COALESCE(json_extract(l.probabilities, '$.title_page'), 0.0)
+            AS probability
+    FROM pages AS p
+    LEFT JOIN page_labels AS l
+        ON l.entry_id = p.entry_id AND l.path = p.path
+        AND l.attempt_id = p.attempt_id
+),
+ranked AS (
+    SELECT entry_id, path, page_index, pages_total, labelled, probability,
+        min({PICK_SEARCH}, last_index + 1) AS pages_leading,
+        sum(labelled AND page_index < {PICK_SEARCH})
+            OVER (PARTITION BY entry_id) AS pages_labelled,
+        row_number() OVER (
+            PARTITION BY entry_id
+            ORDER BY labelled AND page_index < {PICK_SEARCH} DESC,
+                probability DESC, page_index
+        ) AS position
+    FROM leading
+)
+SELECT
+    entry_id, pages_total, pages_leading, pages_labelled,
+    CASE WHEN {_PICKED} THEN path END AS path,
+    CASE WHEN {_PICKED} THEN page_index END AS page_index,
+    CASE WHEN {_PICKED} THEN probability END AS probability
+FROM ranked
+WHERE position = 1""",
+)
+"""The tables and views version 2 adds; a version 1 store is migrated by them."""
+
 _GENERATION_FLOOR = (
     "COALESCE((SELECT CAST(value AS INTEGER) FROM meta "
     "WHERE key = 'generation_floor'), 0)"
@@ -417,7 +545,7 @@ _ACQUIRE = """
 UPDATE works SET
     lease_holder = :holder, lease_expires_at = :until,
     lease_generation = lease_generation + 1,
-    title = :title,
+    title = COALESCE(:title, title),
     creator = COALESCE(:creator, creator), year = COALESCE(:year, year),
     place = COALESCE(:place, place), publisher = COALESCE(:publisher, publisher),
     language = COALESCE(:language, language),
@@ -483,6 +611,26 @@ ON CONFLICT (entry_id, path) DO UPDATE SET
     label = excluded.label, declared_format = excluded.declared_format,
     attempt_id = excluded.attempt_id, recorded_at = excluded.recorded_at
 """
+_UPSERT_LABEL = """
+INSERT INTO page_labels (
+    entry_id, path, attempt_id, page_index, page_type, probabilities,
+    taxonomy_version, profile, model, dialect, fingerprint, run_id, created_at
+)
+SELECT :entry_id, :path, :attempt_id, :page_index, :page_type, :probabilities,
+    :taxonomy_version, :profile, :model, :dialect, :fingerprint, :run_id, :stamp
+WHERE EXISTS (
+    SELECT 1 FROM files WHERE entry_id = :entry_id AND path = :path
+    AND attempt_id = :attempt_id AND kind = 'image'
+)
+ON CONFLICT (entry_id, path) DO UPDATE SET
+    attempt_id = excluded.attempt_id, page_index = excluded.page_index,
+    page_type = excluded.page_type, probabilities = excluded.probabilities,
+    taxonomy_version = excluded.taxonomy_version, profile = excluded.profile,
+    model = excluded.model, dialect = excluded.dialect,
+    fingerprint = excluded.fingerprint, run_id = excluded.run_id,
+    created_at = excluded.created_at
+"""
+"""Lands only while the files row still carries the label's attempt."""
 
 
 # Errors
@@ -496,6 +644,10 @@ class StoreError(Exception):
 
 class NewerSchemaError(StoreError):
     """The database carries a schema version newer than this tool knows."""
+
+
+class StoreBusyError(StoreError):
+    """A version 1 store awaits migration while an older run holds works."""
 
 
 class VersionlessDatabaseError(StoreError):
@@ -669,6 +821,30 @@ class FileRow:
     declared_format: str | None
     attempt_id: int
     recorded_at: str
+
+
+@dataclass(frozen=True)
+class PageLabel:
+    """The page type of one page image, keyed to its ``files`` row.
+
+    *attempt_id* is the attempt of that row when the page was asked;
+    *page_index* its position in the source (module docstring, Page index);
+    *fingerprint* the decision request's (``request_fingerprint``). A label
+    read back carries *run_id* and *created_at*.
+    """
+
+    path: str
+    attempt_id: int
+    page_index: int
+    page_type: str
+    probabilities: Mapping[str, float]
+    taxonomy_version: str
+    profile: str
+    model: str
+    dialect: str
+    fingerprint: str
+    run_id: str | None = None
+    created_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -849,15 +1025,46 @@ def check_schema(
         ) from exc
 
 
-def _initialize(connection: sqlite3.Connection, path: Path) -> None:
-    if _schema_version(connection, path) is not None:
+def _initialize(
+    connection: sqlite3.Connection, path: Path, now: float, *, migrate: bool = True
+) -> None:
+    """Create a missing schema or migrate a version 1 store, in one transaction.
+
+    Without *migrate* an existing store stays at its version. A version 1
+    store is not migrated while a work's lease is unexpired at *now*: only a
+    version 1 process can hold it, and it keeps writing as version 1.
+
+    Raises:
+        StoreBusyError: A version 1 store has a work under an unexpired lease.
+    """
+    version = _schema_version(connection, path)
+    if version == SCHEMA_VERSION or (version is not None and not migrate):
         return
-    for statement in _SCHEMA_V1:
+    if version is not None:
+        leased = connection.execute(
+            "SELECT count(*) FROM works WHERE lease_holder IS NOT NULL "
+            "AND lease_expires_at > ?",
+            (now,),
+        ).fetchone()[0]
+        if leased:
+            raise StoreBusyError(
+                f"{path}: a run of an older chronodownloader holds works in this "
+                "store; let it finish, then rerun."
+            )
+    if version is None:
+        for statement in _SCHEMA_V1:
+            connection.execute(statement)
+        connection.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '1')"
+        )
+    for statement in _SCHEMA_V2:
         connection.execute(statement)
     connection.execute(
-        "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
+        "UPDATE meta SET value = ? WHERE key = 'schema_version'",
         (str(SCHEMA_VERSION),),
     )
+    if version is not None:
+        logger.info("Store %s migrated to schema version %d.", path, SCHEMA_VERSION)
 
 
 # Leases and staging
@@ -939,6 +1146,8 @@ class Store:
     Opening creates the root and a missing or empty database and refuses one
     it does not know (:class:`StoreError`). With *reconcile* (the default),
     :meth:`reconcile` runs once and its report is :attr:`reconciliation`.
+    Without *migrate* a version 1 store is not migrated: such a store serves
+    reads and a dry-run :meth:`drop`, nothing that touches page labels.
     Call :meth:`begin_run` before acquiring leases. Each thread uses its own
     connection, opened on first use; :meth:`close` stops the lease keepers,
     releases this run's leases and closes the connections. *clock* returns
@@ -957,6 +1166,7 @@ class Store:
         lease_ttl: float = LEASE_TTL,
         busy_timeout: float = DEFAULT_BUSY_TIMEOUT,
         reconcile: bool = True,
+        migrate: bool = True,
     ) -> None:
         self.root = Path(root)
         self.path = self.root / DATABASE_NAME
@@ -974,7 +1184,11 @@ class Store:
         check_schema(self.path, busy_timeout=busy_timeout)
         self.root.mkdir(parents=True, exist_ok=True)
         try:
-            self._transact(lambda connection: _initialize(connection, self.path))
+            self._transact(
+                lambda connection: _initialize(
+                    connection, self.path, self.clock(), migrate=migrate
+                )
+            )
             if reconcile:
                 self.reconciliation = self.reconcile()
         except BaseException:  # cleanup on every exit, interrupts too; re-raised
@@ -1135,6 +1349,7 @@ class Store:
         folder: str,
         *,
         select: Callable[[Mapping[str, Any] | None], bool] | None = None,
+        update: bool = True,
     ) -> Lease | None:
         """Lease *work* for this run; None while another run holds it.
 
@@ -1143,7 +1358,8 @@ class Store:
         when it is free, expired or this run's own, or when its holder is a
         dead process on this host (see the module docstring); the acquisition
         increments the generation and updates the input fields (a field the
-        input leaves empty keeps its stored value).
+        input leaves empty keeps its stored value). Without *update* the
+        stored input fields stay as they are.
 
         *select*, when given, is asked inside the acquisition's transaction,
         once the lease is obtainable, with the work's ``work_status`` row as
@@ -1178,12 +1394,7 @@ class Store:
                     f"Folder {folder!r} of work {work.entry_id!r} belongs to "
                     "another work."
                 ) from exc
-            params = {
-                "holder": holder,
-                "until": now + self.lease_ttl,
-                "now": now,
-                "stamp": stamp,
-                "entry_id": work.entry_id,
+            fields = {
                 "title": work.title,
                 "creator": work.creator,
                 "year": work.year,
@@ -1192,6 +1403,14 @@ class Store:
                 "language": work.language,
                 "edition": work.edition,
                 "link": _masked(work.link),
+            }
+            params = {
+                "holder": holder,
+                "until": now + self.lease_ttl,
+                "now": now,
+                "stamp": stamp,
+                "entry_id": work.entry_id,
+                **(fields if update else dict.fromkeys(fields)),
                 "dead": _dead_holder(connection, work.entry_id, holder, now),
             }
             row = connection.execute(_ACQUIRE, params).fetchone()
@@ -1476,6 +1695,66 @@ class Store:
 
         self._leased(lease, write)
 
+    def record_page_labels(
+        self, lease: Lease, labels: Sequence[PageLabel]
+    ) -> tuple[int, int]:
+        """Store page labels of the work; return the labels written and dropped.
+
+        One lease-checked transaction writes each label, replacing the
+        path's earlier one, only while the path's ``files`` row is a page
+        image that still carries the label's ``attempt_id``; a label whose
+        row changed or went since it was asked is dropped as stale.
+
+        Raises:
+            LeaseLostError: The lease expired or passed to another holder;
+                nothing was written.
+        """
+        run_id = self._require_run()
+
+        def write(connection: sqlite3.Connection) -> tuple[int, int]:
+            stamp = _iso(self.clock())
+            written = 0
+            for label in labels:
+                cursor = connection.execute(
+                    _UPSERT_LABEL,
+                    {
+                        "entry_id": lease.entry_id,
+                        "path": label.path,
+                        "attempt_id": label.attempt_id,
+                        "page_index": label.page_index,
+                        "page_type": label.page_type,
+                        "probabilities": json.dumps(dict(label.probabilities)),
+                        "taxonomy_version": label.taxonomy_version,
+                        "profile": label.profile,
+                        "model": label.model,
+                        "dialect": label.dialect,
+                        "fingerprint": label.fingerprint,
+                        "run_id": run_id,
+                        "stamp": stamp,
+                    },
+                )
+                written += cursor.rowcount
+            return written, len(labels) - written
+
+        return self._leased(lease, write)
+
+    def drop_page_labels(self, lease: Lease, fingerprint: str) -> int:
+        """Delete the work's labels of another request fingerprint; return how many.
+
+        Raises:
+            LeaseLostError: The lease expired or passed to another holder;
+                nothing was deleted.
+        """
+
+        def write(connection: sqlite3.Connection) -> int:
+            cursor = connection.execute(
+                "DELETE FROM page_labels WHERE entry_id = ? AND fingerprint != ?",
+                (lease.entry_id, fingerprint),
+            )
+            return cursor.rowcount
+
+        return self._leased(lease, write)
+
     def remove_files(self, lease: Lease, paths: Sequence[str]) -> tuple[str, ...]:
         """Delete recorded files of the work and their rows; return the paths.
 
@@ -1500,6 +1779,10 @@ class Store:
                 )
                 if cursor.rowcount:
                     removed.append(path)
+            connection.executemany(
+                "DELETE FROM page_labels WHERE entry_id = ? AND path = ?",
+                [(lease.entry_id, path) for path in removed],
+            )
             for path in removed:
                 (work_dir / _promotion.final_path(path)).unlink(missing_ok=True)
             return tuple(removed)
@@ -1572,6 +1855,10 @@ class Store:
                 _INSERT_ATTEMPT, {**attempt, "finished_at": stamp}
             )
             attempt_id = int(cursor.lastrowid or 0)
+            connection.executemany(
+                "DELETE FROM page_labels WHERE entry_id = ? AND path = ?",
+                [(lease.entry_id, move.final) for move in moves],
+            )
             connection.executemany(
                 _UPSERT_FILE,
                 [
@@ -1724,10 +2011,11 @@ class Store:
             )
             if not (work_dir / str(row[0])).is_file()
         ]
-        connection.executemany(
-            "DELETE FROM files WHERE entry_id = ? AND path = ?",
-            [(entry_id, path) for path in missing],
-        )
+        for table in ("page_labels", "files"):
+            connection.executemany(
+                f"DELETE FROM {table} WHERE entry_id = ? AND path = ?",  # noqa: S608
+                [(entry_id, path) for path in missing],
+            )
         if missing and status == "complete":
             connection.execute(
                 "UPDATE works SET status = 'partial', status_reason = ?, "
@@ -1757,8 +2045,8 @@ class Store:
         unexpired lease on it; an entry id that names no work is refused as
         well, and with *statuses* a work whose stored status (``new``
         without one) is not among them, checked in the deleting transaction.
-        For the rest, the ``works``, ``candidates``, ``attempts`` and
-        ``files`` rows are deleted, then the recorded files, the staging
+        For the rest, the ``works``, ``candidates``, ``attempts``, ``files``
+        and ``page_labels`` rows are deleted, then the recorded files, the staging
         folders and the ``inspect`` scratch (:func:`.paths.inspect_dir`), and
         the folders left empty; files no row records stay and are reported.
         Runs stay.
@@ -1885,6 +2173,11 @@ class Store:
         )
         return [FileRow(**dict(row)) for row in rows]
 
+    def page_labels(self, entry_id: str) -> list[PageLabel]:
+        """Return the work's page labels by page index, stale ones included."""
+        rows = self._query(_LABELS, (entry_id,))
+        return [_page_label(row) for row in rows]
+
     def present_items(self, entry_id: str) -> frozenset[str]:
         """Return the page and rendering items the work's files hold."""
         rows = self._query(
@@ -1915,7 +2208,7 @@ def _delete_works(connection: sqlite3.Connection, entry_ids: Sequence[str]) -> N
     connection.execute(
         f"UPDATE works SET selected_candidate = NULL WHERE {selected}", ids
     )
-    for table in ("files", "attempts", "candidates", "works"):
+    for table in ("page_labels", "files", "attempts", "candidates", "works"):
         connection.execute(f"DELETE FROM {table} WHERE {selected}", ids)  # noqa: S608
 
 
@@ -2018,14 +2311,34 @@ def _attempt_row(row: Mapping[str, Any]) -> AttemptRow:
     )
 
 
+_LABELS = (
+    "SELECT path, attempt_id, page_index, page_type, probabilities, "
+    "taxonomy_version, profile, model, dialect, fingerprint, run_id, created_at "
+    "FROM page_labels WHERE entry_id = ? ORDER BY page_index, path"
+)
+
+
+def _page_label(row: Mapping[str, Any]) -> PageLabel:
+    values = dict(row)
+    values["probabilities"] = MappingProxyType(json.loads(values["probabilities"]))
+    return PageLabel(**values)
+
+
 # Read-only access for other processes and commands
 
 
 def _read_view(
-    root: Path, sql: str, params: Sequence[Any], busy_timeout: float
+    root: Path,
+    sql: str,
+    params: Sequence[Any],
+    busy_timeout: float,
+    *,
+    since: int = 1,
 ) -> list[dict[str, Any]]:
+    """Return the rows of *sql*; a store older than version *since* gives none."""
     path = Path(root) / DATABASE_NAME
-    if check_schema(path, busy_timeout=busy_timeout) is None:
+    version = check_schema(path, busy_timeout=busy_timeout)
+    if version is None or version < since:
         return []
 
     def query(connection: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -2124,6 +2437,42 @@ def read_files(
         busy_timeout,
     )
     return [FileRow(**row) for row in rows]
+
+
+def read_page_labels(
+    root: Path, entry_id: str, *, busy_timeout: float = DEFAULT_BUSY_TIMEOUT
+) -> list[PageLabel]:
+    """Return the page labels of *entry_id* in *root*, never writing.
+
+    The labels come by page index, stale ones included; a version 1 store
+    has none.
+
+    Raises:
+        StoreError: The database is versionless, newer or unreadable.
+    """
+    rows = _read_view(root, _LABELS, (entry_id,), busy_timeout, since=2)
+    return [_page_label(row) for row in rows]
+
+
+def read_title_page_picks(
+    root: Path,
+    entry_ids: Sequence[str] | None = None,
+    *,
+    busy_timeout: float = DEFAULT_BUSY_TIMEOUT,
+) -> list[dict[str, Any]]:
+    """Return the ``title_page_picks`` rows of *root* by entry id, never writing.
+
+    *entry_ids* limits the rows; a version 1 store gives none.
+
+    Raises:
+        StoreError: The database is versionless, newer or unreadable.
+    """
+    sql = "SELECT * FROM title_page_picks"
+    params: tuple[str, ...] = ()
+    if entry_ids is not None:
+        sql += " WHERE entry_id IN (SELECT value FROM json_each(?))"
+        params = (json.dumps(list(entry_ids)),)
+    return _read_view(root, sql + " ORDER BY entry_id", params, busy_timeout, since=2)
 
 
 def unstored_folders(

@@ -15,7 +15,12 @@ checked; ``failed``: not sampled or the check failed; ``deferred``: the
 decision model is unavailable; ``skipped``: no pages, or no work to ask
 about); ``verify`` counts works (``complete``: every recorded file on disk
 at its size; ``failed``: files missing or of another size, or a failed page
-check; ``skipped``: no recorded files); ``status`` counts the listed works
+check; ``skipped``: no recorded files); ``classify`` counts works
+(``complete``: every page image carries a current label; ``failed``: a page
+could not be read or classified; ``deferred``: the decision model is
+unavailable; ``blocked``: another run holds the work; ``skipped``: no page
+images) and adds the pages and the decision usage, ``decision_cost`` null
+where the dialect reports no cost; ``status`` counts the listed works
 by status (``items_new`` for works without an outcome); ``drop`` counts the
 works dropped as ``complete``, those another run holds as ``blocked`` and
 unknown entry ids as ``skipped``; ``providers`` counts the providers.
@@ -31,6 +36,7 @@ from typing import Any, TextIO
 
 from chronodownloader.process.contract import ExitCode, SummaryEmitter, exit_code_for
 from chronodownloader.run import (
+    ClassifyReport,
     DropReport,
     InspectReport,
     ProvidersReport,
@@ -51,7 +57,7 @@ __all__ = [
     "summary_for",
 ]
 
-COMMAND_FIELDS: Mapping[str, Mapping[str, int]] = MappingProxyType(
+COMMAND_FIELDS: Mapping[str, Mapping[str, int | float | None]] = MappingProxyType(
     {
         "search": {"items_accepted": 0},
         "inspect": {"pages_sampled": 0},
@@ -60,6 +66,21 @@ COMMAND_FIELDS: Mapping[str, Mapping[str, int]] = MappingProxyType(
             "files_missing": 0,
             "files_mismatched": 0,
             "pages_checked": 0,
+        },
+        "classify": {
+            "pages_total": 0,
+            "pages_asked": 0,
+            "pages_current": 0,
+            "pages_labelled": 0,
+            "pages_stale": 0,
+            "pages_failed": 0,
+            "title_pages": 0,
+            "decision_requests": 0,
+            "decision_input_tokens": 0,
+            "decision_output_tokens": 0,
+            "decision_cached_tokens": 0,
+            "decision_cache_write_tokens": 0,
+            "decision_cost": None,
         },
         "status": {"items_new": 0, "unstored_folders": 0, "inspect_leftovers": 0},
         "drop": {"files_deleted": 0, "files_kept": 0},
@@ -80,8 +101,29 @@ def count_fields(command: str, counts: WorkCounts) -> dict[str, int]:
     return {}
 
 
-def report_fields(report: Report | None) -> dict[str, int]:
+def _classify_fields(report: ClassifyReport) -> dict[str, int | float | None]:
+    works, usage = report.works, report.usage
+    return {
+        "pages_total": sum(work.pages for work in works),
+        "pages_asked": sum(work.asked for work in works),
+        "pages_current": sum(work.current for work in works),
+        "pages_labelled": sum(work.labelled for work in works),
+        "pages_stale": sum(work.stale for work in works),
+        "pages_failed": sum(work.failed for work in works),
+        "title_pages": sum(1 for work in works if work.title_page is not None),
+        "decision_requests": usage.requests,
+        "decision_input_tokens": usage.input_tokens,
+        "decision_output_tokens": usage.output_tokens,
+        "decision_cached_tokens": usage.cached_tokens,
+        "decision_cache_write_tokens": usage.cache_write_tokens,
+        "decision_cost": usage.cost,
+    }
+
+
+def report_fields(report: Report | None) -> dict[str, int | float | None]:
     """Return the command's own summary fields from its *report*."""
+    if isinstance(report, ClassifyReport):
+        return _classify_fields(report)
     if isinstance(report, InspectReport):
         return {"pages_sampled": sum(check.pages for check in report.checks)}
     if isinstance(report, VerifyReport):

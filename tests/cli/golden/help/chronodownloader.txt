@@ -14,6 +14,7 @@ commands:
     search     search and judge without downloading
     inspect    sample the first pages of candidates and check them
     verify     check the downloaded works of an output root
+    classify   classify the stored page images by page type
     status     list the works of an output root by status
     drop       remove works from the store, to process them from scratch
     providers  list the providers with their capabilities and state

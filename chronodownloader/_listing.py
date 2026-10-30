@@ -283,11 +283,11 @@ def _preview(
 ) -> DropReport:
     """Return the store's dry run of the drop.
 
-    The store opens without reconciliation; on an existing database that
-    reads and writes nothing, and the dry run itself only reads.
+    The store opens without reconciliation or migration; on an existing
+    database that reads and writes nothing, and the dry run itself only reads.
     """
     try:
-        with Store(root, reconcile=False) as store:
+        with Store(root, reconcile=False, migrate=False) as store:
             return store.drop(entry_ids, dry_run=True, statuses=statuses)
     except StoreError as exc:
         raise PlanError(str(exc)) from exc

@@ -9,12 +9,13 @@ imports a provider.
 
 from __future__ import annotations
 
-from .client import JUDGE, DownloadOutcome, Network, RequestOptions
+from .client import CLASSIFY, JUDGE, DownloadOutcome, Network, RequestOptions
 from .deadline import DeadlineExceeded, run_with_deadline
 from .errors import BreakerOpen, Cause, NetworkError, QuotaSpent, RequestFailed
 from .ports import CoordinatorPort
 
 __all__ = [
+    "CLASSIFY",
     "JUDGE",
     "BreakerOpen",
     "Cause",

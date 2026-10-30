@@ -1,0 +1,58 @@
+usage: chronodownloader classify [-h] [--entry-ids LIST] [--force] [--decision-model ID]
+                                 [--decision-provider {openai,openrouter}]
+                                 [--decision-endpoint URL] [--output DIR] [--dry-run] [--json]
+                                 [--settings FILE]
+
+Ask the decision model for the page type of every page image the store records (title page,
+preface, body text and others) and store the labels. A page whose label is current for the file
+and the request settings is not asked again; the title page each work shows is picked from the
+labels.
+
+options:
+  -h, --help            show this help message and exit
+
+works:
+  --entry-ids LIST      only these works; default: all works
+
+pages:
+  --force               ask every page again, current labels included
+
+decision model:
+  --decision-model ID   decision model id; vendor/model ids go to OpenRouter; default:
+                        decisions.model
+  --decision-provider {openai,openrouter}
+                        dialect and key of the decision model; default: from the model id
+  --decision-endpoint URL
+                        Decisions endpoint URL; default: the provider's endpoint
+
+output:
+  --output DIR          output root to classify; default: downloaded_works
+
+run control:
+  --dry-run             list the pages to ask without requests or writes
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
+
+Precedence: a flag wins over the settings defaults: block, which wins over the code default.
+--settings FILE reads another settings file instead of config/settings.yaml.
+
+The decision model and its request settings come from the settings'
+decisions: block; the --decision-* flags win over it.
+
+Exit codes:
+  0    no work failed; works left deferred or blocked are open, not failed;
+       a dry run that planned
+  1    a page could not be read or classified, or a label went stale
+  2    usage or configuration error: an invalid option or settings file, a
+       store the tool refuses, or an unset key of the decision provider
+  130  interrupted (Ctrl+C or Ctrl+Break)
+
+With --json, stdout carries exactly one JSON summary line on every exit; progress, warnings and
+errors go to stderr.
+
+Examples:
+  Classify every page image of an output root:
+    chronodownloader classify --output out
+  Ask two works again through OpenAI, every page included:
+    chronodownloader classify --output out --entry-ids E0001,E0002 --force
+      --decision-model gpt-6-luna-decisions --decision-provider openai

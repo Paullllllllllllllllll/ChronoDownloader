@@ -8,17 +8,22 @@ them from here, which keeps the import graph acyclic.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import logging
+import sqlite3
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Literal
 
 from chronodownloader.matching.answers import PageAnswer
 from chronodownloader.matching.judge import MissingJudgeKey, judge_key
 from chronodownloader.options.options import Source
+from chronodownloader.output.index import write_index
 from chronodownloader.output.store import (
     DATABASE_NAME,
     DropReport,
+    Store,
     StoreError,
     WorkInput,
     check_schema,
@@ -31,6 +36,10 @@ from chronodownloader.spec import CommandSpec
 
 __all__ = [
     "CheckOutcome",
+    "ClassifiedWork",
+    "ClassifyOutcome",
+    "ClassifyReport",
+    "DecisionTotals",
     "FetchTarget",
     "InspectReport",
     "InspectTarget",
@@ -51,8 +60,13 @@ __all__ = [
     "WorkCounts",
     "check_judge_key",
     "check_store",
+    "close_store",
+    "open_store",
     "read_statuses",
+    "tool_version",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class PlanError(Exception):
@@ -102,6 +116,43 @@ def check_store(root: Path) -> None:
         check_schema(root / DATABASE_NAME)
     except StoreError as exc:
         raise PlanError(str(exc)) from exc
+
+
+def tool_version() -> str | None:
+    """Return the installed chronodownloader version, or None."""
+    try:
+        return version("chronodownloader")
+    except PackageNotFoundError:
+        return None
+
+
+def open_store(root: Path, clock: Callable[[], float]) -> Store:
+    """Open the store of *root* for a run.
+
+    Raises:
+        PlanError: The store's database is refused (exit 2).
+    """
+    try:
+        return Store(root, clock=clock)
+    except StoreError as exc:
+        raise PlanError(str(exc)) from exc
+
+
+def close_store(store: Store, exit_code: int, *, settle: bool) -> None:
+    """Record the run's end, close the store and render ``index.csv``.
+
+    Without *settle* the released leases keep their staging folders.
+    """
+    try:
+        if store.run_id is not None:
+            store.end_run(exit_code)
+    except sqlite3.Error as exc:
+        logger.warning("Could not record the run end in %s: %s", store.path, exc)
+    store.close(settle=settle)
+    try:
+        write_index(store.root)
+    except (StoreError, sqlite3.Error, OSError) as exc:
+        logger.warning("index.csv not written in %s: %s", store.root, exc)
 
 
 def read_statuses(
@@ -319,6 +370,76 @@ class VerifyReport:
     dry_run: bool = False
 
 
+type ClassifyOutcome = Literal[
+    "planned", "complete", "failed", "deferred", "blocked", "skipped"
+]
+"""How a work's classification ended: ``planned`` (a dry run), ``complete``
+(every page image carries a current label), ``failed`` (a page could not be
+read or classified), ``deferred`` (the decision model is unavailable),
+``blocked`` (another run holds the work) or ``skipped`` (no page images)."""
+
+
+@dataclass(frozen=True)
+class ClassifiedWork:
+    """One work as ``classify`` found and left it.
+
+    *pages* counts its page images; *asked* the pages sent to the model (or
+    to be sent, in a dry run); *current* those whose label was current and
+    not asked again; *labelled* the labels written; *stale* the labels
+    dropped because the page's file changed meanwhile; *failed* the pages
+    not classified. *title_page* is the path the ``title_page_picks`` rule
+    picks (None: no pick) with its *probability*; *labelled_leading* counts
+    the current labels among the leading pages that rule reads.
+    """
+
+    entry_id: str
+    folder: str
+    outcome: ClassifyOutcome
+    pages: int = 0
+    asked: int = 0
+    current: int = 0
+    labelled: int = 0
+    stale: int = 0
+    failed: int = 0
+    title_page: str | None = None
+    probability: float | None = None
+    labelled_leading: int = 0
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class DecisionTotals:
+    """The decision requests of a run and their summed token usage.
+
+    *cost* is the billed USD sum where the dialect reports one, else None.
+    """
+
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
+    cost: float | None = None
+
+
+@dataclass(frozen=True)
+class ClassifyReport:
+    """The works of a ``classify`` with the model asked and the usage.
+
+    *fingerprint* is the request fingerprint the labels carry; *dry_run*
+    marks a plan that sent and wrote nothing.
+    """
+
+    works: tuple[ClassifiedWork, ...] = ()
+    model: str = ""
+    dialect: str = ""
+    endpoint: str = ""
+    profile: str = ""
+    fingerprint: str = ""
+    usage: DecisionTotals = DecisionTotals()
+    dry_run: bool = False
+
+
 @dataclass(frozen=True)
 class StatusRow:
     """One work of a ``status`` listing.
@@ -412,7 +533,14 @@ class ProvidersReport:
     providers: tuple[ProviderState, ...] = ()
 
 
-type Report = InspectReport | VerifyReport | StatusReport | DropReport | ProvidersReport
+type Report = (
+    InspectReport
+    | VerifyReport
+    | ClassifyReport
+    | StatusReport
+    | DropReport
+    | ProvidersReport
+)
 """What a command reports beyond its counts."""
 
 
@@ -421,7 +549,8 @@ class RunResult:
     """The outcome of a run.
 
     *rows* holds the candidates of a ``search``, *report* the report of
-    ``inspect``, ``verify``, ``status``, ``drop`` and ``providers``.
+    ``inspect``, ``verify``, ``classify``, ``status``, ``drop`` and
+    ``providers``.
     """
 
     counts: WorkCounts

@@ -1,4 +1,4 @@
-# ChronoDownloader v1.1.4
+# ChronoDownloader v1.2.0
 
 ChronoDownloader finds and downloads digitized historical sources from 17 digital
 libraries. Given a CSV of works, it searches the libraries, has a decision model
@@ -66,6 +66,7 @@ uv run chronodownloader status --output out --only needs_review
 uv run chronodownloader inspect --entry-ids E0001 --output out
 uv run chronodownloader fetch --entry-id E0001 --provider mdz --id bsb11111111 \
   --output out --reason "same edition, title page checked"
+uv run chronodownloader classify --output out
 uv run chronodownloader providers
 uv run chronodownloader ui
 ```
@@ -272,6 +273,38 @@ answer is reported and never changes a status, so a wrong copy is replaced with
 check. Works another run holds are reported `blocked` and left alone.
 `--dry-run` makes the same comparison through read-only queries.
 
+### classify
+
+| Flag | Description | Default | In `defaults:` |
+| --- | --- | --- | --- |
+| `--entry-ids LIST` | only these works | all works | no |
+| `--force` | ask every page again, current labels included | | no |
+| `--decision-model ID` | decision model id; vendor/model ids go to OpenRouter | decisions.model | no |
+| `--decision-provider {openai,openrouter}` | dialect and key of the decision model | from the model id | no |
+| `--decision-endpoint URL` | Decisions endpoint URL | the provider's endpoint | no |
+| `--output DIR` | output root to classify | downloaded_works | yes |
+| `--dry-run` | list the pages to ask without requests or writes | | no |
+| `--json` | print one JSON summary line on stdout | | no |
+| `--settings FILE` | alternate settings file | config/settings.yaml | no |
+
+`classify` asks a decision model for the page type of every page image the store
+records (title page, half-title, preface, privilege, contents, body text, plate,
+blank leaf, binding and others; the `culinary` profile adds recipes, menus and
+carving) and stores one label per page in `page_labels`. The pages of a work go in
+source order, downscaled to `decisions.image_max_px` on the longer side, at most
+`decisions.pages_per_request` to a request, with the work's input fields as
+context. A model id of the form `vendor/model` goes to OpenRouter with
+`OPENROUTER_API_KEY`, any other to OpenAI with `OPENAI_API_KEY`;
+`--decision-provider` overrides that, and every `--decision-*` flag wins over the
+settings' `decisions:` block. A page whose label was written for its current file
+and the same request settings (model, dialect, endpoint, profile, image size,
+grouping) is not asked again; `--force` asks every page. A work is classified
+under its lease, so a work another run holds is counted `blocked`, and a label
+whose file was replaced while it was asked is dropped as stale. A work with a PDF
+only is skipped. The view `title_page_picks` names each work's title page from
+the labels, and the summary carries the requests' token usage. `classify` never
+changes a status.
+
 ### status
 
 | Flag | Description | Default | In `defaults:` |
@@ -334,8 +367,8 @@ coordination database without writing and exits 0.
 | Code | Meaning |
 | --- | --- |
 | 0 | no work failed or stayed partial; works left `no_match`, `needs_review`, `deferred` or `blocked` are open, not failed, and are counted in the summary; a dry run that planned; a listing that was written |
-| 1 | a work failed or stayed partial, a `fetch` download failed, an `inspect` candidate could not be sampled or checked, a `verify` work failed its check, a `drop` refused a work, or an unexpected error |
-| 2 | usage or configuration error: invalid flags or settings, a missing or invalid works CSV, a store the tool refuses, an unset judge key under `--matching judge` or `hybrid` (the message names `--matching fuzzy`), an unset page-model key for `inspect` or `verify --pages`, a `fetch` of a `needs_review` work without `--reason`, a `fetch --url` no provider resolves |
+| 1 | a work failed or stayed partial, a `fetch` download failed, an `inspect` candidate could not be sampled or checked, a `verify` work failed its check, a `classify` page could not be read or classified, a `drop` refused a work, or an unexpected error |
+| 2 | usage or configuration error: invalid flags or settings, a missing or invalid works CSV, a store the tool refuses, an unset judge key under `--matching judge` or `hybrid` (the message names `--matching fuzzy`), an unset page-model key for `inspect` or `verify --pages`, an unset key of the `classify` decision provider, a `fetch` of a `needs_review` work without `--reason`, a `fetch --url` no provider resolves |
 | 130 | interrupted (Ctrl+C, or Ctrl+Break on Windows) |
 
 `<command> --help` lists the exit codes of each command. Progress, warnings and
@@ -354,6 +387,7 @@ where nothing ran.
 | `search` | `items_accepted` |
 | `inspect` | `pages_sampled` |
 | `verify` | `files_checked`, `files_missing`, `files_mismatched`, `pages_checked` |
+| `classify` | `pages_total`, `pages_asked`, `pages_current`, `pages_labelled`, `pages_stale`, `pages_failed`, `title_pages`, `decision_requests`, `decision_input_tokens`, `decision_output_tokens`, `decision_cached_tokens`, `decision_cache_write_tokens`, `decision_cost` |
 | `status` | `items_new`, `unstored_folders`, `inspect_leftovers` |
 | `drop` | `files_deleted`, `files_kept` |
 | `providers` | `breakers_open`, `keys_missing` |
@@ -366,7 +400,12 @@ downloaded. `inspect` counts items: complete when checked, failed when not sampl
 or the check failed, deferred when the page model is unavailable, skipped when an
 item has no pages. `verify` counts works: complete when every recorded file is on
 disk at its size, failed when files are missing or differ, or a page check
-failed, skipped without recorded files. `status` counts the listed works by
+failed, skipped without recorded files. `classify` counts works: complete when
+every page image carries a current label, failed when a page could not be read
+or classified or a label went stale, deferred when the decision model is
+unavailable, blocked when another run holds the work, skipped without page
+images; `decision_cost` is null where the provider reports no cost (OpenAI).
+`status` counts the listed works by
 status, with `items_new` for works without an outcome. `drop` counts dropped works
 as complete, works another run holds as blocked and unknown entry ids as skipped.
 `providers` counts the providers in `items_total`. A dry run reports the plan's
@@ -387,7 +426,8 @@ on the review screen, which previews the plan without network requests and
 prints the equivalent command. It offers Run, Edit a step, Copy command and quit,
 and Quit. The run shows a progress display. The UI needs an interactive terminal
 on stdin and stdout, else it exits 2; otherwise its exit codes are those of the
-chosen command. `inspect`, `status`, `drop` and `providers` are run with flags.
+chosen command. `inspect`, `classify`, `status`, `drop` and `providers` are run
+with flags.
 
 ## Settings File
 
@@ -415,6 +455,7 @@ api_keys:
   hathitrust: HATHI_API_KEY      # read but unused: HathiTrust is metadata-only
   annas_archive: ANNAS_ARCHIVE_API_KEY  # optional member key for fast downloads
   openrouter: OPENROUTER_API_KEY  # judge and page model; --matching fuzzy needs none
+  openai: OPENAI_API_KEY          # classify through the OpenAI Decisions API
 
 # Decision model that judges candidates and pages (OpenRouter Decisions API).
 judge:
@@ -439,6 +480,17 @@ judge:
     max_backoff_s: 60.0
     timeout_s: 300
     slots: 4                # concurrent requests on this machine
+
+# Decision model that classifies page images (classify); its requests take
+# judge.network's policy and slot limit, with pacing and a breaker of their own.
+decisions:
+  model: typesafe/jev-1.14  # vendor/model ids go to OpenRouter, others to OpenAI
+  provider: null            # openai | openrouter; null: from the model id
+  endpoint: null            # null: the provider's Decisions endpoint
+  image_max_px: 768         # longer side of a page sent
+  pages_per_request: 20     # pages per request, at most 400
+  profile: general          # page types: general | culinary
+  timeout_s: 120            # request timeout
 
 # Machine-wide coordination of providers and the judge across agents; the
 # database is <state_dir>/coordination.sqlite.
@@ -845,18 +897,20 @@ read back.
 ## Store
 
 Every output root holds one `chronodownloader.sqlite`, written by `download`,
-`search --output`, `fetch`, `verify` and `drop`. It records the runs (command,
-tool version, process, effective spec, start and end, exit code), the works with
-their input fields, status and lease, every candidate with its text score and
-judgment, every download attempt with its completeness per part, and every file
-of every work folder. Readers outside the tool use the two views, which stay
-stable; the tables behind them (`meta`, `runs`, `works`, `candidates`,
-`attempts`, `files`) may change in a later schema version.
+`search --output`, `fetch`, `verify`, `classify` and `drop`. It records the runs
+(command, tool version, process, effective spec, start and end, exit code), the
+works with their input fields, status and lease, every candidate with its text
+score and judgment, every download attempt with its completeness per part, every
+file of every work folder and the page type of each page image. Readers outside
+the tool use the three views, which stay stable; the tables behind them (`meta`,
+`runs`, `works`, `candidates`, `attempts`, `files`, `page_labels`) may change in
+a later schema version.
 
 | View | One row per | Columns |
 | --- | --- | --- |
 | `work_status` | work | `entry_id`, `title`, `creator`, `year`, `place`, `publisher`, `language`, `edition`, `link`, `folder`, `status`, `stored_status`, `status_reason`, `retry_after`, `lease_holder`, `lease_expires_at`, `selected_provider`, `selected_source_id`, `selected_item_url`, `last_attempt_id`, `last_provider`, `last_source_id`, `last_format`, `last_outcome`, `last_stopped`, `last_attempt_at`, `pages_expected`, `pages_present`, `file_count`, `file_bytes`, `first_run_id`, `last_run_id`, `created_at`, `updated_at` |
 | `work_candidates` | candidate, history included | `candidate_id`, `entry_id`, `folder`, `origin`, `rank`, `provider`, `source_id`, `title`, `creators`, `date`, `year`, `place`, `publisher`, `language`, `item_url`, `iiif_manifest`, `text_score`, `judge_probabilities`, `judge_decision`, `judge_model`, `judge_model_version`, `judged_at`, `selected`, `current`, `superseded_at`, `run_id`, `created_at`, `updated_at` |
+| `title_page_picks` | work with page images | `entry_id`, `pages_total`, `pages_leading`, `pages_labelled`, `path`, `page_index`, `probability` |
 
 In `work_status`, `status` is the read status: `blocked` while a run holds an
 unexpired lease on the work, else the stored status, or `new` for a work without
@@ -866,9 +920,18 @@ last attempt, and `last_stopped` names why a download stopped early (`budget`,
 `breaker_open`, `quota_spent`, `slot_lost`). In `work_candidates`, `origin` is
 `search`, `link` or `fetch`, `creators` a JSON list, `judge_probabilities` the
 JSON probabilities of both questions, `selected` 1 for the work's selected
-candidate and `current` 0 for candidates a `--research` superseded. Times are ISO
-8601 UTC text. URLs and raw fields carry credentials masked, and error texts are
-cut to 2,000 characters.
+candidate and `current` 0 for candidates a `--research` superseded. In
+`title_page_picks`, `page_index` is a page's position in the source (item
+`p00004` is 3), so a partial download keeps its gaps; a work with an image item
+of another form is numbered 0, 1, ... in item order. The title page is the page
+with the highest `title_page` probability among those of `page_index` below 10,
+if it reaches .5 (`path` and `page_index`, else null); only labels written for
+the page's current file count. `pages_leading` is the number of leading pages a
+complete work has (the smaller of 10 and the highest `page_index` plus one), and
+`pages_labelled` below it marks a leading page missing on disk or not yet
+classified rather than a work without a title page. Times are ISO 8601 UTC text.
+URLs and raw fields carry credentials masked, and error texts are cut to 2,000
+characters.
 
 | Status | Meaning | Taken by default |
 | --- | --- | --- |
@@ -911,7 +974,10 @@ rename and the commit is repaired when the store next opens, from a journal in
 the staging folder. On opening, the store also removes stale staging folders,
 deletes the records of files missing on disk and turns a `complete` work that
 lost a file into `partial`. A database that holds tables but no schema version,
-a newer schema or an unreadable file is refused with exit 2 and left unchanged.
+a newer schema or an unreadable file is refused with exit 2 and left unchanged; a
+store of schema version 1 is migrated to version 2 in place when a command that
+writes opens it, unless a run of an older version still holds a work's lease,
+which is refused with exit 2 until that run ends.
 
 ## Coordination Across Runs
 
@@ -949,9 +1015,11 @@ machine:
   `partial` for a later run.
 
 The decision model's endpoint is paced, slotted and breaker-checked as provider
-`judge`. A request to the host of another provider (a Europeana record's images
-on `gallica.bnf.fr`) is paced and counted under that provider. A database that
-stays locked longer than `busy_timeout_s` ends the operation with an error.
+`judge`, and `classify`'s requests as provider `classify`, with the same
+`judge.network` policy and slot limit but a breaker of their own. A request to
+the host of another provider (a Europeana record's images on `gallica.bnf.fr`)
+is paced and counted under that provider. A database that stays locked longer
+than `busy_timeout_s` ends the operation with an error.
 
 Each request is retried on transient failures with backoff, and a server's
 `Retry-After` wins. A connect failure is retried at most twice, a name that does
@@ -1011,6 +1079,7 @@ chronodownloader/
   _loop.py      run loop: leases, store writes, decisions, fallback
   _worker.py    worker threads: search, judge, download
   _review.py    inspect and verify; _listing.py: status, drop, providers
+  _classify.py  classify: page labels under the work lease
   events.py     run events reported to the front ends
   inputs.py     works CSV
   coord.py      machine-wide coordination database
@@ -1018,7 +1087,8 @@ chronodownloader/
   providers/    one class per library, the registry, IIIF download, staging
   iiif/         manifests v2 and v3, canvases, image sizes, renderings
   pages.py      page samples for inspect and verify
-  matching/     fuzzy.py (text score), judge.py (decision model), policy.py
+  matching/     fuzzy.py (text score), judge.py (decision model), policy.py,
+                classifier.py (page types)
   output/       store.py (schema, views, leases), paths.py, index.py
   options/      option tables, wizard framework, prompts, settings loader
   process/      exit codes, summary line, heartbeat, interrupt, log setup
