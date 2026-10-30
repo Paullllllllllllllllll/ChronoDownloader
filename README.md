@@ -360,9 +360,11 @@ the reading of the current pick and file. Every field there is a model reading,
 not catalog data. A rerun reads a page again only when the pick, its file, the
 model or the prompt version changed, or under `--force`; a work whose pick is
 gone loses its reading. A reading that fails or does not fit the schema fails the
-work, and an outage defers it. `title_pages.model: null` turns the step off. This
-route has not yet been measured through OpenRouter; the measured run sent the
-same prompt to the Anthropic API.
+work, and an outage defers it. `title_pages.model: null` turns the step off. On
+the 47 title pages of the evaluation, this route read years as well as the same
+prompt through the Anthropic API (38 of 39 exact; a year invented on 3 of 8
+undated pages) and titles and places nearly as well (median token-set similarity
+97 against 98; places 39 of 43 against 42), at USD 0.00025 a page.
 
 ### status
 
