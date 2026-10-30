@@ -56,7 +56,10 @@ from chronodownloader._core import (
     ClassifiedWork,
     ClassifyReport,
     DecisionTotals,
+    DownloadReport,
     FetchTarget,
+    GateReport,
+    GateResult,
     InspectReport,
     Leftover,
     PageCheck,
@@ -80,6 +83,7 @@ from chronodownloader._core import (
     read_statuses,
     tool_version,
 )
+from chronodownloader._gate import StatusLog, decision_target_of, run_post_phase
 from chronodownloader._listing import plan_drop, plan_status, run_drop, run_providers
 from chronodownloader._loop import DownloadOptions, MatchOptions, Tally, WorkLoop
 from chronodownloader._review import plan_inspect, plan_verify, run_inspect, run_verify
@@ -87,11 +91,13 @@ from chronodownloader._runtime import Services, Wiring
 from chronodownloader.events import RunEvents
 from chronodownloader.iiif.urls import extract_item_id_from_url, is_iiif_manifest_url
 from chronodownloader.inputs import InputError, read_works
+from chronodownloader.matching.classifier import MissingDecisionKey, decision_key
 from chronodownloader.matching.judge import MissingJudgeKey
 from chronodownloader.matching.policy import (
     EDITION_POLICIES,
     MODES,
 )
+from chronodownloader.matching.title_pages import title_key
 from chronodownloader.net.credentials import redact_text
 from chronodownloader.options.options import Source
 from chronodownloader.output.paths import work_folder_name
@@ -111,6 +117,7 @@ from chronodownloader.settings import Naming, Settings
 from chronodownloader.spec import (
     ClassifySpec,
     CommandSpec,
+    DownloadDecisions,
     DownloadSpec,
     DropSpec,
     FetchSpec,
@@ -131,8 +138,11 @@ __all__ = [
     "ClassifiedWork",
     "ClassifyReport",
     "DecisionTotals",
+    "DownloadReport",
     "DropReport",
     "FetchTarget",
+    "GateReport",
+    "GateResult",
     "InspectReport",
     "Leftover",
     "PageCheck",
@@ -378,11 +388,25 @@ def _plan_works(
     return planned, counts, (*warnings, *notes)
 
 
+def _check_decision_keys(decision: DownloadDecisions, settings: Settings) -> None:
+    """Refuse a post-phase whose model is unknown or whose key is unset."""
+    if decision.mode == "off" and not decision.classify:
+        return
+    try:
+        target = decision_target_of(settings, decision)
+        decision_key(settings, target.dialect)
+        if decision.classify and settings.title_pages.model is not None:
+            title_key(settings)
+    except (ValueError, MissingDecisionKey) as exc:
+        raise PlanError(str(exc)) from exc
+
+
 def _plan_download(
     spec: DownloadSpec, settings: Settings, sources: Mapping[str, Source], now: float
 ) -> RunPlan:
     settings.state_directory()
     check_judge_key(spec.matching.mode, settings)
+    _check_decision_keys(spec.decision, settings)
     works, warnings = _read_input(spec.input)
     planned, counts, notes = _plan_works(
         works,
@@ -629,13 +653,19 @@ def _loop_over(
     root: Path | None,
     services: Services,
     build: Callable[[Store | None], WorkLoop],
-) -> Tally:
-    """Run *build*'s loop under a store of *root* (None: no store)."""
+    post: Callable[[Store], Report] | None = None,
+) -> tuple[Tally, Report | None]:
+    """Run *build*'s loop under a store of *root* (None: no store).
+
+    *post* runs once the loop has no work left, under the same leases and
+    before ``index.csv`` is written; its report never changes the exit code.
+    """
     if root is None:
-        return build(None).run(run_plan.works)
+        return build(None).run(run_plan.works), None
     store = open_store(root, services.wiring.clock)
     exit_code: int = ExitCode.FAILURE
     settle = False
+    report: Report | None = None
     try:
         store.begin_run(
             command,
@@ -649,9 +679,11 @@ def _loop_over(
                 tally = loop.run_fetch(run_plan.fetch)
             else:
                 tally = loop.run(run_plan.works)
+            if post is not None:
+                report = post(store)
         exit_code = _exit(tally)
         settle = True
-        return tally
+        return tally, report
     except KeyboardInterrupt:
         exit_code = ExitCode.INTERRUPTED
         raise
@@ -661,18 +693,21 @@ def _loop_over(
         close_store(store, exit_code, settle=settle)
 
 
-def _run_download(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> Tally:
+def _run_download(
+    run_plan: RunPlan, events: RunEvents, wiring: Wiring
+) -> tuple[Tally, Report | None]:
     spec = run_plan.spec
     assert isinstance(spec, DownloadSpec)
     download = _download(spec.files, spec.limits, spec.run.force, run_plan.settings)
     services = _open(run_plan, spec.run.concurrency, wiring, spec.matching.mode)
+    log = StatusLog(events)
     with services:
 
         def build(store: Store | None) -> WorkLoop:
             return WorkLoop(
                 services,
                 store,
-                events,
+                log,
                 command="download",
                 matching=_matching(
                     spec.matching,
@@ -685,6 +720,11 @@ def _run_download(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> Tally
                 heartbeat=Heartbeat.from_env(),
             )
 
+        def post(store: Store) -> DownloadReport:
+            return run_post_phase(
+                store, services, spec.decision, log, stopped=download.budget.stopped
+            )
+
         return _loop_over(
             run_plan,
             events,
@@ -692,10 +732,13 @@ def _run_download(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> Tally
             root=spec.output,
             services=services,
             build=build,
+            post=post,
         )
 
 
-def _run_search(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> Tally:
+def _run_search(
+    run_plan: RunPlan, events: RunEvents, wiring: Wiring
+) -> tuple[Tally, Report | None]:
     spec = run_plan.spec
     assert isinstance(spec, SearchSpec)
     concurrency = min(3, max(1, len(run_plan.works)))
@@ -729,11 +772,13 @@ def _run_search(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> Tally:
         )
 
 
-def _run_fetch(run_plan: RunPlan, events: RunEvents, wiring: Wiring) -> Tally:
+def _run_fetch(
+    run_plan: RunPlan, events: RunEvents, wiring: Wiring
+) -> tuple[Tally, Report | None]:
     spec = run_plan.spec
     assert isinstance(spec, FetchSpec)
     if run_plan.fetch is None:
-        return Tally()
+        return Tally(), None
     download = _download(spec.files, spec.limits, spec.run.force, run_plan.settings)
     services = _open(run_plan, 1, wiring, "fuzzy")
     with services:
@@ -798,8 +843,8 @@ def run(
         raise PlanError(f"{command}: not implemented")
     if not run_plan.works and run_plan.fetch is None:
         return RunResult(run_plan.counts)
-    tally = runner(run_plan, events, wired)
-    return RunResult(_counts(run_plan, tally), tuple(tally.rows))
+    tally, report = runner(run_plan, events, wired)
+    return RunResult(_counts(run_plan, tally), tuple(tally.rows), report=report)
 
 
 def _dry_run(spec: CommandSpec) -> bool:

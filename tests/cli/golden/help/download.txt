@@ -55,6 +55,19 @@ size limits:
                         stop the run or skip the file at a limit; default:
                         download_limits.on_exceed
 
+decision model:
+  --decisions {off,shadow}
+                        shadow checks the downloaded and review-band works' first pages after the
+                        downloads and records the answers only; apply waits for a validated
+                        threshold; default: off
+  --classify            classify the downloaded works' pages after the downloads
+  --decision-model ID   decision model id; vendor/model ids go to OpenRouter; default:
+                        decisions.model
+  --decision-provider {openai,openrouter}
+                        dialect and key of the decision model; default: from the model id
+  --decision-endpoint URL
+                        Decisions endpoint URL; default: the provider's endpoint
+
 output:
   --output DIR          output root holding chronodownloader.sqlite; default: downloaded_works
 

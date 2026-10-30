@@ -10,9 +10,11 @@ The ``defaults:`` block of the settings is validated against
 :data:`DOWNLOAD_OPTIONS`. The other commands take the defaults of the options
 they share with ``download`` by name, as long as their own row is settable:
 ``search`` takes the matching options but not ``output``; ``inspect`` takes
-``providers`` and ``output``. The decision-model flags of ``classify`` take
-no default from ``defaults:``; the settings' ``decisions`` block fills them
-when the run is planned.
+``providers`` and ``output``. The decision-model flags of ``classify`` and
+``download`` take no default from ``defaults:``; the settings' ``decisions``
+block fills them when the run is planned. ``--decisions`` is settable there.
+The page-model flags of ``inspect`` and ``verify --pages`` fall back to
+``judge.page_model``.
 
 Selectors that only work together (``--provider`` with ``--id``) or exclude
 a pair (``--url`` against ``--provider``/``--id``) are checked in the
@@ -50,6 +52,7 @@ from chronodownloader.settings import provider_key
 __all__ = [
     "CLASSIFY_OPTIONS",
     "COMMANDS",
+    "DECISION_MODES",
     "DECISION_PROVIDERS",
     "DEFAULT_ONLY",
     "DEFAULT_PROVIDERS",
@@ -72,6 +75,7 @@ __all__ = [
     "CommandSpec",
     "DecisionModel",
     "DownloadControl",
+    "DownloadDecisions",
     "DownloadSpec",
     "DropSpec",
     "FetchControl",
@@ -157,6 +161,9 @@ COMMANDS = (
 
 DECISION_PROVIDERS = ("openai", "openrouter")
 """The ``--decision-provider`` values: the decision dialects."""
+
+DECISION_MODES = ("off", "shadow")
+"""The ``--decisions`` values; ``apply`` comes with the gate's veto."""
 
 
 class SpecError(ValueError):
@@ -258,6 +265,23 @@ class DownloadControl:
 
 
 @dataclass(frozen=True)
+class DownloadDecisions:
+    """The decision-model steps after a download's work loop.
+
+    ``mode`` ``shadow`` checks the downloaded and review-band works and
+    records the answers only; ``classify`` classifies the downloaded works.
+    ``model``, ``provider`` and ``endpoint`` None take the settings'
+    ``decisions`` block.
+    """
+
+    mode: str
+    classify: bool
+    model: str | None
+    provider: str | None
+    endpoint: str | None
+
+
+@dataclass(frozen=True)
 class DownloadSpec:
     """One ``download`` run: the works of ``input`` into ``output``."""
 
@@ -268,6 +292,7 @@ class DownloadSpec:
     limits: SizeLimits
     output: Path
     run: DownloadControl
+    decision: DownloadDecisions
 
 
 @dataclass(frozen=True)
@@ -354,6 +379,7 @@ class InspectSpec:
     first: int
     output: Path | None
     run: RunControl
+    decision: DecisionModel
 
 
 @dataclass(frozen=True)
@@ -365,11 +391,17 @@ class VerifySpec:
     first: int
     output: Path
     run: RunControl
+    decision: DecisionModel
 
 
 @dataclass(frozen=True)
 class DecisionModel:
-    """The decision model of a run; None takes the settings' ``decisions``."""
+    """The decision model of a run; None takes the settings.
+
+    ``classify`` takes the ``decisions`` block; the page check of
+    ``inspect`` and ``verify --pages`` takes ``judge.page_model`` when all
+    three are None.
+    """
 
     model: str | None
     provider: str | None
@@ -683,6 +715,86 @@ def _output(help: str) -> Option:
     return replace(_OUTPUT, help=help)
 
 
+def _decision(name: str, help: str, **extra: Any) -> Option:
+    return Option(
+        name,
+        "--" + name.replace("_", "-"),
+        help,
+        group="decision",
+        target=f"decision.{name.removeprefix('decision_')}",
+        settable=False,
+        **extra,
+    )
+
+
+_DECISION_ROWS = (
+    _decision(
+        "decision_model",
+        "decision model id; vendor/model ids go to OpenRouter",
+        type=_text,
+        metavar="ID",
+        default_help="decisions.model",
+    ),
+    _decision(
+        "decision_provider",
+        "dialect and key of the decision model",
+        choices=DECISION_PROVIDERS,
+        default_help="from the model id",
+    ),
+    _decision(
+        "decision_endpoint",
+        "Decisions endpoint URL",
+        type=_text,
+        metavar="URL",
+        default_help="the provider's endpoint",
+    ),
+)
+"""The decision-model rows of ``classify`` and ``download``."""
+
+_PAGE_MODEL_ROWS = (
+    replace(
+        _DECISION_ROWS[0],
+        help="page model id of the page check; vendor/model ids go to OpenRouter",
+        group="pages",
+        default_help="judge.page_model",
+    ),
+    replace(
+        _DECISION_ROWS[1],
+        help="dialect and key of the page model",
+        group="pages",
+    ),
+    replace(
+        _DECISION_ROWS[2],
+        help="Decisions endpoint URL of the page model",
+        group="pages",
+        default_help="judge.endpoint; with another model, the provider's",
+    ),
+)
+"""The page-model rows of ``inspect`` and ``verify --pages``."""
+
+_PAGE_MODEL_NAMES = tuple(row.name for row in _PAGE_MODEL_ROWS)
+
+_DECISIONS_MODE = Option(
+    "decisions",
+    "--decisions",
+    (
+        "shadow checks the downloaded and review-band works' first pages after "
+        "the downloads and records the answers only; apply waits for a validated "
+        "threshold"
+    ),
+    group="decision",
+    choices=DECISION_MODES,
+    default="off",
+    target="decision.mode",
+)
+_CLASSIFY = flag_option(
+    "classify",
+    "classify the downloaded works' pages after the downloads",
+    group="decision",
+    target="decision.classify",
+)
+
+
 # -- tables -------------------------------------------------------------------
 
 DOWNLOAD_OPTIONS = OptionTable(
@@ -702,6 +814,9 @@ DOWNLOAD_OPTIONS = OptionTable(
         _INCLUDE_METADATA,
         _FORCE,
         *_LIMITS,
+        _DECISIONS_MODE,
+        _CLASSIFY,
+        *_DECISION_ROWS,
         _OUTPUT,
         concurrency_option(DEFAULT_CONCURRENCY, help="works processed in parallel"),
         _DRY_RUN,
@@ -877,6 +992,7 @@ INSPECT_OPTIONS = OptionTable(
             default=None,
             default_help="a scratch folder in %TEMP%\\chronodownloader\\inspect",
         ),
+        *_PAGE_MODEL_ROWS,
         _DRY_RUN,
         _JSON,
         _SETTINGS,
@@ -904,6 +1020,10 @@ VERIFY_OPTIONS = OptionTable(
             target="first",
             settable=False,
         ),
+        *(
+            replace(row, help=row.help + "; only with --pages")
+            for row in _PAGE_MODEL_ROWS
+        ),
         _output("output root to verify"),
         dry_run_option("run.dry_run", "report without changing statuses"),
         _JSON,
@@ -911,18 +1031,6 @@ VERIFY_OPTIONS = OptionTable(
     ],
     group_titles=_GROUP_TITLES,
 )
-
-
-def _decision(name: str, help: str, **extra: Any) -> Option:
-    return Option(
-        name,
-        "--" + name.replace("_", "-"),
-        help,
-        group="decision",
-        target=f"decision.{name.removeprefix('decision_')}",
-        settable=False,
-        **extra,
-    )
 
 
 CLASSIFY_OPTIONS = OptionTable(
@@ -934,26 +1042,7 @@ CLASSIFY_OPTIONS = OptionTable(
             group="classify",
             target="force",
         ),
-        _decision(
-            "decision_model",
-            "decision model id; vendor/model ids go to OpenRouter",
-            type=_text,
-            metavar="ID",
-            default_help="decisions.model",
-        ),
-        _decision(
-            "decision_provider",
-            "dialect and key of the decision model",
-            choices=DECISION_PROVIDERS,
-            default_help="from the model id",
-        ),
-        _decision(
-            "decision_endpoint",
-            "Decisions endpoint URL",
-            type=_text,
-            metavar="URL",
-            default_help="the provider's endpoint",
-        ),
+        *_DECISION_ROWS,
         _output("output root to classify"),
         dry_run_option(
             "run.dry_run", "list the pages to ask without requests or writes"
@@ -1140,6 +1229,7 @@ def resolve_download(
         limits=SizeLimits(**_part(values, "limits")),
         output=values["output"],
         run=DownloadControl(**_part(values, "run")),
+        decision=DownloadDecisions(**_part(values, "decision")),
     )
     return Resolution(spec, sources)
 
@@ -1235,6 +1325,7 @@ def resolve_inspect(
         first=values["first"],
         output=values["output"],
         run=RunControl(**_part(values, "run")),
+        decision=DecisionModel(**_part(values, "decision")),
     )
     return Resolution(spec, sources)
 
@@ -1245,17 +1336,18 @@ def resolve_verify(
     """Resolve the verify options.
 
     Raises:
-        SpecError: ``--first`` without ``--pages``.
+        SpecError: ``--first`` or a page-model flag without ``--pages``.
     """
     values, sources = _resolve_table(VERIFY_OPTIONS, flags, defaults)
     if not values["pages"]:
-        _given_only_with(flags, ("first",), "--pages")
+        _given_only_with(flags, ("first", *_PAGE_MODEL_NAMES), "--pages")
     spec = VerifySpec(
         entry_ids=values["entry_ids"],
         pages=values["pages"],
         first=values["first"],
         output=values["output"],
         run=RunControl(**_part(values, "run")),
+        decision=DecisionModel(**_part(values, "decision")),
     )
     return Resolution(spec, sources)
 

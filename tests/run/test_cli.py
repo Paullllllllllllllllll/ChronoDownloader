@@ -97,6 +97,22 @@ def test_a_complete_download_exits_0_with_one_summary_line(
 
 
 @pytest.mark.usefixtures("wired")
+def test_a_failed_gate_check_leaves_the_exit_code_and_is_counted(
+    tmp_path: Path, base: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The fake page files are no decodable images, so no check is sent.
+    argv = ["download", "--input", works(tmp_path), *base, "--decisions", "shadow"]
+
+    assert entry.main([*argv, "--json"]) == 0
+
+    payload, err = one_line(capsys)
+    assert (payload["items_complete"], payload["gate_failed"]) == (2, 2)
+    assert (payload["gate_checks"], payload["gate_requests"]) == (0, 0)
+    assert "Gate (shadow, model typesafe/jev-1.14): 0 request(s)" in err
+    assert "mdz:bsb1" in err
+
+
+@pytest.mark.usefixtures("wired")
 def test_a_partial_download_exits_1(
     tmp_path: Path,
     base: list[str],

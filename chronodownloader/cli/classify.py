@@ -16,7 +16,7 @@ from chronodownloader.cli.summary import Summary
 from chronodownloader.run import ClassifyReport, DecisionTotals, RunResult
 from chronodownloader.spec import resolve_classify
 
-__all__ = ["execute", "render"]
+__all__ = ["execute", "render", "usage_line"]
 
 HEADER = (
     "work",
@@ -43,7 +43,8 @@ def _title(title: str | None) -> str:
     return title if len(title) <= TITLE_WIDTH else title[: TITLE_WIDTH - 3] + "..."
 
 
-def _usage(usage: DecisionTotals) -> str:
+def usage_line(usage: DecisionTotals) -> str:
+    """Return *usage* as one line: requests, tokens and the cost if known."""
     cost = "" if usage.cost is None else f", cost {usage.cost:.4f} USD"
     return (
         f"{usage.requests} request(s), {usage.input_tokens:,} input tokens "
@@ -83,8 +84,10 @@ def render(report: ClassifyReport) -> str:
         lines.append(f"Title pages: {title_model}.\n")
         lines.append("Dry run: nothing was sent or written.\n")
     else:
-        lines.append(f"Page types: {_usage(report.usage)}.\n")
-        lines.append(f"Title pages ({title_model}): {_usage(report.title_usage)}.\n")
+        lines.append(f"Page types: {usage_line(report.usage)}.\n")
+        lines.append(
+            f"Title pages ({title_model}): {usage_line(report.title_usage)}.\n"
+        )
     return "".join(lines)
 
 

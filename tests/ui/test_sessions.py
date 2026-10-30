@@ -97,8 +97,12 @@ class Run:
         self.screen = buffer.getvalue()
         return code
 
-    def download_answers(self, *, dry_run: Any = KEEP) -> list[Any]:
-        """Download the CSV's works as page images into the output root."""
+    def download_answers(
+        self, *, dry_run: Any = KEEP, decisions: Any = KEEP
+    ) -> list[Any]:
+        """Download the CSV's works as page images into the output root;
+        ``decisions="shadow"`` keeps the settings' decision model."""
+        model = [KEEP] * 3 if decisions == "shadow" else []
         return [
             KEEP,
             str(self.csv),
@@ -110,6 +114,9 @@ class Run:
             KEEP,
             KEEP,
             str(self.out),
+            decisions,
+            KEEP,
+            *model,
             KEEP,
             dry_run,
             "run",
@@ -137,6 +144,18 @@ def test_a_download_session_runs_the_works_and_prints_the_summary(
     session.prompter.finish()
     assert statuses(session.out) == {"E1": "complete", "E2": "complete"}
     assert "E1: complete" in session.screen
+    assert "Run summary: 2 work(s): 2 complete" in session.screen
+
+
+def test_a_shadow_download_session_shows_the_gate_checks(session: Run) -> None:
+    # The fake page files are no decodable images: each check fails unsent.
+    assert session(session.download_answers(decisions="shadow")) == 0
+
+    assert session.prompter is not None
+    session.prompter.finish()
+    assert "Gate checks" in session.screen
+    assert "unreadable page" in session.screen
+    assert "Gate (shadow, model typesafe/jev-1.14): 0 request(s)" in session.screen
     assert "Run summary: 2 work(s): 2 complete" in session.screen
 
 

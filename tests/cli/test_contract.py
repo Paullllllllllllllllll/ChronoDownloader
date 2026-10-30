@@ -313,7 +313,10 @@ def test_a_run_with_open_works_exits_0_and_counts_them(
         "items_needs_review": 1,
         "items_deferred": 1,
         "items_blocked": 1,
+        **COMMAND_FIELDS["download"],
     }
+    assert payload["gate_checks"] == payload["pages_total"] == 0
+    assert payload["gate_cost"] is None
 
 
 def test_a_partial_work_exits_1(

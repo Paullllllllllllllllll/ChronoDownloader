@@ -64,6 +64,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -90,6 +91,7 @@ __all__ = [
     "LIBRARY_NAMES",
     "PAGE_QUESTIONS",
     "WORK_QUESTIONS",
+    "DecisionTarget",
     "JudgeClient",
     "JudgeError",
     "JudgeRefused",
@@ -97,9 +99,11 @@ __all__ = [
     "MalformedAnswer",
     "MissingJudgeKey",
     "catalog_record",
+    "dialect_key",
     "judge_key",
     "mask_key",
     "page_request",
+    "page_target",
     "parse_masked",
     "post_decision",
     "sought_work",
@@ -275,14 +279,77 @@ class MissingJudgeKey(JudgeError):
     ``env_var`` names the environment variable that should hold it.
     """
 
-    def __init__(self, env_var: str, *, unusable: bool = False) -> None:
+    def __init__(
+        self,
+        env_var: str,
+        *,
+        unusable: bool = False,
+        needs: str = "the decision model needs an OpenRouter key",
+        hint: str = (
+            "run with --matching fuzzy to match on text scores without the "
+            "decision model"
+        ),
+    ) -> None:
         self.env_var = env_var
         state = "holds an unusable value" if unusable else "is not set"
         super().__init__(
-            f"the decision model needs an OpenRouter key, but the environment "
-            f"variable {env_var} {state}; set it, or run with --matching fuzzy "
-            f"to match on text scores without the decision model"
+            f"{needs}, but the environment variable {env_var} {state}; set it, "
+            f"or {hint}"
         )
+
+
+@dataclass(frozen=True)
+class DecisionTarget:
+    """The model, dialect and endpoint of decision requests."""
+
+    model: str
+    dialect: decisions.Dialect
+    endpoint: str
+
+
+def page_target(
+    settings: Settings,
+    model: str | None = None,
+    provider: str | None = None,
+    endpoint: str | None = None,
+) -> DecisionTarget:
+    """Return the page check's model: ``judge`` unless a flag names another.
+
+    Without flags the page check asks ``judge.page_model`` at
+    ``judge.endpoint`` through OpenRouter. A given flag wins over
+    ``judge.page_model``, the dialect follows the model id unless *provider*
+    names it, and the endpoint is *endpoint*, else the dialect's.
+
+    Raises:
+        ValueError: *provider* is no dialect.
+    """
+    judge = settings.judge
+    if model is None and provider is None and endpoint is None:
+        return DecisionTarget(judge.page_model, _DIALECT, judge.endpoint)
+    chosen = model or judge.page_model
+    dialect = decisions.dialect_for(chosen, provider)
+    return DecisionTarget(chosen, dialect, endpoint or decisions.ENDPOINTS[dialect])
+
+
+def dialect_key(
+    settings: Settings,
+    dialect: decisions.Dialect,
+    environ: Mapping[str, str] | None = None,
+    *,
+    needs: str,
+    hint: str,
+) -> str:
+    """Return the key of *dialect* (``api_keys.openai`` or ``.openrouter``).
+
+    Raises:
+        MissingJudgeKey: The key's variable is unset, empty or unusable; the
+            message says what *needs* it and the *hint*.
+    """
+    env_var = settings.api_key_env(dialect)
+    key = (os.environ if environ is None else environ).get(env_var, "").strip()
+    if not key or not usable_key(key):
+        raise MissingJudgeKey(env_var, unusable=bool(key), needs=needs, hint=hint)
+    return key
 
 
 class JudgeUnavailable(JudgeError):
@@ -403,8 +470,20 @@ def work_request(
     return body
 
 
+def _page_questions(query: SearchQuery) -> list[Question]:
+    """Return the page check's questions; the year's only with a sought year."""
+    return [
+        question
+        for question in _PAGE
+        if question.name != "imprint_year_matches" or query.year is not None
+    ]
+
+
 def page_request(
-    model: str, query: SearchQuery, page_images: Sequence[bytes]
+    model: str,
+    query: SearchQuery,
+    page_images: Sequence[bytes],
+    dialect: decisions.Dialect = _DIALECT,
 ) -> dict[str, Any]:
     """Return the request body of the page check over *page_images*.
 
@@ -422,12 +501,8 @@ def page_request(
                 f"page image {index} is not a JPEG, PNG, GIF or WebP image"
             ) from None
     text = json.dumps({"sought_work": sought_work(query)}, ensure_ascii=False)
-    questions = [
-        question
-        for question in _PAGE
-        if question.name != "imprint_year_matches" or query.year is not None
-    ]
-    return decisions.request_body(_DIALECT, model, [Text(text), *images], questions)
+    questions = _page_questions(query)
+    return decisions.request_body(dialect, model, [Text(text), *images], questions)
 
 
 def _predicate(result: DecisionResult, name: str) -> float:
@@ -477,7 +552,10 @@ class JudgeClient:
 
     *network* is the run's client, built from the same *settings*; *environ*
     is where the key is looked up (the process environment by default);
-    *clock* gives the epoch seconds a deferral counts from.
+    *clock* gives the epoch seconds a deferral counts from. *page* is the
+    page check's model (:func:`page_target`), ``judge.page_model`` through
+    OpenRouter by default; an OpenAI page model needs the OpenAI key only,
+    and the OpenRouter key is then looked up when a work is judged.
 
     Raises:
         MissingJudgeKey: The key's environment variable is unset, empty or
@@ -491,19 +569,40 @@ class JudgeClient:
         *,
         environ: Mapping[str, str] | None = None,
         clock: Callable[[], float] = time.time,
+        page: DecisionTarget | None = None,
     ) -> None:
-        key = judge_key(settings, environ)
+        self._page = page or page_target(settings)
+        self._settings = settings
+        self._environ = environ
+        self._key: str | None = None
+        if self._page.dialect == _DIALECT:
+            self._key = judge_key(settings, environ)
+            page_key = self._key
+        else:
+            page_key = dialect_key(
+                settings,
+                self._page.dialect,
+                environ,
+                needs="the page model needs an OpenAI key",
+                hint="choose another --decision-model",
+            )
         self._network = network
         self._judge = settings.judge
-        self._authorization = MappingProxyType({"Authorization": f"Bearer {key}"})
-        self._key = key
+        self._page_key = page_key
+        self._page_authorization = MappingProxyType(
+            {"Authorization": f"Bearer {page_key}"}
+        )
         self._clock = clock
 
     def __repr__(self) -> str:
         return (
-            f"JudgeClient(model={self._judge.model!r}, "
-            f"page_model={self._judge.page_model!r})"
+            f"JudgeClient(model={self._judge.model!r}, page_model={self._page.model!r})"
         )
+
+    def _work_key(self) -> str:
+        if self._key is None:
+            self._key = judge_key(self._settings, self._environ)
+        return self._key
 
     def judge_work(self, sought: SearchQuery, candidate: SearchRecord) -> WorkAnswer:
         """Return the model's answer on whether *candidate* is *sought*.
@@ -514,7 +613,15 @@ class JudgeClient:
             MalformedAnswer: The answer does not fit the questions.
         """
         model = self._judge.model
-        result = self._parse(self._post(work_request(model, sought, candidate)), _WORK)
+        key = self._work_key()
+        data = post_decision(
+            self._network,
+            self._judge.endpoint,
+            work_request(model, sought, candidate),
+            MappingProxyType({"Authorization": f"Bearer {key}"}),
+            unavailable=self._unavailable,
+        )
+        result = parse_masked(_DIALECT, data, _WORK, key)
         relation, probabilities, confidence = _choice(result, "match", RELATIONS)
         return WorkAnswer(
             same_work=_predicate(result, "same_work"),
@@ -538,10 +645,19 @@ class JudgeClient:
             JudgeRefused: The endpoint refused the request.
             MalformedAnswer: The answer does not fit the questions.
         """
-        model = self._judge.page_model
-        body = page_request(model, sought, page_images)
-        asked = [q for q in _PAGE if q.name in body["questions"]]
-        result = self._parse(self._post(body), asked)
+        page = self._page
+        model = page.model
+        body = page_request(model, sought, page_images, page.dialect)
+        data = post_decision(
+            self._network,
+            page.endpoint,
+            body,
+            self._page_authorization,
+            unavailable=self._unavailable,
+        )
+        result = parse_masked(
+            page.dialect, data, _page_questions(sought), self._page_key
+        )
         kind, probabilities, _ = _choice(result, "title_page_type", PAGE_TYPES)
         year = None
         if sought.year is not None:
@@ -554,20 +670,6 @@ class JudgeClient:
             pages=len(page_images),
             model=result.model,
             requested_model=model,
-        )
-
-    def _parse(self, data: Any, questions: Sequence[Question]) -> DecisionResult:
-        """Return the answers of *data*, masking this client's key in an error."""
-        return parse_masked(_DIALECT, data, questions, self._key)
-
-    def _post(self, body: Mapping[str, Any]) -> Any:
-        """Send *body* under a judge slot and return the decoded response."""
-        return post_decision(
-            self._network,
-            self._judge.endpoint,
-            body,
-            self._authorization,
-            unavailable=self._unavailable,
         )
 
     def _unavailable(self, reason: str, until: float | None) -> JudgeUnavailable:

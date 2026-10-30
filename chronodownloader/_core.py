@@ -40,7 +40,11 @@ __all__ = [
     "ClassifyOutcome",
     "ClassifyReport",
     "DecisionTotals",
+    "DownloadReport",
     "FetchTarget",
+    "GateOutcome",
+    "GateReport",
+    "GateResult",
     "InspectReport",
     "InspectTarget",
     "Leftover",
@@ -448,6 +452,54 @@ class ClassifyReport:
     dry_run: bool = False
 
 
+type GateOutcome = Literal["ok", "reused", "failed", "unavailable", "stale", "blocked"]
+"""How one gate check ended: ``ok`` (asked and recorded), ``reused`` (a
+stored check fits), ``failed`` and ``unavailable`` (recorded), ``stale`` (the
+work changed before the commit; dropped) or ``blocked`` (another run held
+the work)."""
+
+
+@dataclass(frozen=True)
+class GateResult:
+    """One gate check of a ``download --decisions shadow``.
+
+    *band* is ``accepted`` or ``review``; *same_work* and *relation* are the
+    model's answers of an ``ok`` or ``reused`` check; *note* says why a check
+    failed or was dropped.
+    """
+
+    entry_id: str
+    provider: str
+    source_id: str
+    band: str
+    outcome: GateOutcome
+    same_work: float | None = None
+    relation: str | None = None
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class GateReport:
+    """The gate checks of a download run, with the model and the usage."""
+
+    mode: str = "off"
+    checks: tuple[GateResult, ...] = ()
+    model: str = ""
+    usage: DecisionTotals = DecisionTotals()
+
+    def count(self, outcome: GateOutcome) -> int:
+        """Return the number of checks that ended with *outcome*."""
+        return sum(1 for check in self.checks if check.outcome == outcome)
+
+
+@dataclass(frozen=True)
+class DownloadReport:
+    """What a download's post-phase did: the gate checks, the classification."""
+
+    gate: GateReport = GateReport()
+    classify: ClassifyReport | None = None
+
+
 @dataclass(frozen=True)
 class StatusRow:
     """One work of a ``status`` listing.
@@ -545,6 +597,7 @@ type Report = (
     InspectReport
     | VerifyReport
     | ClassifyReport
+    | DownloadReport
     | StatusReport
     | DropReport
     | ProvidersReport
@@ -558,7 +611,7 @@ class RunResult:
 
     *rows* holds the candidates of a ``search``, *report* the report of
     ``inspect``, ``verify``, ``classify``, ``status``, ``drop`` and
-    ``providers``.
+    ``providers``, and the post-phase of ``download``.
     """
 
     counts: WorkCounts

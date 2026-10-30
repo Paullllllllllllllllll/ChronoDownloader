@@ -36,6 +36,7 @@ from chronodownloader.ui.questions import (
 from chronodownloader.ui.session import Session
 
 __all__ = [
+    "DECISION_MODEL",
     "LIMITS",
     "download_steps",
     "fetch_steps",
@@ -164,6 +165,31 @@ def _output_step() -> Step:
     return option_step("output", "Output", ("output",))
 
 
+DECISION_MODEL: Final = ("decision_model", "decision_provider", "decision_endpoint")
+"""The decision-model options of the post-phase and of the page check."""
+
+_DIALECTS: Final = (
+    Choice(None, "from the model id", note="vendor/model ids go to OpenRouter"),
+    Choice("openai", "openai", note="needs the OpenAI key"),
+    Choice("openrouter", "openrouter", note="needs the OpenRouter key"),
+)
+
+
+def _model_step(name: str, title: str, applies: Callable[[State], bool]) -> Step:
+    return option_step(
+        name,
+        title,
+        DECISION_MODEL,
+        applies=applies,
+        extra={"decision_provider": {"choices": _DIALECTS}},
+    )
+
+
+def _post_phase(state: State) -> bool:
+    """Whether the download runs the gate or ``--classify`` after the loop."""
+    return state.value("decisions") == "shadow" or bool(state.value("classify"))
+
+
 def download_steps(session: Session) -> Sequence[Step]:
     """Return the steps of ``download``."""
     return (
@@ -177,6 +203,8 @@ def download_steps(session: Session) -> Sequence[Step]:
         option_step("files", "Files", FILES),
         _limits_step(session),
         _output_step(),
+        option_step("decisions", "After the downloads", ("decisions", "classify")),
+        _model_step("decision_model", "Decision model", _post_phase),
         option_step("run", "Run", ("concurrency", "dry_run")),
     )
 
@@ -375,6 +403,9 @@ def verify_steps(session: Session) -> Sequence[Step]:
             "Pages sampled",
             ("first",),
             applies=lambda state: bool(state.value("pages")),
+        ),
+        _model_step(
+            "page_model", "Page model", lambda state: bool(state.value("pages"))
         ),
         option_step("run", "Run", ("dry_run",)),
     )

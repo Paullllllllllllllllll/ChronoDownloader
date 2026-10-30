@@ -9,11 +9,12 @@ from typing import Any
 import pytest
 
 from chronodownloader.cli.parser import build_parser
-from chronodownloader.options.options import Source
+from chronodownloader.options.options import OptionError, Source
 from chronodownloader.spec import (
     DOWNLOAD_OPTIONS,
     TABLES,
     DecisionModel,
+    DownloadDecisions,
     Resolution,
     SpecError,
     effective_spec,
@@ -99,6 +100,16 @@ def test_classify_leaves_unset_decision_flags_to_the_settings() -> None:
     assert given.decision.model == "a/b"
 
 
+def test_download_takes_the_decisions_mode_but_no_model_from_the_defaults() -> None:
+    defaults = DOWNLOAD_OPTIONS.check_defaults({"decisions": "shadow"})
+    spec = _resolve(["download", "--input", "w.csv"], defaults).spec
+    assert spec.decision == DownloadDecisions("shadow", False, None, None, None)
+    plain = _resolve(["download", "--input", "w.csv"]).spec
+    assert (plain.decision.mode, plain.decision.classify) == ("off", False)
+    with pytest.raises(OptionError, match="decision_model"):
+        DOWNLOAD_OPTIONS.check_defaults({"decision_model": "a/b"})
+
+
 SPEC_ERRORS = [
     pytest.param(["download"], id="download-no-input"),
     pytest.param(["download", "--input", "w.csv", "--only", ""], id="empty-only"),
@@ -116,6 +127,7 @@ SPEC_ERRORS = [
     ),
     pytest.param(["inspect", "--entry-ids", "E"], id="inspect-no-output"),
     pytest.param(["verify", "--first", "3"], id="first-without-pages"),
+    pytest.param(["verify", "--decision-model", "m"], id="page-model-without-pages"),
     pytest.param(["drop", "--all"], id="drop-no-output"),
     pytest.param(["drop", "--output", "o"], id="drop-no-selection"),
 ]
@@ -167,7 +179,21 @@ ROUND_TRIPS = [
     ["search", "--title=-x", "--creator", "A", "--year", "1651", "--entry-id", "E"],
     ["search", "--input", "w.csv", "--output", "out", "--max-candidates", "2"],
     ["inspect", "--entry-ids", "E1", "--output", "out", "--first", "4"],
+    ["inspect", "--entry-ids", "E1", "--output", "out", "--decision-model", "gpt-5.5"],
     ["verify", "--pages", "--first", "3", "--dry-run"],
+    ["verify", "--pages", "--decision-provider", "openai", "--decision-model", "m"],
+    [
+        "download",
+        "--input",
+        "w.csv",
+        "--decisions",
+        "shadow",
+        "--classify",
+        "--decision-model",
+        "gpt-5.5",
+        "--decision-endpoint",
+        "https://proxy.example/decisions",
+    ],
     [
         "classify",
         "--entry-ids",

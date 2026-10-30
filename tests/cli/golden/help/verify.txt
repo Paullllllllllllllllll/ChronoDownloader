@@ -1,26 +1,35 @@
-usage: chronodownloader verify [-h] [--entry-ids LIST] [--pages] [--first N] [--output DIR]
-                               [--dry-run] [--json] [--settings FILE]
+usage: chronodownloader verify [-h] [--entry-ids LIST] [--pages] [--first N] [--decision-model ID]
+                               [--decision-provider {openai,openrouter}] [--decision-endpoint URL]
+                               [--output DIR] [--dry-run] [--json] [--settings FILE]
 
 Check the files of the stored works against the store and update their statuses; with --pages also
 check the title page and the imprint year with the page model.
 
 options:
-  -h, --help        show this help message and exit
+  -h, --help            show this help message and exit
 
 works:
-  --entry-ids LIST  only these works; default: all works
+  --entry-ids LIST      only these works; default: all works
 
 page check:
-  --pages           also check title page and imprint year with the page model
-  --first N         pages sampled for the check; only with --pages; default: 10
+  --pages               also check title page and imprint year with the page model
+  --first N             pages sampled for the check; only with --pages; default: 10
+  --decision-model ID   page model id of the page check; vendor/model ids go to OpenRouter; only
+                        with --pages; default: judge.page_model
+  --decision-provider {openai,openrouter}
+                        dialect and key of the page model; only with --pages; default: from the
+                        model id
+  --decision-endpoint URL
+                        Decisions endpoint URL of the page model; only with --pages; default:
+                        judge.endpoint; with another model, the provider's
 
 output:
-  --output DIR      output root to verify; default: downloaded_works
+  --output DIR          output root to verify; default: downloaded_works
 
 run control:
-  --dry-run         report without changing statuses
-  --json            print one JSON summary line on stdout
-  --settings FILE   alternate settings file; default: config/settings.yaml
+  --dry-run             report without changing statuses
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
 
 Precedence: a flag wins over the settings defaults: block, which wins over the code default.
 --settings FILE reads another settings file instead of config/settings.yaml.

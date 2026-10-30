@@ -40,8 +40,9 @@ judge:
     timeout_s: 300
     slots: 4                # concurrent requests on this machine
 
-# Decision model that classifies page images (classify); its requests take
-# judge.network's policy and slot limit, with pacing and a breaker of their own.
+# Decision model of classify and of the download post-phase (--decisions,
+# --classify); its requests take judge.network's policy and slot limit, with
+# pacing and a breaker of their own.
 decisions:
   model: typesafe/jev-1.14  # vendor/model ids go to OpenRouter, others to OpenAI
   provider: null            # openai | openrouter; null: from the model id
@@ -233,3 +234,4 @@ defaults:
   # search_timeout: 60          # seconds per provider search; 0 = none
   # include_metadata: true
   # concurrency: 3              # works in parallel
+  # decisions: shadow           # 'off' (quoted) | shadow: gate checks after downloads

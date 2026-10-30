@@ -35,6 +35,7 @@ from chronodownloader.output.store import (
     CandidateInput,
     FileRow,
     FolderConflictError,
+    GateCheck,
     Judgment,
     Lease,
     LeaseLostError,
@@ -48,6 +49,7 @@ from chronodownloader.output.store import (
     UnreadableDatabaseError,
     VersionlessDatabaseError,
     WorkInput,
+    read_gate_checks,
     read_page_labels,
     read_title_page_picks,
     read_title_page_readings,
@@ -159,7 +161,7 @@ def _staging_root(root: Path, entry_id: str) -> Path:
 # Opening and schema
 
 
-def test_opening_creates_schema_version_three_with_the_read_views(
+def test_opening_creates_schema_version_four_with_the_read_views(
     opened: Callable[..., Store], root: Path
 ) -> None:
     store = opened()
@@ -169,6 +171,7 @@ def test_opening_creates_schema_version_three_with_the_read_views(
         "candidates",
         "files",
         "meta",
+        "page_checks",
         "page_labels",
         "runs",
         "title_pages",
@@ -184,6 +187,7 @@ def test_opening_creates_schema_version_three_with_the_read_views(
         ],
     )
     assert views == [
+        "gate_checks",
         "title_page_picks",
         "title_page_readings",
         "work_candidates",
@@ -203,11 +207,11 @@ def test_a_newer_database_is_refused_and_left_as_it_is(
 ) -> None:
     opened().close()
     with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
-        connection.execute("UPDATE meta SET value = '4'")
+        connection.execute("UPDATE meta SET value = '5'")
         connection.commit()
     before = (root / DATABASE_NAME).read_bytes()
 
-    with pytest.raises(NewerSchemaError, match="version 4") as raised:
+    with pytest.raises(NewerSchemaError, match="version 5") as raised:
         Store(root, clock=clock)
     assert raised.value.exit_code == ExitCode.USAGE == 2
     assert (root / DATABASE_NAME).read_bytes() == before
@@ -1349,26 +1353,30 @@ def _older_store(root: Path, version: int, lease_until: float | None = None) -> 
         connection.commit()
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_an_older_store_is_migrated_in_place(
     root: Path, clock: FakeClock, version: int
 ) -> None:
     _older_store(root, version)
 
-    assert read_title_page_readings(root) == []
+    assert read_gate_checks(root) == []
+    if version <= 2:
+        assert read_title_page_readings(root) == []
     if version == 1:
         assert (read_page_labels(root, "e1"), read_title_page_picks(root)) == ([], [])
     with Store(root, clock=clock, reconcile=False, migrate=False):
         assert store_module.check_schema(root / DATABASE_NAME) == version
     with Store(root, clock=clock) as store:
-        assert store_module.check_schema(store.path) == SCHEMA_VERSION == 3
+        assert store_module.check_schema(store.path) == SCHEMA_VERSION == 4
         tables = sqlite_module.table_names(store.path)
-        assert {"page_labels", "title_pages"} <= set(tables)
+        assert {"page_labels", "title_pages", "page_checks"} <= set(tables)
         assert [row["entry_id"] for row in read_work_status(root)] == ["e1"]
         assert (store.page_labels("e1"), store.title_page("e1")) == ([], None)
+        assert store.page_checks("e1") == []
+    assert read_gate_checks(root) == []
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_an_older_store_under_an_older_runs_lease_is_not_migrated(
     root: Path, clock: FakeClock, version: int
 ) -> None:
@@ -1381,7 +1389,7 @@ def test_an_older_store_under_an_older_runs_lease_is_not_migrated(
 
     clock.advance(61)
     with Store(root, clock=clock) as store:
-        assert store_module.check_schema(store.path) == 3
+        assert store_module.check_schema(store.path) == 4
 
 
 def test_a_label_lands_only_while_its_file_keeps_the_attempt(
@@ -1607,3 +1615,98 @@ def test_the_view_counts_only_current_labels_and_shows_an_incomplete_run(
     row = _pick(root)
     assert (row["pages_total"], row["pages_labelled"], row["path"]) == (3, 1, None)
     assert len(store.page_labels("e1")) == 2
+
+
+def _gate_check(source_id: str = "bsb1", **fields: Any) -> GateCheck:
+    values: dict[str, Any] = {
+        "candidate_id": None,
+        "provider": "mdz",
+        "source_id": source_id,
+        "band": "accepted",
+        "page_source": "downloaded",
+        "sought_hash": "s" * 64,
+        "page_hashes": ("a" * 64, "b" * 64),
+        "model": "gpt-5.5",
+        "dialect": "openai",
+        "endpoint": "https://api.openai.com/v1/decisions",
+        "question_version": "v",
+        "fingerprint": "f",
+        "status": "ok",
+        "answers": {
+            "same_work": 0.9,
+            "title_page_of_sought": 0.8,
+            "relation": {"choice": "same_edition", "probabilities": {}},
+        },
+    }
+    values.update(fields)
+    return GateCheck(**values)
+
+
+def test_a_gate_check_is_stored_and_the_view_shows_the_latest_per_item(
+    opened: Callable[..., Store], root: Path
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    first = store.record_page_check(lease, _gate_check())
+    failed = _gate_check(status="failed", error="outage", answers=None)
+    second = store.record_page_check(lease, failed)
+    store.record_page_check(lease, _gate_check("bsb2", band="review"))
+    store.release(lease)
+
+    checks = store.page_checks("e1")
+    assert [check.check_id for check in checks][:2] == [first, second]
+    assert checks[0].page_hashes == ("a" * 64, "b" * 64)
+    assert checks[0].run_id == "a"
+    assert checks[0].answers is not None and checks[0].answers["same_work"] == 0.9
+    rows = read_gate_checks(root)
+    assert [(row["source_id"], row["status"]) for row in rows] == [
+        ("bsb1", "failed"),
+        ("bsb2", "ok"),
+    ]
+    assert (rows[1]["same_work"], rows[1]["relation"]) == (0.9, "same_edition")
+    assert rows[1]["band"] == "review"
+    assert read_gate_checks(root, ["e2"]) == []
+    with pytest.raises(LeaseLostError):
+        store.record_page_check(lease, _gate_check())
+
+
+def test_a_gate_check_stores_its_endpoint_without_credentials(
+    opened: Callable[..., Store],
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    endpoint = "https://user:secret@proxy.example:8443/v1/decisions?key=sk-1#x"
+    store.record_page_check(lease, _gate_check(endpoint=endpoint))
+
+    (check,) = store.page_checks("e1")
+    assert check.endpoint == "https://proxy.example:8443/v1/decisions"
+
+
+def test_a_lease_without_update_leaves_last_run_and_updated_at(
+    opened: Callable[..., Store], clock: FakeClock
+) -> None:
+    first = opened("a")
+    first.release(_acquire(first))
+    (before,) = sqlite_module.read_rows(first.path, "works")
+    clock.advance(5)
+    second = opened("b")
+    lease = second.acquire(_work(), folder_of("e1"), update=False)
+    assert lease is not None
+    second.release(lease)
+
+    (after,) = sqlite_module.read_rows(second.path, "works")
+    assert (after["last_run_id"], after["updated_at"]) == ("a", before["updated_at"])
+    assert after["lease_generation"] == before["lease_generation"] + 1
+
+
+def test_drop_deletes_the_works_gate_checks(
+    opened: Callable[..., Store], root: Path
+) -> None:
+    store = opened("a")
+    lease = _acquire(store)
+    store.record_page_check(lease, _gate_check())
+    store.release(lease)
+
+    store.drop(["e1"])
+    assert store.page_checks("e1") == []
+    assert read_gate_checks(root) == []

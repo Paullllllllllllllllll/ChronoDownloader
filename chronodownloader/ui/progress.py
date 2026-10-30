@@ -275,6 +275,55 @@ def _verify_view(report: core.VerifyReport) -> RenderableType:
     return Group(*lines)
 
 
+def _usage(usage: core.DecisionTotals) -> str:
+    cost = "" if usage.cost is None else f", cost {usage.cost:.4f} USD"
+    return (
+        f"{usage.requests} request(s), {usage.input_tokens:,} input tokens "
+        f"({usage.cached_tokens:,} cached), {usage.output_tokens:,} output "
+        f"tokens{cost}"
+    )
+
+
+def _download_view(report: core.DownloadReport) -> list[RenderableType]:
+    """Return the post-phase of a download: gate checks, classification."""
+    parts: list[RenderableType] = []
+    gate = report.gate
+    if gate.mode != "off":
+        table = Table(title="Gate checks", title_justify="left")
+        for header in ("Work", "Band", "Item", "Outcome", "Same work", "Relation"):
+            table.add_column(header)
+        table.add_column("Note", overflow="fold")
+        for check in gate.checks:
+            table.add_row(
+                Text(check.entry_id),
+                check.band,
+                Text(f"{check.provider}:{check.source_id}"),
+                check.outcome,
+                _number(check.same_work),
+                check.relation or "-",
+                Text(check.note or ""),
+            )
+        line = Text(f"Gate ({gate.mode}, model {gate.model}): {_usage(gate.usage)}.")
+        parts += [table, line]
+    classified = report.classify
+    if classified is not None:
+        table = Table(title="Classified works", title_justify="left")
+        for header in ("Work", "Outcome", "Pages", "Labelled", "Title page"):
+            table.add_column(header)
+        table.add_column("Title", overflow="fold")
+        for work in classified.works:
+            table.add_row(
+                Text(work.entry_id),
+                work.outcome,
+                str(work.pages),
+                str(work.labelled),
+                Text(work.title_page or "-"),
+                Text(_short(work.title or "-")),
+            )
+        parts += [table, Text(f"Page types: {_usage(classified.usage)}.")]
+    return parts
+
+
 def plan_view(run_plan: core.RunPlan) -> RenderableType:
     """Return what a dry run would do: the planned works or the report."""
     if isinstance(run_plan.report, core.VerifyReport):
@@ -310,5 +359,7 @@ def summary_view(result: core.RunResult, progress: RichProgress) -> RenderableTy
         parts.append(_search_table(result.rows))
     if isinstance(result.report, core.VerifyReport):
         parts.append(_verify_view(result.report))
+    if isinstance(result.report, core.DownloadReport):
+        parts += _download_view(result.report)
     parts.append(Text(f"Run summary: {counts_text(result.counts)}", style="bold"))
     return Group(*parts)

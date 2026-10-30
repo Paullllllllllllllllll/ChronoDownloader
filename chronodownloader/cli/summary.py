@@ -21,7 +21,10 @@ could not be read or classified; ``deferred``: the decision model is
 unavailable; ``blocked``: another run holds the work; ``skipped``: no page
 images) and adds the pages, the decision usage, ``decision_cost`` null
 where the dialect reports no cost, and the title-page readings with their
-usage; ``status`` counts the listed works
+usage. ``download`` adds the gate checks by outcome (``gate_checks`` asked
+and recorded, ``gate_reused``, ``gate_failed``, ``gate_unavailable``,
+``gate_stale``, ``gate_blocked``) with the gate's usage and ``classify``'s
+fields, all zero when the post-phase is off; ``status`` counts the listed works
 by status (``items_new`` for works without an outcome); ``drop`` counts the
 works dropped as ``complete``, those another run holds as ``blocked`` and
 unknown entry ids as ``skipped``; ``providers`` counts the providers.
@@ -38,6 +41,7 @@ from typing import Any, TextIO
 from chronodownloader.process.contract import ExitCode, SummaryEmitter, exit_code_for
 from chronodownloader.run import (
     ClassifyReport,
+    DownloadReport,
     DropReport,
     InspectReport,
     ProvidersReport,
@@ -58,8 +62,49 @@ __all__ = [
     "summary_for",
 ]
 
+_CLASSIFY_FIELDS: Mapping[str, int | float | None] = MappingProxyType(
+    {
+        "pages_total": 0,
+        "pages_asked": 0,
+        "pages_current": 0,
+        "pages_labelled": 0,
+        "pages_stale": 0,
+        "pages_failed": 0,
+        "title_pages": 0,
+        "decision_requests": 0,
+        "decision_input_tokens": 0,
+        "decision_output_tokens": 0,
+        "decision_cached_tokens": 0,
+        "decision_cache_write_tokens": 0,
+        "decision_cost": None,
+        "title_pages_transcribed": 0,
+        "title_requests": 0,
+        "title_input_tokens": 0,
+        "title_output_tokens": 0,
+        "title_cost": None,
+    }
+)
+
+_GATE_FIELDS: Mapping[str, int | float | None] = MappingProxyType(
+    {
+        "gate_checks": 0,
+        "gate_reused": 0,
+        "gate_failed": 0,
+        "gate_unavailable": 0,
+        "gate_stale": 0,
+        "gate_blocked": 0,
+        "gate_requests": 0,
+        "gate_input_tokens": 0,
+        "gate_output_tokens": 0,
+        "gate_cached_tokens": 0,
+        "gate_cache_write_tokens": 0,
+        "gate_cost": None,
+    }
+)
+
 COMMAND_FIELDS: Mapping[str, Mapping[str, int | float | None]] = MappingProxyType(
     {
+        "download": {**_GATE_FIELDS, **_CLASSIFY_FIELDS},
         "search": {"items_accepted": 0},
         "inspect": {"pages_sampled": 0},
         "verify": {
@@ -68,26 +113,7 @@ COMMAND_FIELDS: Mapping[str, Mapping[str, int | float | None]] = MappingProxyTyp
             "files_mismatched": 0,
             "pages_checked": 0,
         },
-        "classify": {
-            "pages_total": 0,
-            "pages_asked": 0,
-            "pages_current": 0,
-            "pages_labelled": 0,
-            "pages_stale": 0,
-            "pages_failed": 0,
-            "title_pages": 0,
-            "decision_requests": 0,
-            "decision_input_tokens": 0,
-            "decision_output_tokens": 0,
-            "decision_cached_tokens": 0,
-            "decision_cache_write_tokens": 0,
-            "decision_cost": None,
-            "title_pages_transcribed": 0,
-            "title_requests": 0,
-            "title_input_tokens": 0,
-            "title_output_tokens": 0,
-            "title_cost": None,
-        },
+        "classify": _CLASSIFY_FIELDS,
         "status": {"items_new": 0, "unstored_folders": 0, "inspect_leftovers": 0},
         "drop": {"files_deleted": 0, "files_kept": 0},
         "providers": {"breakers_open": 0, "keys_missing": 0},
@@ -131,8 +157,31 @@ def _classify_fields(report: ClassifyReport) -> dict[str, int | float | None]:
     }
 
 
+def _download_fields(report: DownloadReport) -> dict[str, int | float | None]:
+    gate, usage = report.gate, report.gate.usage
+    fields: dict[str, int | float | None] = {
+        "gate_checks": gate.count("ok"),
+        "gate_reused": gate.count("reused"),
+        "gate_failed": gate.count("failed"),
+        "gate_unavailable": gate.count("unavailable"),
+        "gate_stale": gate.count("stale"),
+        "gate_blocked": gate.count("blocked"),
+        "gate_requests": usage.requests,
+        "gate_input_tokens": usage.input_tokens,
+        "gate_output_tokens": usage.output_tokens,
+        "gate_cached_tokens": usage.cached_tokens,
+        "gate_cache_write_tokens": usage.cache_write_tokens,
+        "gate_cost": usage.cost,
+    }
+    if report.classify is not None:
+        fields.update(_classify_fields(report.classify))
+    return fields
+
+
 def report_fields(report: Report | None) -> dict[str, int | float | None]:
     """Return the command's own summary fields from its *report*."""
+    if isinstance(report, DownloadReport):
+        return _download_fields(report)
     if isinstance(report, ClassifyReport):
         return _classify_fields(report)
     if isinstance(report, InspectReport):

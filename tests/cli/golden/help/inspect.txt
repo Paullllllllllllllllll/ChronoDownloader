@@ -6,23 +6,32 @@ page among the first pages and the imprint year. fetch and drop remove the sampl
 works.
 
 options:
-  -h, --help        show this help message and exit
+  -h, --help            show this help message and exit
 
 candidates:
-  --entry-ids LIST  inspect the stored candidates of these works; needs --output
-  --provider KEY    provider of --id; inspects one item outside the store
-  --id ID           provider item identifier; inspects one item outside the store
-  --providers LIST  only candidates of these providers; default: all
-  --first N         pages sampled per candidate; default: 10
+  --entry-ids LIST      inspect the stored candidates of these works; needs --output
+  --provider KEY        provider of --id; inspects one item outside the store
+  --id ID               provider item identifier; inspects one item outside the store
+  --providers LIST      only candidates of these providers; default: all
+  --first N             pages sampled per candidate; default: 10
 
 output:
-  --output DIR      store root; pages go to <output>/_inspect/<entry_id>/<provider>_<id>/;
-                    default: a scratch folder in %TEMP%\chronodownloader\inspect
+  --output DIR          store root; pages go to <output>/_inspect/<entry_id>/<provider>_<id>/;
+                        default: a scratch folder in %TEMP%\chronodownloader\inspect
+
+page check:
+  --decision-model ID   page model id of the page check; vendor/model ids go to OpenRouter;
+                        default: judge.page_model
+  --decision-provider {openai,openrouter}
+                        dialect and key of the page model; default: from the model id
+  --decision-endpoint URL
+                        Decisions endpoint URL of the page model; default: judge.endpoint; with
+                        another model, the provider's
 
 run control:
-  --dry-run         plan without network requests or writes
-  --json            print one JSON summary line on stdout
-  --settings FILE   alternate settings file; default: config/settings.yaml
+  --dry-run             plan without network requests or writes
+  --json                print one JSON summary line on stdout
+  --settings FILE       alternate settings file; default: config/settings.yaml
 
 Precedence: a flag wins over the settings defaults: block, which wins over the code default.
 --settings FILE reads another settings file instead of config/settings.yaml.

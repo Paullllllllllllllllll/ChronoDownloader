@@ -23,7 +23,7 @@ import requests
 from PIL import Image
 
 from chronodownloader import run as core
-from chronodownloader._classify import _pages
+from chronodownloader._classify import source_pages
 from chronodownloader.cli.summary import report_fields
 from chronodownloader.common.decisions import ENDPOINTS
 from chronodownloader.coord import BreakerStatus, read_snapshot
@@ -496,13 +496,13 @@ def _file(item: str) -> FileRow:
 
 
 def test_pages_keep_their_source_position_across_a_gap() -> None:
-    pages = _pages([_file("p00004"), _file("p00001"), _file("p00002")])
+    pages = source_pages([_file("p00004"), _file("p00001"), _file("p00002")])
     assert [(page.index, page.file.item) for page in pages] == [
         (0, "p00001"),
         (1, "p00002"),
         (3, "p00004"),
     ]
-    mixed = _pages([_file("p00004"), _file("cover")])
+    mixed = source_pages([_file("p00004"), _file("cover")])
     assert [(page.index, page.file.item) for page in mixed] == [
         (0, "cover"),
         (1, "p00004"),

@@ -3,13 +3,14 @@
 The store is the only status record of an output root. It holds the runs, the
 works with their input fields and status, the candidates found for each work
 with their scores and judgments, every download attempt with its completeness,
-the files each work's folder holds, the page type of each page image and a
-chat model's reading of each work's title page. External readers use the views
-``work_status``, ``work_candidates``, ``title_page_picks`` and
-``title_page_readings`` (the read contract); the tables behind them may change
-in a later schema version.
+the files each work's folder holds, the page type of each page image, a chat
+model's reading of each work's title page and the gate's checks of candidates'
+leading pages. External readers use the views ``work_status``,
+``work_candidates``, ``title_page_picks``, ``title_page_readings`` and
+``gate_checks`` (the read contract); the tables behind them may change in a
+later schema version.
 
-Schema (version 3, ``meta.schema_version``)::
+Schema (version 4, ``meta.schema_version``)::
 
     meta       (key TEXT PRIMARY KEY, value TEXT)  -- schema_version,
                                                    -- generation_floor
@@ -53,6 +54,15 @@ Schema (version 3, ``meta.schema_version``)::
                 is_title_page (0|1), title, place, year INTEGER,
                 year_as_printed,              -- the model's reading
                 model, prompt_version, run_id -> runs, created_at)  -- version 3
+    page_checks (check_id INTEGER PRIMARY KEY, entry_id, candidate_id,
+                provider, source_id, band (accepted|review),
+                page_source (downloaded|sampled), sought_hash,
+                page_hashes JSON,             -- SHA-256 of the bytes sent
+                model, dialect, endpoint,      -- without userinfo and query
+                question_version, fingerprint,
+                status (ok|failed|unavailable), error, answers JSON,
+                usage JSON, reused_from,       -- check_id whose answers it reuses
+                run_id -> runs, created_at)  -- version 4
 
     work_status     one row per work: the works columns, ``status``
                     (``blocked`` while a run holds an unexpired lease by the
@@ -91,6 +101,13 @@ Schema (version 3, ``meta.schema_version``)::
                     ``created_at``. Every field from ``is_title_page`` to
                     ``year_as_printed`` is a chat model's reading of the
                     page image, not catalog data.
+    gate_checks     one row per checked candidate of a work: the latest
+                    check of each (``entry_id``, ``provider``,
+                    ``source_id``), with ``band``, ``page_source``,
+                    ``status``, ``same_work`` and ``title_page_of_sought``
+                    (probabilities), ``relation`` (the chosen value),
+                    ``model`` and ``created_at``. A check is a shadow
+                    record: no status or decision depends on it.
 
 Page index. A page's ``page_index`` is its position in the source: item
 ``pNNNNN`` is page NNNNN - 1, so a partial download keeps the gaps of the
@@ -126,9 +143,9 @@ masked; error texts are cut to :data:`ERROR_TEXT_LIMIT` characters.
 Opening. A database with tables but no schema version, one with a newer
 version and one SQLite cannot read raise a :class:`StoreError` (exit code
 2) and are left as they are; only a missing or empty database is created. A
-version 1 or 2 store is migrated in place, in the opening's write
+store of version 1 to 3 is migrated in place, in the opening's write
 transaction: the tables and views of the later versions are created and
-``meta.schema_version`` becomes 3. While a work of it is under an unexpired
+``meta.schema_version`` becomes 4. While a work of it is under an unexpired
 lease, which only a process of the older version can hold, the opening
 refuses with :class:`StoreBusyError` and migrates nothing. The read-only
 functions read an older store as one without the later tables' rows.
@@ -203,6 +220,7 @@ import socket
 import sqlite3
 import threading
 import time
+import urllib.parse
 import uuid
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -250,6 +268,7 @@ __all__ = [
     "DropReport",
     "FileRow",
     "FolderConflictError",
+    "GateCheck",
     "Judgment",
     "Lease",
     "LeaseKeeper",
@@ -274,6 +293,7 @@ __all__ = [
     "check_schema",
     "read_candidates",
     "read_files",
+    "read_gate_checks",
     "read_page_labels",
     "read_title_page_picks",
     "read_title_page_readings",
@@ -287,7 +307,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 DATABASE_NAME: Final = "chronodownloader.sqlite"
-SCHEMA_VERSION: Final = 3
+SCHEMA_VERSION: Final = 4
 PICK_THRESHOLD: Final = 0.5
 PICK_SEARCH: Final = 10
 """The ``title_page_picks`` rule; equal to ``page_types.TITLE_PAGE_THRESHOLD``
@@ -580,7 +600,49 @@ JOIN files AS f
 )
 """The table and view version 3 adds."""
 
-_MIGRATIONS: Final = {2: _SCHEMA_V2, 3: _SCHEMA_V3}
+_SCHEMA_V4: Final = (
+    """CREATE TABLE page_checks (
+    check_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id TEXT NOT NULL,
+    candidate_id INTEGER,
+    provider TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    band TEXT NOT NULL CHECK (band IN ('accepted', 'review')),
+    page_source TEXT NOT NULL CHECK (page_source IN ('downloaded', 'sampled')),
+    sought_hash TEXT NOT NULL,
+    page_hashes TEXT NOT NULL DEFAULT '[]',
+    model TEXT NOT NULL,
+    dialect TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    question_version TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('ok', 'failed', 'unavailable')),
+    error TEXT,
+    answers TEXT,
+    usage TEXT,
+    reused_from INTEGER,
+    run_id TEXT NOT NULL REFERENCES runs (run_id),
+    created_at TEXT NOT NULL
+)""",
+    "CREATE INDEX page_checks_by_item ON page_checks "
+    "(entry_id, provider, source_id, check_id)",
+    """CREATE VIEW gate_checks AS
+SELECT
+    c.entry_id, c.provider, c.source_id, c.band, c.page_source, c.status,
+    json_extract(c.answers, '$.same_work') AS same_work,
+    json_extract(c.answers, '$.title_page_of_sought') AS title_page_of_sought,
+    json_extract(c.answers, '$.relation.choice') AS relation,
+    c.model, c.created_at
+FROM page_checks AS c
+WHERE c.check_id = (
+    SELECT max(l.check_id) FROM page_checks AS l
+    WHERE l.entry_id = c.entry_id AND l.provider = c.provider
+    AND l.source_id = c.source_id
+)""",
+)
+"""The table and view version 4 adds."""
+
+_MIGRATIONS: Final = {2: _SCHEMA_V2, 3: _SCHEMA_V3, 4: _SCHEMA_V4}
 """The statements that bring a store to each version from the one before."""
 
 _PATH_TABLES: Final = ("page_labels", "title_pages")
@@ -601,7 +663,8 @@ UPDATE works SET
     place = COALESCE(:place, place), publisher = COALESCE(:publisher, publisher),
     language = COALESCE(:language, language),
     edition = COALESCE(:edition, edition), link = COALESCE(:link, link),
-    last_run_id = :holder, updated_at = :stamp
+    last_run_id = CASE WHEN :touch THEN :holder ELSE last_run_id END,
+    updated_at = CASE WHEN :touch THEN :stamp ELSE updated_at END
 WHERE entry_id = :entry_id
 AND (lease_holder IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= :now
      OR lease_holder = :holder OR lease_holder = :dead)
@@ -938,6 +1001,43 @@ class TitlePageReading:
     year_as_printed: str | None
     model: str
     prompt_version: str
+    run_id: str | None = None
+    created_at: str | None = None
+
+
+@dataclass(frozen=True)
+class GateCheck:
+    """A gate check of one candidate's leading pages (``page_checks``).
+
+    *band* is ``accepted`` (a downloaded work's selected candidate) or
+    ``review`` (a review-band candidate); *page_source* ``downloaded`` or
+    ``sampled``. *sought_hash* and *page_hashes* (SHA-256 of the page bytes
+    sent, in order) key a reuse together with *fingerprint*. *status* is
+    ``ok``, ``failed`` (*error* says why) or ``unavailable`` (no pages to
+    send). *answers* holds the model's answers as decoded JSON; *reused_from*
+    names the check whose answers a reuse copied, without a request of its
+    own. *endpoint* is stored without userinfo, query and fragment. A check
+    read back carries *check_id*, *run_id* and *created_at*.
+    """
+
+    candidate_id: int | None
+    provider: str
+    source_id: str
+    band: str
+    page_source: str
+    sought_hash: str
+    page_hashes: tuple[str, ...]
+    model: str
+    dialect: str
+    endpoint: str
+    question_version: str
+    fingerprint: str
+    status: str
+    error: str | None = None
+    answers: Mapping[str, Any] | None = None
+    usage: Mapping[str, Any] | None = None
+    reused_from: int | None = None
+    check_id: int | None = None
     run_id: str | None = None
     created_at: str | None = None
 
@@ -1455,7 +1555,8 @@ class Store:
         dead process on this host (see the module docstring); the acquisition
         increments the generation and updates the input fields (a field the
         input leaves empty keeps its stored value). Without *update* the
-        stored input fields stay as they are.
+        stored input fields, ``last_run_id`` and ``updated_at`` stay as they
+        are; ownership rests on the holder and generation alone.
 
         *select*, when given, is asked inside the acquisition's transaction,
         once the lease is obtainable, with the work's ``work_status`` row as
@@ -1506,6 +1607,7 @@ class Store:
                 "now": now,
                 "stamp": stamp,
                 "entry_id": work.entry_id,
+                "touch": update,
                 **(fields if update else dict.fromkeys(fields)),
                 "dead": _dead_holder(connection, work.entry_id, holder, now),
             }
@@ -1886,6 +1988,46 @@ class Store:
 
         return self._leased(lease, write)
 
+    def record_page_check(self, lease: Lease, check: GateCheck) -> int:
+        """Store a gate check of the work; return its ``check_id``.
+
+        Raises:
+            LeaseLostError: The lease expired or passed to another holder;
+                nothing was written.
+        """
+        run_id = self._require_run()
+        row = {
+            "entry_id": lease.entry_id,
+            "candidate_id": check.candidate_id,
+            "provider": check.provider,
+            "source_id": check.source_id,
+            "band": check.band,
+            "page_source": check.page_source,
+            "sought_hash": check.sought_hash,
+            "page_hashes": json.dumps(list(check.page_hashes)),
+            "model": check.model,
+            "dialect": check.dialect,
+            "endpoint": _bare_url(check.endpoint),
+            "question_version": check.question_version,
+            "fingerprint": check.fingerprint,
+            "status": check.status,
+            "error": bounded_error(_masked(check.error)),
+            "answers": _json(None if check.answers is None else dict(check.answers)),
+            "usage": _json(None if check.usage is None else dict(check.usage)),
+            "reused_from": check.reused_from,
+            "run_id": run_id,
+        }
+
+        def write(connection: sqlite3.Connection) -> int:
+            cursor = connection.execute(
+                f"INSERT INTO page_checks ({', '.join(row)}, created_at) "  # noqa: S608
+                f"VALUES ({', '.join(':' + name for name in row)}, :stamp)",
+                {**row, "stamp": _iso(self.clock())},
+            )
+            return int(cursor.lastrowid or 0)
+
+        return self._leased(lease, write)
+
     def drop_title_page(self, lease: Lease) -> int:
         """Delete the work's title-page reading; return how many rows went.
 
@@ -2184,8 +2326,9 @@ class Store:
         unexpired lease on it; an entry id that names no work is refused as
         well, and with *statuses* a work whose stored status (``new``
         without one) is not among them, checked in the deleting transaction.
-        For the rest, the ``works``, ``candidates``, ``attempts``, ``files``
-        and ``page_labels`` rows are deleted, then the recorded files, the staging
+        For the rest, the ``works``, ``candidates``, ``attempts``, ``files``,
+        ``page_labels``, ``title_pages`` and ``page_checks`` rows are
+        deleted, then the recorded files, the staging
         folders and the ``inspect`` scratch (:func:`.paths.inspect_dir`), and
         the folders left empty; files no row records stay and are reported.
         Runs stay.
@@ -2317,6 +2460,14 @@ class Store:
         rows = self._query(_LABELS, (entry_id,))
         return [_page_label(row) for row in rows]
 
+    def page_checks(self, entry_id: str) -> list[GateCheck]:
+        """Return the work's gate checks, oldest first."""
+        rows = self._query(
+            "SELECT * FROM page_checks WHERE entry_id = ? ORDER BY check_id",
+            (entry_id,),
+        )
+        return [_gate_check(row) for row in rows]
+
     def title_page(self, entry_id: str) -> TitlePageReading | None:
         """Return the work's stored title-page reading, current or not."""
         rows = self._query(_READING, (entry_id,))
@@ -2370,7 +2521,8 @@ def _delete_works(connection: sqlite3.Connection, entry_ids: Sequence[str]) -> N
     connection.execute(
         f"UPDATE works SET selected_candidate = NULL WHERE {selected}", ids
     )
-    for table in (*_PATH_TABLES, "files", "attempts", "candidates", "works"):
+    tables = (*_PATH_TABLES, "page_checks", "files", "attempts", "candidates")
+    for table in (*tables, "works"):
         connection.execute(f"DELETE FROM {table} WHERE {selected}", ids)  # noqa: S608
 
 
@@ -2491,6 +2643,23 @@ _READING = (
     "year_as_printed, model, prompt_version, run_id, created_at "
     "FROM title_pages WHERE entry_id = ?"
 )
+
+
+def _bare_url(url: str) -> str:
+    """Return *url* without userinfo, query and fragment."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.netloc.rpartition("@")[2]
+    return urllib.parse.urlunsplit((parts.scheme, host, parts.path, "", ""))
+
+
+def _gate_check(row: Mapping[str, Any]) -> GateCheck:
+    values = dict(row)
+    del values["entry_id"]
+    values["page_hashes"] = tuple(json.loads(values["page_hashes"]))
+    for name in ("answers", "usage"):
+        if values[name] is not None:
+            values[name] = MappingProxyType(json.loads(values[name]))
+    return GateCheck(**values)
 
 
 def _reading(row: Mapping[str, Any]) -> TitlePageReading:
@@ -2648,6 +2817,29 @@ def read_title_page_picks(
         sql += " WHERE entry_id IN (SELECT value FROM json_each(?))"
         params = (json.dumps(list(entry_ids)),)
     return _read_view(root, sql + " ORDER BY entry_id", params, busy_timeout, since=2)
+
+
+def read_gate_checks(
+    root: Path,
+    entry_ids: Sequence[str] | None = None,
+    *,
+    busy_timeout: float = DEFAULT_BUSY_TIMEOUT,
+) -> list[dict[str, Any]]:
+    """Return the ``gate_checks`` rows of *root*, never writing.
+
+    The rows come by entry id, provider and item; *entry_ids* limits them,
+    and a store older than version 4 gives none.
+
+    Raises:
+        StoreError: The database is versionless, newer or unreadable.
+    """
+    sql = "SELECT * FROM gate_checks"
+    params: tuple[str, ...] = ()
+    if entry_ids is not None:
+        sql += " WHERE entry_id IN (SELECT value FROM json_each(?))"
+        params = (json.dumps(list(entry_ids)),)
+    order = " ORDER BY entry_id, provider, source_id"
+    return _read_view(root, sql + order, params, busy_timeout, since=4)
 
 
 def read_title_page_readings(

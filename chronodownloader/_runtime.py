@@ -34,7 +34,7 @@ import requests
 
 from chronodownloader.coord import Coordinator, Holder
 from chronodownloader.matching.answers import PageAnswer, WorkAnswer
-from chronodownloader.matching.judge import JudgeClient
+from chronodownloader.matching.judge import DecisionTarget, JudgeClient
 from chronodownloader.net import Network
 from chronodownloader.net.session import build_session
 from chronodownloader.providers.base import SearchQuery, SearchRecord
@@ -63,12 +63,15 @@ class WorkJudge(Protocol):
         ...
 
 
-type JudgeFactory = Callable[[Network, Settings], WorkJudge]
-"""Builds the run's judge; raises ``MissingJudgeKey`` without a usable key."""
+type JudgeFactory = Callable[..., WorkJudge]
+"""Builds the run's judge from the network and settings, and ``page=`` when
+a page model is named; raises ``MissingJudgeKey`` without a usable key."""
 
 
-def _judge_client(network: Network, settings: Settings) -> WorkJudge:
-    return JudgeClient(network, settings)
+def _judge_client(
+    network: Network, settings: Settings, *, page: DecisionTarget | None = None
+) -> WorkJudge:
+    return JudgeClient(network, settings, page=page)
 
 
 @dataclass(frozen=True)
@@ -219,15 +222,19 @@ class Services:
             wiring=wiring,
         )
 
-    def judge(self) -> WorkJudge:
+    def judge(self, page: DecisionTarget | None = None) -> WorkJudge:
         """Return the run's judge, built on the first call.
+
+        *page* names the page check's model (``inspect``, ``verify
+        --pages``); the first call's choice holds for the run.
 
         Raises:
             MissingJudgeKey: The decision model's key is unset or unusable.
         """
         with self._lock:
             if self._judge is None:
-                self._judge = self.wiring.judge(self.network, self.settings)
+                extra = {} if page is None else {"page": page}
+                self._judge = self.wiring.judge(self.network, self.settings, **extra)
             return self._judge
 
     def close(self) -> None:

@@ -165,6 +165,11 @@ def download_customized(ws: Workspace) -> Script:
         True,
         *LIMIT_ANSWERS,
         str(ws.out),
+        "shadow",
+        True,
+        "gpt-5.5",
+        "openai",
+        "https://example.org/v1/decisions",
         "2",
         True,
         "copy",
@@ -179,9 +184,20 @@ def download_over_defaults(ws: Workspace) -> Script:
         "format": "images",
         "include_metadata": False,
         "output": ws.out,
+        "decisions": "shadow",
         "concurrency": 4,
     }
-    answers = [str(ws.csv), *[KEEP] * 9, *[KEEP] * 4, False, KEEP, KEEP, KEEP, "copy"]
+    answers = [
+        str(ws.csv),
+        *[KEEP] * 9,
+        *[KEEP] * 4,
+        False,
+        KEEP,
+        *[KEEP] * 5,
+        KEEP,
+        KEEP,
+        "copy",
+    ]
     return Script("download", ws.session(defaults), answers)
 
 
@@ -199,6 +215,9 @@ def download_unnamed_settings(ws: Workspace) -> Script:
         *[KEEP] * 4,
         False,
         KEEP,
+        KEEP,
+        True,
+        *[KEEP] * 3,
         KEEP,
         True,
         "copy",
@@ -291,13 +310,36 @@ def search_adhoc(ws: Workspace) -> Script:
 
 def verify_pages(ws: Workspace) -> Script:
     """A verify with the page check."""
-    answers = [str(ws.out), "E1", True, "3", True, "copy"]
+    answers = [
+        str(ws.out),
+        "E1",
+        True,
+        "3",
+        "gpt-5.5",
+        "openai",
+        "https://example.org/v1/decisions",
+        True,
+        "copy",
+    ]
     return Script("verify", ws.session(), answers)
 
 
 def verify_pages_off(ws: Workspace) -> Script:
     """A verify whose page check is switched off again from the review."""
-    answers = [KEEP, KEEP, True, "4", KEEP, "edit", "pages", False, "copy"]
+    answers = [
+        KEEP,
+        KEEP,
+        True,
+        "4",
+        "gpt-5.5",
+        KEEP,
+        KEEP,
+        KEEP,
+        "edit",
+        "pages",
+        False,
+        "copy",
+    ]
     return Script("verify", ws.session(), answers)
 
 
@@ -407,5 +449,6 @@ def test_settings_defaults_are_the_starting_values_and_are_spelled_out(
     assert _flag_value(words, "--format") == "images"
     assert "--no-include-metadata" in words
     assert _flag_value(words, "--concurrency") == "4"
+    assert _flag_value(words, "--decisions") == "shadow"
     assert played.outcome.answers == {"input": workspace.csv}
     assert "(s) = from settings defaults" in played.prompter.transcript

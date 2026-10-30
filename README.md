@@ -1,4 +1,4 @@
-# ChronoDownloader v1.3.0
+# ChronoDownloader v1.4.0
 
 ChronoDownloader finds and downloads digitized historical sources from 17 digital
 libraries. Given a CSV of works, it searches the libraries, has a decision model
@@ -116,6 +116,11 @@ option takes comma-separated values.
 | `--work-pdfs-gb GB` | per-work size limit of PDFs in GB; 0 = none | download_limits.per_work.pdfs_gb | no |
 | `--work-metadata-mb MB` | per-work size limit of metadata files in MB; 0 = none | download_limits.per_work.metadata_mb | no |
 | `--on-exceed {stop,skip}` | stop the run or skip the file at a limit | download_limits.on_exceed | no |
+| `--decisions {off,shadow}` | shadow checks the downloaded and review-band works' first pages after the downloads and records the answers only; apply waits for a validated threshold | off | yes |
+| `--classify` | classify the downloaded works' pages after the downloads | | no |
+| `--decision-model ID` | decision model id; vendor/model ids go to OpenRouter | decisions.model | no |
+| `--decision-provider {openai,openrouter}` | dialect and key of the decision model | from the model id | no |
+| `--decision-endpoint URL` | Decisions endpoint URL | the provider's endpoint | no |
 | `--output DIR` | output root holding chronodownloader.sqlite | downloaded_works | yes |
 | `--concurrency N` | works processed in parallel | 3 | yes |
 | `--dry-run` | plan without network requests or writes | | no |
@@ -149,6 +154,34 @@ holds the files of one copy and is matched to another goes to `needs_review`
 unless `--force`, which deletes the other copy's files first. The size limits
 count the bytes written in this run and per work; at a limit, `--on-exceed stop`
 starts no further work and `skip` leaves the file out.
+
+After the last download of the run and before `index.csv` is written, a
+post-phase can check the works it reached; a dry run and a run a size limit
+stopped skip it. `--decisions shadow` sends one gate request per work to the
+decision model (`--decision-*` flags, else the settings' `decisions:` block,
+with the key and dialect rules of `classify`). A work this run left `complete` or
+`partial` is checked on the first 10 page images of its selected candidate, read
+from disk; a work with a PDF only is recorded `unavailable`. A work this run left
+`needs_review` in the review band, or held by the edition policy, is checked on
+the first 10 pages of the candidate its reason names, sampled into its `inspect`
+folder; metadata-only works and rejected links get no check. Pages go at 1,500
+pixels on the longer side. The request sends the sought work and the numbered
+pages and asks whether one page is the sought work's title page
+(`title_page_of_sought`), whether the pages come from a copy of it (`same_work`),
+what they show relative to it (`relation`: `same_edition`, `other_edition`,
+`translation_or_adaptation`, `different_work`, `insufficient`) and each page's
+type. A check is stored in `page_checks` under the work's lease, which leaves
+the work's row as it was; one whose candidate, leading page files, work status
+or sought work changed while it was asked is dropped as stale, and a work
+another run holds is skipped as blocked. A stored answer is reused while the
+model, dialect, endpoint, question version, profile, sought work, item and page
+hashes all match, as a new row that names the check it copies. Shadow mode
+records the answers and changes no status, decision, download order or exit
+code; an unreadable page, a failed request, an outage or a store error counts
+the check `failed`. Acting on the
+answers (`--decisions apply`) waits until a holdout validates a threshold.
+`--classify` labels and reads the title pages of the works this run downloaded,
+as `classify` does.
 
 ### fetch
 
@@ -232,6 +265,9 @@ reuses the judgments. The selection options act as in `download`.
 | `--providers LIST` | only candidates of these providers | all | yes |
 | `--first N` | pages sampled per candidate | 10 | no |
 | `--output DIR` | store root; pages go to <output>/_inspect/<entry_id>/<provider>_<id>/ | a scratch folder in %TEMP%\chronodownloader\inspect | yes |
+| `--decision-model ID` | page model id of the page check; vendor/model ids go to OpenRouter | judge.page_model | no |
+| `--decision-provider {openai,openrouter}` | dialect and key of the page model | from the model id | no |
+| `--decision-endpoint URL` | Decisions endpoint URL of the page model | judge.endpoint; with another model, the provider's | no |
 | `--dry-run` | plan without network requests or writes | | no |
 | `--json` | print one JSON summary line on stdout | | no |
 | `--settings FILE` | alternate settings file | config/settings.yaml | no |
@@ -249,7 +285,10 @@ checked against every work of `--output` whose candidates include it; without
 such a work its pages go to `%TEMP%\chronodownloader\inspect\<provider>_<id>\` and
 no question is asked. The store records nothing of an inspection. A page-model
 outage defers that item's check; a metadata-only provider offers no pages and is
-skipped.
+skipped. The `--decision-*` flags replace `judge.page_model` for the check: a
+`vendor/model` id goes to OpenRouter with `OPENROUTER_API_KEY`, any other to
+OpenAI with `OPENAI_API_KEY`, unless `--decision-provider` names the dialect, and
+the endpoint is that dialect's unless `--decision-endpoint` names one.
 
 ### verify
 
@@ -258,6 +297,9 @@ skipped.
 | `--entry-ids LIST` | only these works | all works | no |
 | `--pages` | also check title page and imprint year with the page model | | no |
 | `--first N` | pages sampled for the check; only with --pages | 10 | no |
+| `--decision-model ID` | page model id of the page check; vendor/model ids go to OpenRouter; only with --pages | judge.page_model | no |
+| `--decision-provider {openai,openrouter}` | dialect and key of the page model; only with --pages | from the model id | no |
+| `--decision-endpoint URL` | Decisions endpoint URL of the page model; only with --pages | judge.endpoint; with another model, the provider's | no |
 | `--output DIR` | output root to verify | downloaded_works | yes |
 | `--dry-run` | report without changing statuses | | no |
 | `--json` | print one JSON summary line on stdout | | no |
@@ -269,7 +311,8 @@ reason recorded, so the next `download` fetches it again; a file of another size
 is reported and fails the check but is not repaired. With `--pages`, the first
 `--first` page images on disk are sent to the page model as in `inspect`; the
 answer is reported and never changes a status, so a wrong copy is replaced with
-`fetch --force` or removed with `drop`. A work with a PDF only gets no page
+`fetch --force` or removed with `drop`. The `--decision-*` flags choose the page
+model as in `inspect`. A work with a PDF only gets no page
 check. Works another run holds are reported `blocked` and left alone.
 `--dry-run` makes the same comparison through read-only queries.
 
@@ -384,7 +427,7 @@ coordination database without writing and exits 0.
 | --- | --- |
 | 0 | no work failed or stayed partial; works left `no_match`, `needs_review`, `deferred` or `blocked` are open, not failed, and are counted in the summary; a dry run that planned; a listing that was written |
 | 1 | a work failed or stayed partial, a `fetch` download failed, an `inspect` candidate could not be sampled or checked, a `verify` work failed its check, a `classify` page could not be read or classified, a `drop` refused a work, or an unexpected error |
-| 2 | usage or configuration error: invalid flags or settings, a missing or invalid works CSV, a store the tool refuses, an unset judge key under `--matching judge` or `hybrid` (the message names `--matching fuzzy`), an unset page-model key for `inspect` or `verify --pages`, an unset key of the `classify` decision provider, a `fetch` of a `needs_review` work without `--reason`, a `fetch --url` no provider resolves |
+| 2 | usage or configuration error: invalid flags or settings, a missing or invalid works CSV, a store the tool refuses, an unset judge key under `--matching judge` or `hybrid` (the message names `--matching fuzzy`), an unset page-model key for `inspect` or `verify --pages`, an unset key of the decision provider of `classify` or of a `download` post-phase, a `fetch` of a `needs_review` work without `--reason`, a `fetch --url` no provider resolves |
 | 130 | interrupted (Ctrl+C, or Ctrl+Break on Windows) |
 
 `<command> --help` lists the exit codes of each command. Progress, warnings and
@@ -400,6 +443,7 @@ where nothing ran.
 | Command | Fields |
 | --- | --- |
 | every command | `dry_run`, `command`, `items_total`, `items_complete`, `items_partial`, `items_failed`, `items_no_match`, `items_skipped`, `items_needs_review`, `items_deferred`, `items_blocked` |
+| `download` | `gate_checks`, `gate_reused`, `gate_failed`, `gate_unavailable`, `gate_stale`, `gate_blocked`, `gate_requests`, `gate_input_tokens`, `gate_output_tokens`, `gate_cached_tokens`, `gate_cache_write_tokens`, `gate_cost`, and the fields of `classify` |
 | `search` | `items_accepted` |
 | `inspect` | `pages_sampled` |
 | `verify` | `files_checked`, `files_missing`, `files_mismatched`, `pages_checked` |
@@ -410,7 +454,11 @@ where nothing ran.
 
 For `download` and `fetch`, the counts are works by their outcome in this run;
 `items_skipped` counts works the selection or a status re-check left alone, and
-`items_blocked` works another run held. `search` counts a work with an accepted
+`items_blocked` works another run held. The gate fields of `download` count its
+checks by outcome (`gate_checks` asked and recorded, the others reused, failed,
+unavailable, stale or blocked) and its requests' usage; with `--classify` the
+`classify` fields describe the post-phase, and both sets are zero when it is off.
+`search` counts a work with an accepted
 candidate as `items_accepted`, not `items_complete`, since nothing was
 downloaded. `inspect` counts items: complete when checked, failed when not sampled
 or the check failed, deferred when the page model is unavailable, skipped when an
@@ -497,8 +545,9 @@ judge:
     timeout_s: 300
     slots: 4                # concurrent requests on this machine
 
-# Decision model that classifies page images (classify); its requests take
-# judge.network's policy and slot limit, with pacing and a breaker of their own.
+# Decision model of classify and of the download post-phase (--decisions,
+# --classify); its requests take judge.network's policy and slot limit, with
+# pacing and a breaker of their own.
 decisions:
   model: typesafe/jev-1.14  # vendor/model ids go to OpenRouter, others to OpenAI
   provider: null            # openai | openrouter; null: from the model id
@@ -690,6 +739,7 @@ defaults:
   # search_timeout: 60          # seconds per provider search; 0 = none
   # include_metadata: true
   # concurrency: 3              # works in parallel
+  # decisions: shadow           # 'off' (quoted) | shadow: gate checks after downloads
 ```
 
 The blocks:
@@ -927,11 +977,12 @@ Every output root holds one `chronodownloader.sqlite`, written by `download`,
 (command, tool version, process, effective spec, start and end, exit code), the
 works with their input fields, status and lease, every candidate with its text
 score and judgment, every download attempt with its completeness per part, every
-file of every work folder, the page type of each page image and a chat model's
-reading of each work's title page. Readers outside the tool use the four views,
-which stay stable; the tables behind them (`meta`, `runs`, `works`,
-`candidates`, `attempts`, `files`, `page_labels`, `title_pages`) may change in a
-later schema version.
+file of every work folder, the page type of each page image, a chat model's
+reading of each work's title page and the gate checks of `download --decisions`.
+Readers outside the tool use the five views, which stay stable; the tables
+behind them (`meta`, `runs`, `works`, `candidates`, `attempts`, `files`,
+`page_labels`, `title_pages`, `page_checks`) may change in a later schema
+version.
 
 | View | One row per | Columns |
 | --- | --- | --- |
@@ -939,6 +990,7 @@ later schema version.
 | `work_candidates` | candidate, history included | `candidate_id`, `entry_id`, `folder`, `origin`, `rank`, `provider`, `source_id`, `title`, `creators`, `date`, `year`, `place`, `publisher`, `language`, `item_url`, `iiif_manifest`, `text_score`, `judge_probabilities`, `judge_decision`, `judge_model`, `judge_model_version`, `judged_at`, `selected`, `current`, `superseded_at`, `run_id`, `created_at`, `updated_at` |
 | `title_page_picks` | work with page images | `entry_id`, `pages_total`, `pages_leading`, `pages_labelled`, `path`, `page_index`, `probability` |
 | `title_page_readings` | work with a current reading | `entry_id`, `path`, `page_index`, `is_title_page`, `title`, `place`, `year`, `year_as_printed`, `model`, `created_at` |
+| `gate_checks` | work and checked item, latest check | `entry_id`, `provider`, `source_id`, `band`, `page_source`, `status`, `same_work`, `title_page_of_sought`, `relation`, `model`, `created_at` |
 
 In `work_status`, `status` is the read status: `blocked` while a run holds an
 unexpired lease on the work, else the stored status, or `new` for a work without
@@ -961,8 +1013,14 @@ classified rather than a work without a title page. `title_page_readings` shows
 a work's stored reading only while its page is the current pick and its file
 row is the one read; `is_title_page` is the chat model's own check (0 or 1), and
 every field from it to `year_as_printed` is a model reading of the page image,
-not catalog data. Times are ISO 8601 UTC text. URLs and raw fields carry
-credentials masked, and error texts are cut to 2,000 characters.
+not catalog data. `gate_checks` shows the latest check of each item a work was
+checked on: `band` is `accepted` (the selected candidate of a downloaded work) or
+`review` (a review-band candidate), `page_source` `downloaded` or `sampled`,
+`status` `ok`, `failed` or `unavailable`; `same_work` and `title_page_of_sought`
+are probabilities and `relation` the chosen relation, null unless `ok`. `drop`
+deletes a work's checks with its other rows. Times are ISO 8601 UTC text. URLs
+and raw fields carry credentials masked, and error texts are cut to 2,000
+characters.
 
 | Status | Meaning | Taken by default |
 | --- | --- | --- |
@@ -1006,7 +1064,7 @@ the staging folder. On opening, the store also removes stale staging folders,
 deletes the records of files missing on disk and turns a `complete` work that
 lost a file into `partial`. A database that holds tables but no schema version,
 a newer schema or an unreadable file is refused with exit 2 and left unchanged; a
-store of schema version 1 or 2 is migrated to version 3 in place when a command
+store of schema version 1 to 3 is migrated to version 4 in place when a command
 that writes opens it, unless a run of an older version still holds a work's
 lease, which is refused with exit 2 until that run ends.
 
@@ -1046,11 +1104,11 @@ machine:
   `partial` for a later run.
 
 The decision model's endpoint is paced, slotted and breaker-checked as provider
-`judge`, and `classify`'s requests as provider `classify`, with the same
-`judge.network` policy and slot limit but a breaker of their own. A request to
-the host of another provider (a Europeana record's images on `gallica.bnf.fr`)
-is paced and counted under that provider. A database that stays locked longer
-than `busy_timeout_s` ends the operation with an error.
+`judge`, and the requests of `classify` and the gate as provider `classify`, with
+the same `judge.network` policy and slot limit but a breaker of their own. A
+request to the host of another provider (a Europeana record's images on
+`gallica.bnf.fr`) is paced and counted under that provider. A database that stays
+locked longer than `busy_timeout_s` ends the operation with an error.
 
 Each request is retried on transient failures with backoff, and a server's
 `Retry-After` wins. A connect failure is retried at most twice, a name that does
@@ -1111,6 +1169,7 @@ chronodownloader/
   _worker.py    worker threads: search, judge, download
   _review.py    inspect and verify; _listing.py: status, drop, providers
   _classify.py  classify: page labels under the work lease
+  _gate.py      download post-phase: gate checks in shadow mode, --classify
   events.py     run events reported to the front ends
   inputs.py     works CSV
   coord.py      machine-wide coordination database
@@ -1119,7 +1178,8 @@ chronodownloader/
   iiif/         manifests v2 and v3, canvases, image sizes, renderings
   pages.py      page samples for inspect and verify
   matching/     fuzzy.py (text score), judge.py (decision model), policy.py,
-                classifier.py (page types), title_pages.py (title-page reading)
+                classifier.py (page types), title_pages.py (title-page reading),
+                gate.py (gate request and answers)
   output/       store.py (schema, views, leases), paths.py, index.py
   options/      option tables, wizard framework, prompts, settings loader
   process/      exit codes, summary line, heartbeat, interrupt, log setup

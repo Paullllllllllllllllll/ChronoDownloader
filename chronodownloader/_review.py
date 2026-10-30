@@ -40,6 +40,12 @@ the network. A work without page images (a PDF only) gets no check
 reported for the agent to decide (``fetch --force`` another copy, or
 ``drop``), since a status change on a page answer would need thresholds the
 settings do not hold.
+
+Page model. The page check of both commands asks ``judge.page_model`` at
+``judge.endpoint`` through OpenRouter; ``--decision-model``,
+``--decision-provider`` and ``--decision-endpoint`` name another model
+(:func:`~chronodownloader.matching.judge.page_target`), whose dialect follows
+the model id and whose key is that dialect's.
 """
 
 from __future__ import annotations
@@ -56,10 +62,13 @@ from typing import Any, Final
 
 from chronodownloader.coord import CoordinationError
 from chronodownloader.matching.judge import (
+    DecisionTarget,
     JudgeRefused,
     JudgeUnavailable,
     MalformedAnswer,
     MissingJudgeKey,
+    dialect_key,
+    page_target,
 )
 from chronodownloader.net import NetworkError
 from chronodownloader.net.credentials import redact_text
@@ -80,7 +89,7 @@ from chronodownloader.output.store import (
 from chronodownloader.pages import sample_pages
 from chronodownloader.providers.base import ProviderError, UnsupportedCapability
 from chronodownloader.settings import Settings
-from chronodownloader.spec import InspectSpec, VerifySpec
+from chronodownloader.spec import DecisionModel, InspectSpec, VerifySpec
 
 from ._core import (
     CheckOutcome,
@@ -161,11 +170,45 @@ def _read_candidates(root: Path, entry_id: str) -> list[CandidateRow]:
         raise PlanError(str(exc)) from exc
 
 
-def _open(settings: Settings, size: int, wiring: Wiring) -> Services:
+def _page_model(settings: Settings, decision: DecisionModel) -> DecisionTarget | None:
+    """Return the page model the flags name, or None for ``judge.page_model``.
+
+    Raises:
+        PlanError: ``--decision-provider`` names no dialect.
+    """
+    if decision == DecisionModel(None, None, None):
+        return None
+    try:
+        return page_target(
+            settings, decision.model, decision.provider, decision.endpoint
+        )
+    except ValueError as exc:
+        raise PlanError(str(exc)) from exc
+
+
+def _check_page_key(settings: Settings, page: DecisionTarget | None) -> None:
+    """Refuse a page check without the key of its page model (exit 2)."""
+    if page is None or page.dialect == "openrouter":
+        check_judge_key("judge", settings)
+        return
+    try:
+        dialect_key(
+            settings,
+            page.dialect,
+            needs="the page model needs an OpenAI key",
+            hint="choose another --decision-model",
+        )
+    except MissingJudgeKey as exc:
+        raise PlanError(str(exc)) from exc
+
+
+def _open(
+    settings: Settings, size: int, wiring: Wiring, page: DecisionTarget | None
+) -> Services:
     """Open the services of a page check; a missing judge key exits 2."""
     services = Services.open(settings, concurrency=max(1, size), wiring=wiring)
     try:
-        services.judge()
+        services.judge(page)
     except MissingJudgeKey as exc:
         services.close()
         raise PlanError(str(exc)) from exc
@@ -330,7 +373,7 @@ def plan_inspect(
         PlanError: The judge key is missing, or the store is refused.
     """
     settings.state_directory()
-    check_judge_key("judge", settings)
+    _check_page_key(settings, _page_model(settings, spec.decision))
     root = spec.output
     if root is not None:
         check_store(root)
@@ -409,7 +452,9 @@ def run_inspect(run_plan: RunPlan, wiring: Wiring) -> RunResult:
     targets = run_plan.targets
     if not targets:
         return RunResult(run_plan.counts, report=InspectReport())
-    with _open(run_plan.settings, min(CONCURRENCY, len(targets)), wiring) as services:
+    page = _page_model(run_plan.settings, spec.decision)
+    size = min(CONCURRENCY, len(targets))
+    with _open(run_plan.settings, size, wiring, page) as services:
         checks = _gather(
             services,
             [
@@ -504,7 +549,7 @@ def plan_verify(
     """
     if spec.pages:
         settings.state_directory()
-        check_judge_key("judge", settings)
+        _check_page_key(settings, _page_model(settings, spec.decision))
     root = spec.output
     check_store(root)
     rows = read_statuses(root, spec.entry_ids or None)
@@ -607,7 +652,9 @@ def _with_pages(
         works[index] = replace(work, pages=skipped)
     if not jobs:
         return works
-    with _open(run_plan.settings, min(CONCURRENCY, len(jobs)), wiring) as services:
+    page = _page_model(run_plan.settings, spec.decision)
+    size = min(CONCURRENCY, len(jobs))
+    with _open(run_plan.settings, size, wiring, page) as services:
         checks = _gather(
             services,
             [

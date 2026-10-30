@@ -62,6 +62,7 @@ from chronodownloader.net import CLASSIFY, Network
 from chronodownloader.settings import Decisions, Settings
 
 from .judge import (
+    DecisionTarget,
     JudgeError,
     JudgeUnavailable,
     parse_masked,
@@ -122,15 +123,6 @@ class MissingDecisionKey(JudgeError):
             f"model, but the environment variable {env_var} {state}; set it, or "
             f"choose another model or --decision-provider {other}"
         )
-
-
-@dataclass(frozen=True)
-class DecisionTarget:
-    """The model, dialect and endpoint of the classify requests."""
-
-    model: str
-    dialect: Dialect
-    endpoint: str
 
 
 def decision_target(

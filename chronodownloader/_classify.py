@@ -114,7 +114,7 @@ from ._core import (
 )
 from ._runtime import Services, Wiring
 
-__all__ = ["plan_classify", "run_classify"]
+__all__ = ["classify_stored", "plan_classify", "run_classify", "source_pages"]
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class _Page:
     file: FileRow
 
 
-def _pages(files: Sequence[FileRow]) -> list[_Page]:
+def source_pages(files: Sequence[FileRow]) -> list[_Page]:
     """Return the work's page images by source position, as the store's view.
 
     Item ``pNNNNN`` is position NNNNN - 1; when any item is not of that form,
@@ -263,7 +263,7 @@ def plan_classify(
     planned: list[PlannedWork] = []
     for entry_id, row in rows.items():
         folder = str(row["folder"])
-        pages = _pages(_read(functools.partial(read_files, root, entry_id)))
+        pages = source_pages(_read(functools.partial(read_files, root, entry_id)))
         if not pages:
             works.append(ClassifiedWork(entry_id, folder, "skipped", note=NO_IMAGES))
             continue
@@ -661,7 +661,7 @@ class _Classifier:
             )
             return
         # An error here ends the run, whose store close releases the lease.
-        pages = _pages(self.store.files(entry_id))
+        pages = source_pages(self.store.files(entry_id))
         key = self.classifier.fingerprint
         ask = _to_ask(pages, self.store.page_labels(entry_id), key, self.force)
         job = _InFlight(planned, lease, len(pages), len(ask))
@@ -767,9 +767,7 @@ def run_classify(run_plan: RunPlan, wiring: Wiring) -> RunResult:
             classifier = PageClassifier(
                 services.network, settings, target, clock=wiring.clock
             )
-            reader = None
-            if settings.title_pages.model is not None:
-                reader = TitleReader(services.network, settings, clock=wiring.clock)
+            reader = _reader(services, settings, wiring)
         except MissingDecisionKey as exc:
             raise PlanError(str(exc)) from exc
         store = open_store(spec.output, wiring.clock)
@@ -804,3 +802,45 @@ def run_classify(run_plan: RunPlan, wiring: Wiring) -> RunResult:
         dry_run=False,
     )
     return RunResult(_counts(report.works), report=report)
+
+
+def _reader(
+    services: Services, settings: Settings, wiring: Wiring
+) -> TitleReader | None:
+    if settings.title_pages.model is None:
+        return None
+    return TitleReader(services.network, settings, clock=wiring.clock)
+
+
+def classify_stored(
+    store: Store,
+    services: Services,
+    target: DecisionTarget,
+    works: Sequence[PlannedWork],
+) -> ClassifyReport:
+    """Classify *works* in *store*, whose run began and whose leases are kept.
+
+    The post-phase of ``download --classify`` calls it after the downloads;
+    the labels and title-page readings follow the ``classify`` rules above.
+
+    Raises:
+        MissingDecisionKey: A key of the decision or title-page model is unset.
+    """
+    settings = services.settings
+    clock = services.wiring.clock
+    classifier = PageClassifier(services.network, settings, target, clock=clock)
+    reader = _reader(services, settings, services.wiring)
+    window = settings.judge.network.slots
+    loop = _Classifier(store, services, classifier, reader, force=False, window=window)
+    done = loop.run(works) if works else []
+    return ClassifyReport(
+        _with_picks(store.root, done),
+        model=target.model,
+        dialect=target.dialect,
+        endpoint=target.endpoint,
+        profile=settings.decisions.profile,
+        fingerprint=classifier.fingerprint,
+        usage=loop.usage.totals(),
+        title_model=settings.title_pages.model,
+        title_usage=loop.title_usage.totals(),
+    )

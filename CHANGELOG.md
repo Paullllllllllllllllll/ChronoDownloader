@@ -1,5 +1,34 @@
 # Changelog
 
+- **v1.4.0** (30 October 2026) -- `download` can run the gate in shadow mode.
+  With `--decisions shadow`, a post-phase starts once the last download of the
+  run has finished and before `index.csv` is written: every work the run left
+  `complete` or `partial` is checked on the first 10 page images of its selected
+  candidate, read from disk, and every work left `needs_review` by the decision
+  policy is checked on the first 10 pages of its review-band candidate, sampled
+  into its `inspect` folder. One Decisions request per candidate sends the
+  sought work and the numbered pages at 1,500 pixels and asks the predicates
+  `title_page_of_sought` and `same_work`, the five-way `relation` and each
+  page's type, with the question texts of the measured `jev_or` condition, under
+  the `classify` model, key and network key. The answers go to the new
+  `page_checks` table and the read-contract view `gate_checks` (store schema
+  version 4, migrated in place from versions 1 to 3, the endpoint stored
+  without userinfo or query). A check is committed under the work's lease
+  without touching the work's `last_run_id` or `updated_at`, and dropped as
+  stale when the candidate, its leading files, the work's status or the sought
+  work changed meanwhile. An answer is reused while its model, endpoint,
+  questions, sought work, item and page hashes match, as a new row naming the
+  check it copies. Shadow mode changes no status, decision, download order or
+  exit code: an unreadable page, a failed request or a store error counts the
+  check `failed`, and an error that stops the gate keeps its report and lets
+  `--classify` run. An `apply` mode comes with the veto once a holdout
+  validates a threshold.
+  `--classify` labels and reads the title pages of the works the run
+  downloaded, and the JSON summary of `download` adds the gate counts, the gate
+  usage and the `classify` fields. `inspect` and `verify --pages` take
+  `--decision-model`, `--decision-provider` and `--decision-endpoint` to ask the
+  page check of another model in either dialect, and the guided `download` and
+  `verify` ask these options.
 - **v1.3.0** (30 October 2026) -- `classify` now has a chat model read the
   title page it picks. Once a work's leading pages all carry current labels and
   `title_page_picks` names a page, that page alone goes at 1,500 pixels on the
