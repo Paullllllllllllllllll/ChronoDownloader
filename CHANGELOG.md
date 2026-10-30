@@ -1,5 +1,10 @@
 # Changelog
 
+- **v1.4.1** (30 October 2026) -- The vendored `common/decisions.py` matches
+  ChronoTranscriber v1.2.0: a score answer outside its levels is rejected as
+  malformed, and a malformed answer carries the usage its response reported.
+  ChronoDownloader asks no score questions and raises its own masked error for
+  a malformed answer, so its behavior is unchanged.
 - **v1.4.0** (30 October 2026) -- `download` can run the gate in shadow mode.
   With `--decisions shadow`, a post-phase starts once the last download of the
   run has finished and before `index.csv` is written: every work the run left
