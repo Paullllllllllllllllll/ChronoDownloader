@@ -1,5 +1,7 @@
 # ChronoDownloader v1.4.1
 
+<img src="assets/logo.svg" alt="ChronoDownloader logo" width="64" align="right">
+
 ChronoDownloader finds and downloads digitized historical sources from 17 digital
 libraries. Given a CSV of works, it searches the libraries, has a decision model
 judge whether each catalog record describes the sought work, and downloads the
