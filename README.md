@@ -1,4 +1,4 @@
-# ChronoDownloader v1.4.1
+# ChronoDownloader v1.5.0
 
 <img src="assets/logo.svg" alt="ChronoDownloader logo" width="64" align="right">
 

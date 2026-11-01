@@ -1,5 +1,11 @@
 # Changelog
 
+- **v1.5.0** (1 November 2026) -- Refreshed dependencies within their current
+  majors: `curl_cffi` 0.15.0 to 0.17.0, `mypy` 2.1.0 to 2.4.1, `pytest` 9.1.1 to
+  9.2.0, `types-pyyaml` 6.0.12.20260906 to 6.0.12.20261030, and `types-requests`
+  2.33.0.20260518 to 2.33.0.20261030, with the `pyproject.toml` floors raised to
+  match and `uv.lock` regenerated. No dependency was removed and no major bump
+  was held.
 - **v1.4.1** (30 October 2026) -- The vendored `common/decisions.py` matches
   ChronoTranscriber v1.2.0: a score answer outside its levels is rejected as
   malformed, and a malformed answer carries the usage its response reported.

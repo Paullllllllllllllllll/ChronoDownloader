@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chronodownloader"
-version = "1.4.1"
+version = "1.5.0"
 description = "Discover and download digitized historical sources from 17 digital libraries"
 readme = "README.md"
 license = "MIT"
@@ -19,7 +19,7 @@ dependencies = [
     "beautifulsoup4>=4.15",
     # Browser-fingerprint impersonation for providers behind Cloudflare
     # (Gallica, BNE), used where a provider sets network.impersonate
-    "curl_cffi>=0.15",
+    "curl_cffi>=0.17",
     # Configuration
     "pyyaml>=6.0.3",
     # Interactive prompts (options/prompts.py) and terminal output
@@ -35,10 +35,10 @@ chronodownloader = "chronodownloader.__main__:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "mypy>=2.1.0",
-    "types-pyyaml>=6.0.12.20260906",
-    "types-requests>=2.33.0.20260518",
+    "pytest>=9.2.0",
+    "mypy>=2.4.1",
+    "types-pyyaml>=6.0.12.20261030",
+    "types-requests>=2.33.0.20261030",
 ]
 
 [tool.hatch.build.targets.wheel]
