@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chronodownloader"
-version = "1.5.0"
+version = "1.6.0"
 description = "Discover and download digitized historical sources from 17 digital libraries"
 readme = "README.md"
 license = "MIT"
@@ -37,7 +37,7 @@ chronodownloader = "chronodownloader.__main__:main"
 dev = [
     "pytest>=9.2.0",
     "mypy>=2.4.1",
-    "types-pyyaml>=6.0.12.20261030",
+    "types-pyyaml>=6.0.12.20261103",
     "types-requests>=2.33.0.20261030",
 ]
 

@@ -1,5 +1,9 @@
 # Changelog
 
+- **v1.6.0** (7 November 2026) -- Refreshed dependencies within their current
+  majors: upgraded the dev-group stub package `types-pyyaml` from 6.0.12.20261030
+  to 6.0.12.20261103 and raised its floor to match. No dependencies were removed
+  or added, and no major-version upgrades were held.
 - **v1.5.0** (1 November 2026) -- Refreshed dependencies within their current
   majors: `curl_cffi` 0.15.0 to 0.17.0, `mypy` 2.1.0 to 2.4.1, `pytest` 9.1.1 to
   9.2.0, `types-pyyaml` 6.0.12.20260906 to 6.0.12.20261030, and `types-requests`
