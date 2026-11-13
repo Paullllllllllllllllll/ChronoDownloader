@@ -102,17 +102,11 @@ def test_every_connection_reports_the_rollback_journal(
     opened: Callable[..., Coordinator],
 ) -> None:
     coordinator = opened("a")
-    modes: list[str] = []
-
-    def mode() -> None:
-        connection = coordinator._connection()
-        modes.append(connection.execute("PRAGMA journal_mode").fetchone()[0])
-        assert connection.execute("PRAGMA synchronous").fetchone()[0] == 2
-
-    mode()
-    worker = threading.Thread(target=mode)
-    worker.start()
-    worker.join()
+    held = [coordinator._checkout(), coordinator._checkout()]
+    modes = [c.execute("PRAGMA journal_mode").fetchone()[0] for c in held]
+    assert all(c.execute("PRAGMA synchronous").fetchone()[0] == 2 for c in held)
+    for connection in held:
+        coordinator._checkin(connection)
     coordinator.reserve(PROVIDER, 0.0, 0.0)
 
     assert modes == ["delete", "delete"]
@@ -129,6 +123,102 @@ def test_a_closed_coordinator_refuses_calls(
     coordinator.close()
     with pytest.raises(CoordinationError, match="closed"):
         coordinator.reserve(PROVIDER, 0.0, 0.0)
+
+
+def test_connections_stay_bounded_by_the_concurrent_threads(
+    opened: Callable[..., Coordinator],
+) -> None:
+    coordinator = opened("a")
+    for _ in range(25):
+        wave = [
+            threading.Thread(target=coordinator.reserve, args=(PROVIDER, 0.0, 0.0))
+            for _ in range(4)
+        ]
+        for thread in wave:
+            thread.start()
+        for thread in wave:
+            thread.join()
+
+    assert 1 <= len(coordinator._connections) <= 4
+    assert len(coordinator._free) == len(coordinator._connections)
+
+
+def test_a_failed_transaction_returns_its_connection_and_an_open_one_is_closed(
+    opened: Callable[..., Coordinator],
+) -> None:
+    coordinator = opened("a")
+
+    def fail(connection: sqlite3.Connection) -> None:
+        connection.execute("INSERT INTO pacing VALUES ('x', 1.0)")
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        coordinator._transact(fail)
+    assert len(coordinator._free) == 1
+    assert coordinator._transact(
+        lambda c: c.execute("SELECT COUNT(*) FROM pacing").fetchone()[0]
+    ) == (0)
+
+    connection = coordinator._checkout()
+    connection.execute("BEGIN")
+    coordinator._checkin(connection)
+    assert connection not in coordinator._connections
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("SELECT 1")
+
+
+def test_close_during_a_transaction_closes_its_connection_when_it_ends(
+    opened: Callable[..., Coordinator],
+) -> None:
+    coordinator = opened("a")
+    inside, release = threading.Event(), threading.Event()
+    used: list[sqlite3.Connection] = []
+
+    def slow(connection: sqlite3.Connection) -> int:
+        used.append(connection)
+        inside.set()
+        release.wait(5.0)
+        return int(connection.execute("SELECT 7").fetchone()[0])
+
+    results: list[int] = []
+    worker = threading.Thread(
+        target=lambda: results.append(coordinator._transact(slow))
+    )
+    worker.start()
+    assert inside.wait(5.0)
+    coordinator.close()
+    with pytest.raises(CoordinationError, match="closed"):
+        coordinator.reserve(PROVIDER, 0.0, 0.0)
+    release.set()
+    worker.join(5.0)
+
+    assert results == [7]
+    assert coordinator._connections == set()
+    with pytest.raises(sqlite3.ProgrammingError):
+        used[0].execute("SELECT 1")
+
+
+def test_a_connection_opened_while_closing_is_closed_not_pooled(
+    opened: Callable[..., Coordinator], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    coordinator = opened("a")
+    held = coordinator._checkout()
+    made: list[sqlite3.Connection] = []
+
+    def connect_then_close(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = sqlite_module.connect(*args, **kwargs)
+        made.append(connection)
+        coordinator.close()
+        return connection
+
+    monkeypatch.setattr(coord, "connect", connect_then_close)
+    with pytest.raises(CoordinationError, match="closed"):
+        coordinator.reserve(PROVIDER, 0.0, 0.0)
+    assert made[0] not in coordinator._connections
+    with pytest.raises(sqlite3.ProgrammingError):
+        made[0].execute("SELECT 1")
+    coordinator._checkin(held)
+    assert coordinator._connections == set()
 
 
 def test_another_schema_version_is_refused(

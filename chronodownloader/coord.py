@@ -66,6 +66,7 @@ Times are wall-clock epoch seconds from the injectable clock
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import logging
 import os
@@ -281,8 +282,12 @@ class QuotaStatus:
 class Coordinator:
     """Opens the coordination database of *state_dir* for one holder.
 
-    Each thread uses its own connection, opened on first use; :meth:`close`
-    closes them all.
+    Connections are pooled: a transaction takes a free connection, or opens
+    one when none is free, and returns it after the transaction, so no
+    connection serves two threads at once and the pool grows only to the
+    peak number of concurrent transactions. A connection left inside a
+    transaction is closed instead of returned. :meth:`close` closes the free
+    connections; one in use is closed when its transaction ends.
 
     Raises:
         CoordinationError: The database has another schema version.
@@ -302,9 +307,9 @@ class Coordinator:
         self.holder = holder
         self._clock = clock
         self._random = random.Random()
-        self._local = threading.local()
         self._lock = threading.Lock()
-        self._connections: list[sqlite3.Connection] = []
+        self._connections: set[sqlite3.Connection] = set()
+        self._free: list[sqlite3.Connection] = []
         self._released: set[str] = set()
         self._closed = False
         Path(state_dir).mkdir(parents=True, exist_ok=True)
@@ -317,12 +322,15 @@ class Coordinator:
     def close(self) -> None:
         """Close every connection; later calls raise :class:`CoordinationError`.
 
-        Call it once the threads that use the coordinator have stopped.
+        Call it once the threads that use the coordinator have stopped. A
+        transaction still running in another thread (an abandoned search)
+        finishes, and its connection is closed when it ends.
         """
         with self._lock:
             self._closed = True
-            connections, self._connections = self._connections, []
-        for connection in connections:
+            free, self._free = self._free, []
+            self._connections.difference_update(free)
+        for connection in free:
             connection.close()
 
     def __enter__(self) -> Self:
@@ -336,29 +344,55 @@ class Coordinator:
     ) -> None:
         self.close()
 
-    def _connection(self) -> sqlite3.Connection:
-        if self._closed:
-            raise CoordinationError(f"Coordinator for {self.path} is closed.")
-        connection: sqlite3.Connection | None = getattr(self._local, "connection", None)
-        if connection is None:
-            connection = connect(
-                self.path,
-                TABLES,
-                busy_timeout=self.settings.busy_timeout_s,
-                check_same_thread=False,
-            )
-            with self._lock:
-                if self._closed:
-                    connection.close()
-                    raise CoordinationError(f"Coordinator for {self.path} is closed.")
-                self._connections.append(connection)
-            self._local.connection = connection
-        return connection
+    def _checkout(self) -> sqlite3.Connection:
+        """Return a free connection for the caller's use alone, or a new one.
+
+        Raises:
+            CoordinationError: The coordinator is closed.
+        """
+        with self._lock:
+            if self._closed:
+                raise CoordinationError(f"Coordinator for {self.path} is closed.")
+            if self._free:
+                return self._free.pop()
+        connection = connect(
+            self.path,
+            TABLES,
+            busy_timeout=self.settings.busy_timeout_s,
+            check_same_thread=False,
+        )
+        with self._lock:
+            # close() may have run while the connection was opened.
+            if not self._closed:
+                self._connections.add(connection)
+                return connection
+        connection.close()
+        raise CoordinationError(f"Coordinator for {self.path} is closed.")
+
+    def _checkin(self, connection: sqlite3.Connection) -> None:
+        """Return *connection* to the pool; close it after :meth:`close`.
+
+        A connection still inside a transaction, or one that cannot say, is
+        closed rather than reused.
+        """
+        try:
+            reusable = not connection.in_transaction
+        except sqlite3.Error:
+            reusable = False
+        with self._lock:
+            if reusable and not self._closed:
+                self._free.append(connection)
+                return
+            self._connections.discard(connection)
+        with contextlib.suppress(sqlite3.Error):
+            connection.close()
 
     def _transact(self, func: Callable[[sqlite3.Connection], T]) -> T:
-        return transact(
-            self._connection(), func, busy_timeout=self.settings.busy_timeout_s
-        )
+        connection = self._checkout()
+        try:
+            return transact(connection, func, busy_timeout=self.settings.busy_timeout_s)
+        finally:
+            self._checkin(connection)
 
     # Pacing
 

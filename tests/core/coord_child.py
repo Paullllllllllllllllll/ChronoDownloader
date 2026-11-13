@@ -81,7 +81,9 @@ def _coordinator(
     state: str, run_id: str, settings: Coordination
 ) -> CountingCoordinator:
     coordinator = CountingCoordinator(Path(state), settings, Holder.current(run_id))
-    (mode,) = coordinator._connection().execute("PRAGMA journal_mode").fetchone()
+    (mode,) = coordinator._transact(
+        lambda connection: connection.execute("PRAGMA journal_mode").fetchone()
+    )
     _say(f"READY {mode}")
     return coordinator
 
