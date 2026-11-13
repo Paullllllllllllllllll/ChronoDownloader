@@ -557,19 +557,33 @@ class TestOutage:
             )
         assert excinfo.value.retry_after == NOW + 300
 
+    @pytest.mark.parametrize("cause", ["blocked", "rejected"])
     def test_a_breaker_opened_by_refusals_stays_a_refusal(
-        self, harness: Harness, coordinator: FakeCoordinator
+        self, cause: str, harness: Harness, coordinator: FakeCoordinator
     ) -> None:
         coordinator.breakers[JUDGE] = BreakerState(
-            BreakerStatus.OPEN, 3, NOW + 600, "blocked"
+            BreakerStatus.OPEN, 3, NOW + 600, cause
         )
         session = ScriptedSession(_json_reply(_work_payload()))
         with pytest.raises(JudgeRefused) as excinfo:
             harness.client(session).judge_work(
                 SearchQuery("T"), SearchRecord("mdz", "b", "T")
             )
-        assert (excinfo.value.cause, excinfo.value.status) == ("blocked", None)
+        assert (excinfo.value.cause, excinfo.value.status) == (cause, None)
         assert session.calls == []
+
+    def test_spent_credit_stops_sending_after_the_breaker_threshold(
+        self, harness: Harness
+    ) -> None:
+        session = ScriptedSession(_json_reply({"error": {"message": "credit"}}, 402))
+        client = harness.client(session)
+        refusals = []
+        for _ in range(5):
+            with pytest.raises(JudgeRefused) as excinfo:
+                client.judge_work(SearchQuery("T"), SearchRecord("mdz", "b", "T"))
+            refusals.append((excinfo.value.cause, excinfo.value.status))
+        assert refusals == [(Cause.REJECTED, 402)] * 3 + [("rejected", None)] * 2
+        assert len(session.calls) == 3
 
     @pytest.mark.parametrize(
         ("status", "cause"),

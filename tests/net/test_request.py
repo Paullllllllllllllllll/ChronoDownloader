@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import logging
 import socket
+import threading
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from email.utils import format_datetime
 from pathlib import Path
@@ -19,10 +22,13 @@ from types import MappingProxyType
 import pytest
 import requests
 
-from chronodownloader.coord import BreakerState, BreakerStatus
+from chronodownloader.coord import BreakerState, BreakerStatus, SlotToken
 from chronodownloader.net import (
+    CLASSIFY,
     JUDGE,
     BreakerOpen,
+    CallScope,
+    Cancelled,
     Cause,
     QuotaSpent,
     RequestFailed,
@@ -38,6 +44,7 @@ from .support import (
     FakeCoordinator,
     RecordingSession,
     Reply,
+    Reservation,
     ScriptedServer,
     ScriptedSession,
     response,
@@ -129,6 +136,43 @@ class TestCauses:
         assert server.hits("/b") == 1
         assert coordinator.failures == [("mdz", "blocked")]
         assert coordinator.successes == []
+
+    @pytest.mark.parametrize(
+        ("key", "counted"), [(JUDGE, True), (CLASSIFY, False), ("mdz", False)]
+    )
+    def test_a_402_counts_on_the_judge_breaker_only(
+        self,
+        key: str,
+        counted: bool,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        url = server.script("/credit", Reply(402))
+        settings = settings_with(max_attempts=5)
+        with pytest.raises(RequestFailed) as excinfo:
+            make_network(settings).request(key, "POST", url)
+        assert (excinfo.value.cause, excinfo.value.status) == (Cause.REJECTED, 402)
+        assert server.hits("/credit") == 1
+        assert coordinator.failures == ([(key, "rejected")] if counted else [])
+        assert coordinator.successes == ([] if counted else [key])
+
+    def test_402s_open_the_judge_breaker(
+        self,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        url = server.script("/credit", Reply(402))
+        client = make_network(Settings())
+        threshold = client.policy(JUDGE).circuit_breaker_threshold
+        for _ in range(threshold):
+            with pytest.raises(RequestFailed):
+                client.request(JUDGE, "POST", url)
+        with pytest.raises(BreakerOpen) as excinfo:
+            client.request(JUDGE, "POST", url)
+        assert excinfo.value.cause == "rejected"
+        assert server.hits("/credit") == threshold
 
     def test_a_final_status_ends_the_call_as_an_answer(
         self,
@@ -978,3 +1022,195 @@ class TestQuota:
     ) -> None:
         with pytest.raises(ValueError, match="no enabled quota"):
             make_network(settings_with()).request("mdz", "GET", "http://x", quota=True)
+
+
+class _LateWaker(FakeCoordinator):
+    """Wakes late from every pacing wait and reserves again, three times."""
+
+    def wait_turn(
+        self,
+        provider: str,
+        delay_s: float,
+        jitter_s: float,
+        *,
+        slot: SlotToken | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        for _ in range(3):
+            self.reservations.append(Reservation(provider, delay_s, jitter_s, slot))
+            sleep(1.0)
+
+
+def _count_checks(coordinator: FakeCoordinator, then: Callable[[int], None]) -> None:
+    """Make the coordinator call *then* with the number of each breaker check."""
+    check = coordinator.breaker_check
+    count = [0]
+
+    def counted(provider: str) -> BreakerState:
+        count[0] += 1
+        then(count[0])
+        return check(provider)
+
+    coordinator.breaker_check = counted  # type: ignore[method-assign]
+
+
+class TestCancellation:
+    """A cancelled scope starts nothing further; other threads go on."""
+
+    def test_a_cancelled_scope_claims_no_probe_and_sends_nothing(
+        self,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        url = server.script("/x", Reply(200))
+        coordinator.breakers["mdz"] = BreakerState(
+            BreakerStatus.HALF_OPEN, 3, NOW + 5, probe=True
+        )
+        checks: list[int] = []
+        _count_checks(coordinator, checks.append)
+        client = make_network(settings_with())
+        scope = CallScope()
+        scope.cancel()
+        with client.scoped(scope), pytest.raises(Cancelled):
+            client.request("mdz", "GET", url)
+        assert server.arrivals == []
+        assert coordinator.reservations == []
+        assert checks == []
+
+    def test_a_cancel_during_the_pacing_wait_returns_the_quota_unit(
+        self,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        url = server.script("/fast", Reply(200))
+        scope = CallScope()
+        coordinator.on_wait = lambda _provider: scope.cancel()
+        client = make_network(
+            settings_with("annas_archive", quota=AnnasQuota(daily_limit=5))
+        )
+        with client.scoped(scope), pytest.raises(Cancelled) as excinfo:
+            client.request("annas_archive", "GET", url, quota=True)
+        assert excinfo.value.quota_charged is False
+        assert server.arrivals == []
+        assert coordinator.quota_used["annas_archive"] == 0
+        assert len(coordinator.released) == 1
+
+    def test_a_cancel_during_breaker_admission_sends_nothing(
+        self,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        url = server.script("/fast", Reply(200))
+        scope = CallScope()
+        _count_checks(coordinator, lambda n: scope.cancel() if n == 2 else None)
+        client = make_network(
+            settings_with("annas_archive", quota=AnnasQuota(daily_limit=5))
+        )
+        with client.scoped(scope), pytest.raises(Cancelled):
+            client.request("annas_archive", "GET", url, quota=True)
+        assert server.arrivals == []
+        assert coordinator.quota_used["annas_archive"] == 0
+
+    def test_a_cancelled_pacing_wait_reserves_no_new_turn(
+        self, server: ScriptedServer, make_network: NetworkFactory
+    ) -> None:
+        url = server.script("/x", Reply(200))
+        late = _LateWaker()
+        scope = CallScope()
+        client = make_network(
+            settings_with(), coord=late, sleep=lambda _seconds: scope.cancel()
+        )
+        with client.scoped(scope), pytest.raises(Cancelled):
+            client.request("mdz", "GET", url)
+        assert len(late.reservations) == 1
+        assert server.arrivals == []
+
+    def test_the_probe_attempt_is_sent_and_recorded_before_cancelling(
+        self, coordinator: FakeCoordinator, make_network: NetworkFactory
+    ) -> None:
+        coordinator.breakers["mdz"] = BreakerState(
+            BreakerStatus.HALF_OPEN, 3, NOW + 5, probe=True
+        )
+        scope = CallScope()
+        coordinator.on_wait = lambda _provider: scope.cancel()
+        session = ScriptedSession(response(503))
+        client = make_network(settings_with(), session_factory=lambda: session)
+        with client.scoped(scope), pytest.raises(Cancelled):
+            client.request("mdz", "GET", "https://mdz.example/search")
+        assert len(session.calls) == 1
+        assert coordinator.failures == [("mdz", "transient")]
+
+    def test_a_sent_request_completes_and_no_backoff_follows(
+        self,
+        coordinator: FakeCoordinator,
+        sleeps: list[float],
+        make_network: NetworkFactory,
+    ) -> None:
+        scope = CallScope()
+        refused = response(503)
+
+        def sent_then_cancelled() -> requests.Response:
+            scope.cancel()
+            return refused()
+
+        session = ScriptedSession(sent_then_cancelled)
+        client = make_network(settings_with(), session_factory=lambda: session)
+        with client.scoped(scope), pytest.raises(Cancelled):
+            client.request("mdz", "GET", "https://mdz.example/search")
+        assert len(session.calls) == 1
+        assert coordinator.failures == [("mdz", "transient")]
+        assert sleeps == []
+
+    def test_a_cancel_after_a_redirect_stops_the_next_hop(
+        self,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        server.script("/a", Reply(302, headers={"Location": "/b"}))
+        server.script("/b", Reply(200))
+        scope = CallScope()
+        coordinator.on_wait = lambda _provider: (
+            scope.cancel() if server.arrivals else None
+        )
+        client = make_network(settings_with())
+        with client.scoped(scope), pytest.raises(Cancelled):
+            client.request("mdz", "GET", server.url("/a"))
+        assert [arrival.path for arrival in server.arrivals] == ["/a"]
+
+    def test_the_scope_counts_requests_in_flight_not_pacing_waits(
+        self, coordinator: FakeCoordinator, make_network: NetworkFactory
+    ) -> None:
+        answer = response(200, [b"ok"])
+
+        def slow() -> requests.Response:
+            time.sleep(0.05)
+            return answer()
+
+        coordinator.on_wait = lambda _provider: time.sleep(0.2)
+        session = ScriptedSession(slow)
+        client = make_network(settings_with(), session_factory=lambda: session)
+        with client.scoped(CallScope()) as scope:
+            client.request("mdz", "GET", "https://mdz.example/search")
+        assert 0.05 <= scope.in_flight_s() < 0.2
+
+    def test_the_scope_binds_the_entering_thread_only(
+        self, server: ScriptedServer, make_network: NetworkFactory
+    ) -> None:
+        url = server.script("/x", Reply(200))
+        client = make_network(settings_with())
+        scope = CallScope()
+        scope.cancel()
+        statuses: list[int] = []
+        with client.scoped(scope):
+            other = threading.Thread(
+                target=lambda: statuses.append(
+                    client.request("mdz", "GET", url).status_code
+                )
+            )
+            other.start()
+            other.join(5.0)
+        assert statuses == [200]

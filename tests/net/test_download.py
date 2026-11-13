@@ -9,6 +9,7 @@ death) against the new API.
 from __future__ import annotations
 
 import gzip
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ import requests
 
 from chronodownloader.net import Cause, RequestFailed
 from chronodownloader.net.classify import CONNECT_FAILURE_MAX_ATTEMPTS
+from chronodownloader.net.client import DRAIN_BYTES
 from chronodownloader.settings import AnnasQuota
 
 from .conftest import NetworkFactory
@@ -269,6 +271,69 @@ def test_a_404_records_success_and_a_403_failure(
     assert refused.value.cause is Cause.BLOCKED
     assert coordinator.failures == [("mdz", "blocked")]
     assert _files(tmp_path) == []
+
+
+class _CountingRaw:
+    """A body that counts the bytes read from it."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self.read = 0
+
+    def stream(
+        self, amt: int | None = None, decode_content: bool = True
+    ) -> Iterator[bytes]:
+        for chunk in self._chunks:
+            self.read += len(chunk)
+            yield chunk
+
+    def close(self) -> None:
+        """Nothing to release."""
+
+
+@pytest.mark.parametrize(
+    ("status", "declared", "chunks", "drained"),
+    [
+        pytest.param(404, "20", [b"x" * 20], 20, id="small"),
+        pytest.param(404, str(DRAIN_BYTES + 1), [b"x" * 8192] * 9, 0, id="large"),
+        pytest.param(404, None, [b"x" * 20], 0, id="undeclared"),
+        pytest.param(404, "20", [b"x" * 8192] * 20, DRAIN_BYTES + 8192, id="endless"),
+        pytest.param(503, "20", [b"x" * 20], 0, id="unexpected"),
+    ],
+)
+def test_an_expected_refusal_is_read_only_when_small(
+    status: int,
+    declared: str | None,
+    chunks: list[bytes],
+    drained: int,
+    tmp_path: Path,
+    make_network: NetworkFactory,
+) -> None:
+    built: list[requests.Response] = []
+    raw = _CountingRaw(chunks)
+
+    def refused() -> requests.Response:
+        answer = response(
+            status, headers={} if declared is None else {"Content-Length": declared}
+        )()
+        answer.raw = raw
+        built.append(answer)
+        return answer
+
+    session = ScriptedSession(refused)
+    with pytest.raises(RequestFailed) as excinfo:
+        make_network(
+            settings_with(max_attempts=1), session_factory=lambda: session
+        ).download(
+            "mdz",
+            "https://example.org/p.jpg",
+            tmp_path / "p.jpg.part",
+            slot=SLOT,
+            final_statuses=frozenset({400, 404, 410}),
+        )
+    assert excinfo.value.status == status
+    assert raw.read == drained
+    assert built[0]._content_consumed is (drained == 20)
 
 
 def test_a_dead_host_gets_the_short_budget(

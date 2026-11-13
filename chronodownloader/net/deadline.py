@@ -3,7 +3,9 @@
 :func:`run_with_deadline` runs the call in a daemon thread and stops waiting
 when the deadline passes. The abandoned thread may linger until its blocking
 HTTP call returns, but as a daemon it never delays interpreter exit. Searches
-use it for the per-provider timeout.
+use it for the per-provider timeout and run the call under
+:meth:`~chronodownloader.net.Network.scoped`, so that the abandoned thread
+sends nothing further once its caller gives up.
 
 Rewritten from ChronoDownloader v1.30.3
 ``main/orchestration/selection.py:_run_with_timeout`` on 19.10.2026.

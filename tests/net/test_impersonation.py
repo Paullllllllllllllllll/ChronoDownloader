@@ -525,6 +525,29 @@ class TestAdaptedResponses:
         assert outcome.path.read_bytes() == body
         assert curl.calls[0][2]["stream"] is True
 
+    def test_a_refused_curl_stream_is_closed_unread(
+        self, tmp_path: Path, make_network: NetworkFactory
+    ) -> None:
+        read: list[bytes] = []
+
+        class Refused(FakeCurlResponse):
+            def iter_content(self) -> Iterator[bytes]:
+                read.append(b"read")
+                yield b"gone"
+
+        refused = Refused(404, {"Content-Length": "4"}, chunks=[b"gone"])
+        _curl, client = _run(make_network, response=refused)
+        with pytest.raises(RequestFailed) as excinfo:
+            client.download(
+                "bne",
+                "https://bdh.bne.es/b.pdf",
+                tmp_path / "b.pdf.part",
+                slot=SLOT,
+                final_statuses=frozenset({404}),
+            )
+        assert excinfo.value.cause is Cause.NOT_FOUND
+        assert read == []
+
     def test_a_midstream_curl_error_is_retried_and_cleaned_up(
         self, tmp_path: Path, make_network: NetworkFactory
     ) -> None:

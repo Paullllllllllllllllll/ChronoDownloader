@@ -16,14 +16,30 @@ coordinator and closes it at the end. Every call names its provider key
    :data:`MAX_REDIRECTS` itself, each hop paced and breaker-checked like an
    attempt (the quota unit covers the whole chain);
 4. classifies the result (see :mod:`chronodownloader.net.errors`), records
-   every transient, blocked, DNS or certificate failure on the shared
-   breaker, and retries transient failures with backoff (a server's
-   Retry-After wins), a connect failure at most twice, a name that does not
-   resolve only under ``dns_retry``, and a certificate failure once
-   unverified under ``retry_insecure_once`` unless a hop carried a
-   credential;
+   every transient, blocked, DNS or certificate failure, and a 402 on the
+   ``judge`` key, on the shared breaker, and retries transient failures
+   with backoff (a server's Retry-After wins), a connect failure at most
+   twice, a name that does not resolve only under ``dns_retry``, and a
+   certificate failure once unverified under ``retry_insecure_once`` unless
+   a hop carried a credential; a streamed call reads the body of an
+   expected refusal (one of its ``final_statuses``) of at most
+   :data:`DRAIN_BYTES` declared bytes before closing it, so that the
+   connection is kept (not on curl_cffi sessions);
 5. returns, recording success, or raises
    :class:`~chronodownloader.net.errors.RequestFailed` with its cause.
+
+Scopes. A thread that runs its calls inside :meth:`Network.scoped` starts
+nothing further once its :class:`~chronodownloader.net.scope.CallScope` is
+cancelled: the first breaker admission, each attempt, pacing wait (before
+and after every sleep, so a late wake reserves no new turn), breaker
+admission, send, redirect hop and backoff is preceded by a check that
+raises :class:`~chronodownloader.net.errors.Cancelled`. A request already
+sent completes and is recorded on the breaker as usual; a quota unit
+reserved for an attempt that is then not sent is given back. An attempt
+that holds the half-open probe is the exception: it is sent and recorded,
+and cancellation applies again after it, so that no probe is stranded. The
+scope also adds up the seconds each request was in flight, from just before
+it is sent until its response is handled.
 
 Hosts of other providers. A client built with a *host_key* resolver (the
 provider registry supplies it) re-resolves the provider key for every hop,
@@ -50,6 +66,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
@@ -90,7 +107,14 @@ from .credentials import (
     redact_url,
     request_carries_credential,
 )
-from .errors import BreakerOpen, Cause, NetworkError, QuotaSpent, RequestFailed
+from .errors import (
+    BreakerOpen,
+    Cancelled,
+    Cause,
+    NetworkError,
+    QuotaSpent,
+    RequestFailed,
+)
 from .impersonation import (
     CurlBackend,
     ImpersonatingSession,
@@ -106,6 +130,7 @@ from .payload import (
     sniff_extension,
 )
 from .ports import CoordinatorPort
+from .scope import CallScope
 from .session import build_session
 
 __all__ = ["CLASSIFY", "JUDGE", "DownloadOutcome", "Network", "RequestOptions"]
@@ -128,6 +153,17 @@ _SUCCESS_CAUSES = frozenset(
 
 _BREAKER_FAILURES = frozenset({Cause.TRANSIENT, Cause.BLOCKED, Cause.DNS, Cause.SSL})
 """Failures the breaker counts, attempt by attempt."""
+
+_JUDGE_REFUSALS = frozenset({402})
+"""Statuses the ``judge`` key's breaker counts as failures although their
+cause is ``rejected``: spent credit refuses every later request too. The
+``classify`` key, whose endpoints differ, counts them as answers."""
+
+DRAIN_BYTES = 65_536
+"""The largest declared body of a refused streamed response that is read
+before closing, so that its connection is kept."""
+
+DRAIN_CHUNK_BYTES = 8_192
 
 MAX_REDIRECTS = 10
 """Redirects followed per attempt; each is a paced, breaker-checked request."""
@@ -347,12 +383,15 @@ class _Admission:
 
     Holds the probes the call was granted and the breakers its own failure
     opened (each by provider key, with the time the breaker reports), and
-    whether a quota unit stayed charged.
+    whether a quota unit stayed charged. *probing* is True from a probe's
+    grant until the attempt it belongs to is recorded; cancellation waits
+    for that.
     """
 
     probes: dict[str, float | None] = field(default_factory=dict)
     tripped: dict[str, float | None] = field(default_factory=dict)
     charged: bool = False
+    probing: bool = False
 
 
 @dataclass(frozen=True)
@@ -387,8 +426,9 @@ type _Handler[T] = Callable[[requests.Response, bool], T]
 
 
 class Network:
-    """The network client of one run; thread-safe, no mutable state.
+    """The network client of one run; thread-safe.
 
+    Its only mutable state is each thread's call scope (:meth:`scoped`).
     *session_factory* builds the run's plain session; *curl_loader* imports
     curl_cffi when a provider sets ``impersonate``; *sleep* waits out
     backoffs, pacing and slot polls; *clock* reads the wall clock for
@@ -426,6 +466,7 @@ class Network:
         self._coordinator = coordinator
         self._sleep = sleep
         self._clock = clock
+        self._thread_state = threading.local()
         self._session = session_factory()
         targets = {
             key: policy.impersonate
@@ -503,6 +544,51 @@ class Network:
                 yield keeper.token
         finally:
             self._coordinator.release_slot(keeper.token)
+
+    @contextlib.contextmanager
+    def scoped(self, scope: CallScope) -> Iterator[CallScope]:
+        """Run the calling thread's calls in the block under *scope*.
+
+        Once *scope* is cancelled, a call of this thread claims no breaker
+        admission and starts no further attempt, pacing wait, send, redirect
+        hop or backoff, and raises
+        :class:`~chronodownloader.net.errors.Cancelled` instead. A request
+        already sent completes, and an attempt holding the half-open probe
+        is sent and recorded first. *scope* adds up the seconds the requests
+        were in flight. Other threads are unaffected.
+        """
+        previous: CallScope | None = getattr(self._thread_state, "scope", None)
+        self._thread_state.scope = scope
+        try:
+            yield scope
+        finally:
+            self._thread_state.scope = previous
+
+    def _scope(self) -> CallScope | None:
+        scope: CallScope | None = getattr(self._thread_state, "scope", None)
+        return scope
+
+    def _check_cancelled(self, call: _Call, admission: _Admission) -> None:
+        """Raise :class:`Cancelled` when the thread's scope is cancelled.
+
+        An attempt holding the half-open probe is not cancelled.
+        """
+        scope = self._scope()
+        if scope is not None and scope.cancelled and not admission.probing:
+            raise Cancelled(call.log_url)
+
+    @contextlib.contextmanager
+    def _in_flight(self) -> Iterator[None]:
+        """Count the block's seconds as in flight on the thread's scope."""
+        scope = self._scope()
+        if scope is None:
+            yield
+            return
+        scope.begin()
+        try:
+            yield
+        finally:
+            scope.end()
 
     def _resolve(self, url: str, origin: str) -> str:
         """Return the key a hop to *url* is paced under (see the module doc)."""
@@ -653,12 +739,14 @@ class Network:
     ) -> T:
         """Run the attempts of *call* (see :meth:`_exchange`)."""
         policy = call.policy
+        self._check_cancelled(call, admission)
         self._admit(call, admission)
         verify = policy.verify_ssl
         insecure = False
         attempt = 0
         while True:
             attempt += 1
+            self._check_cancelled(call, admission)
             token = self._reserve_quota(call)
             try:
                 self._turn(call, admission)
@@ -666,6 +754,8 @@ class Network:
                 self._release_quota(token)
                 raise
             outcome = self._attempt(call, verify, insecure, handle, admission)
+            # The probe's attempt is recorded below before any further check.
+            admission.probing = False
             result = outcome.result
             final = (
                 not isinstance(result, _Done)
@@ -682,7 +772,7 @@ class Network:
                 return result.value
             if final:
                 raise self._final_answer(outcome.call, result, attempt)
-            if result.cause in _BREAKER_FAILURES:
+            if _breaker_failure(outcome.call, result):
                 self._record_failure(outcome.call, result.cause, admission)
             if self._insecure_retry(
                 call, result, attempt, verify, outcome.credentialed
@@ -692,6 +782,7 @@ class Network:
             wait = self._retry_wait(call, result, attempt)
             if wait is None:
                 raise self._give_up(outcome.call, result, attempt)
+            self._check_cancelled(call, admission)
             logger.warning(
                 "%s for %s (%s); retrying in %.1f s (attempt %d/%d)",
                 result.cause.value,
@@ -732,27 +823,25 @@ class Network:
                 )
                 self._turn(current, admission)
             credentialed = credentialed or _carries_credential(current, hop)
-            try:
-                response = current.session.request(
-                    hop.method, hop.url, **hop.send_kwargs(current, hop_verify)
-                )
-            except requests.exceptions.RequestException as exc:
-                return _Outcome(classify_exception(exc), credentialed, current)
-            if call.follow_redirects and response.is_redirect:
-                with response:
-                    following = hop.redirected(response)
-                logger.debug(
-                    "%s redirects to %s",
-                    redact_url(hop.url),
-                    redact_url(following.url),
-                )
-                hop = following
-                continue
-            return _Outcome(
-                self._answer(current, response, insecure, handle),
-                credentialed,
-                current,
+            with self._in_flight():
+                try:
+                    response = current.session.request(
+                        hop.method, hop.url, **hop.send_kwargs(current, hop_verify)
+                    )
+                except requests.exceptions.RequestException as exc:
+                    return _Outcome(classify_exception(exc), credentialed, current)
+                if call.follow_redirects and response.is_redirect:
+                    with response:
+                        following = hop.redirected(response)
+                else:
+                    answered = self._answer(current, response, insecure, handle)
+                    return _Outcome(answered, credentialed, current)
+            logger.debug(
+                "%s redirects to %s",
+                redact_url(hop.url),
+                redact_url(following.url),
             )
+            hop = following
         failure = Failure(Cause.REJECTED, detail=f"more than {MAX_REDIRECTS} redirects")
         return _Outcome(failure, credentialed, current)
 
@@ -777,8 +866,11 @@ class Network:
                     response.headers, head
                 ):
                     failure = replace(failure, cause=Cause.BLOCKED)
-                if failure.status in call.final_statuses and not call.stream:
-                    failure = replace(failure, detail=_answer_text(response))
+                if failure.status in call.final_statuses:
+                    if call.stream:
+                        _drain(call, response)
+                    else:
+                        failure = replace(failure, detail=_answer_text(response))
                 return failure
             try:
                 return _Done(handle(response, insecure))
@@ -788,16 +880,30 @@ class Network:
                 return rejected.failure
 
     def _turn(self, call: _Call, admission: _Admission) -> None:
-        """Wait for the provider's pacing turn, then pass the breaker."""
+        """Wait for the provider's pacing turn, then pass the breaker.
+
+        A cancelled thread reserves no turn; one cancelled during the wait
+        reserves no further turn and claims no admission, and one cancelled
+        while the breaker admits it does not send.
+        """
         policy = call.policy
+
+        def sleep(seconds: float) -> None:
+            self._check_cancelled(call, admission)
+            self._sleep(seconds)
+            self._check_cancelled(call, admission)
+
+        self._check_cancelled(call, admission)
         self._coordinator.wait_turn(
             call.provider,
             policy.delay_ms / 1000.0,
             policy.jitter_ms / 1000.0,
             slot=call.slot,
-            sleep=self._sleep,
+            sleep=sleep,
         )
+        self._check_cancelled(call, admission)
         self._admit(call, admission)
+        self._check_cancelled(call, admission)
 
     def _admit(self, call: _Call, admission: _Admission) -> None:
         """Raise :class:`BreakerOpen` unless the breaker admits this call now.
@@ -814,6 +920,7 @@ class Network:
         state = self._coordinator.breaker_check(call.provider)
         if state.probe:
             admission.probes[call.provider] = state.until
+            admission.probing = True
             return
         if state.allows:
             return
@@ -823,6 +930,7 @@ class Network:
             and state.status is BreakerStatus.HALF_OPEN
             and state.until == probe_until
         ):
+            admission.probing = True
             return
         if (
             state.status is BreakerStatus.OPEN
@@ -958,7 +1066,7 @@ class Network:
 
         Breaker failures were recorded attempt by attempt.
         """
-        if failure.cause in _SUCCESS_CAUSES:
+        if failure.cause in _SUCCESS_CAUSES and not _breaker_failure(call, failure):
             self._record_success(call)
         error = RequestFailed(
             failure.cause,
@@ -969,6 +1077,38 @@ class Network:
         )
         logger.warning("%s: %s", call.provider, error)
         return error
+
+
+def _breaker_failure(call: _Call, failure: Failure) -> bool:
+    """Report whether the breaker of *call*'s provider counts *failure*."""
+    if failure.cause in _BREAKER_FAILURES:
+        return True
+    return call.provider == JUDGE and failure.status in _JUDGE_REFUSALS
+
+
+def _drain(call: _Call, response: requests.Response) -> None:
+    """Read an expected refusal's streamed body of at most :data:`DRAIN_BYTES`.
+
+    Called for the call's ``final_statuses`` only (a refused image size), so
+    that a 429 or 5xx is recorded on the breaker without waiting for a body.
+    A fully read body lets requests return the connection to its pool. A
+    body declared larger, or without a declared length, is left unread, and
+    the read stops once more than :data:`DRAIN_BYTES` decoded bytes arrive.
+    A curl_cffi session is left alone: it opens a connection per streamed
+    request anyway. A transport error while reading is ignored, since the
+    failure is already classified.
+    """
+    if isinstance(call.session, ImpersonatingSession):
+        return
+    declared = parse_content_length(response.headers.get("Content-Length"))
+    if declared is None or declared > DRAIN_BYTES:
+        return
+    read = 0
+    with contextlib.suppress(requests.exceptions.RequestException):
+        for chunk in response.iter_content(chunk_size=DRAIN_CHUNK_BYTES):
+            read += len(chunk)
+            if read > DRAIN_BYTES:
+                return
 
 
 def _stream_body(

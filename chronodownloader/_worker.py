@@ -9,7 +9,11 @@ Matching (:func:`match_work`). A work's current stored candidates are
 reused unless ``--research``; their stored judgments are reused when the
 configured model gave them. Without stored candidates the providers are
 searched one after another, each under the per-provider timeout
-(:func:`~chronodownloader.net.run_with_deadline`, a daemon thread); a work
+(:func:`~chronodownloader.net.run_with_deadline`, a daemon thread, cancelled
+when the deadline passes). Providers without a key are left out; providers
+the run paused count as failed searches. The match names the providers that
+timed out with their requests in flight for at least :data:`SLOW_SHARE` of
+the deadline, and those whose search returned or failed otherwise. A work
 with a ``link`` is not searched: the linked IIIF manifest, or the manifest
 of the item an item page names (:func:`link_record`), is fetched and its
 metadata becomes the one candidate. Every candidate gets its text
@@ -61,6 +65,7 @@ from chronodownloader.matching.judge import (
 )
 from chronodownloader.net import (
     BreakerOpen,
+    CallScope,
     DeadlineExceeded,
     NetworkError,
     run_with_deadline,
@@ -249,6 +254,9 @@ class Match:
     work cannot be decided (every search failed, the judge refused);
     *deferral* holds the reason and ``retry_after`` of a judge outage;
     *review* the reason a ``link`` row goes to review without a decision.
+    *timed_out* names the providers whose search passed its deadline while
+    their requests were slow, *searched* those whose search returned or
+    failed otherwise.
     """
 
     candidates: tuple[Scored, ...] = ()
@@ -257,6 +265,8 @@ class Match:
     failure: str | None = None
     deferral: tuple[str, float] | None = None
     review: str | None = None
+    timed_out: tuple[str, ...] = ()
+    searched: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -265,7 +275,9 @@ class MatchJob:
 
     *stored* are the work's current stored candidates (empty under
     ``--research`` or without a store); *providers* the keys to search in
-    order; *skip* the providers already known to lack their key.
+    order; *skip* the providers already known to lack their key; *paused*
+    those the run leaves out after repeated search timeouts, each counted as
+    a failed search.
     """
 
     work: WorkInput
@@ -275,6 +287,7 @@ class MatchJob:
     max_candidates: int
     search_timeout: float
     skip: frozenset[str] = field(default_factory=frozenset)
+    paused: frozenset[str] = field(default_factory=frozenset)
 
 
 def _iiif(services: Services, record: SearchRecord) -> bool:
@@ -317,7 +330,12 @@ def _provider_search(
     has "Taillevent" for Guillaume Tirel), so the creator clause can hide every
     copy; the judge still sees the creator in the full query. Both searches
     share one deadline: the run's search timeout, raised to the provider's
-    ``min_search_timeout_s``; a run timeout of 0 sets none.
+    ``min_search_timeout_s``; a run timeout of 0 sets none. When the deadline
+    passes, the abandoned search is cancelled: it starts no further variant
+    and the network sends none of its further requests.
+
+    Raises:
+        _Overdue: The deadline passed; it says whether the provider was slow.
     """
     provider = services.registry.get(key)
     timeout = job.search_timeout
@@ -325,52 +343,104 @@ def _provider_search(
         floor = services.settings.providers[key].min_search_timeout_s
         timeout = max(timeout, floor)
     variants = (query, replace(query, creator=None)) if query.creator else (query,)
+    scope = CallScope()
 
     def search() -> list[SearchRecord]:
         records: list[SearchRecord] = []
-        for variant in variants:
-            records = provider.search(
-                variant, network=services.network, limit=job.max_candidates
-            )
-            if records:
-                break
+        with services.network.scoped(scope):
+            for variant in variants:
+                if scope.cancelled:
+                    break
+                records = provider.search(
+                    variant, network=services.network, limit=job.max_candidates
+                )
+                if records:
+                    break
         return records
 
-    return run_with_deadline(search, timeout)
+    try:
+        return run_with_deadline(search, timeout)
+    except DeadlineExceeded as exc:
+        scope.cancel()
+        slow = scope.in_flight_s() >= SLOW_SHARE * exc.timeout_s
+        raise _Overdue(exc, slow=slow) from exc
 
 
-def _search(
-    services: Services, job: MatchJob, query: SearchQuery
-) -> tuple[list[Scored], list[str], list[str], int]:
-    """Search every provider.
+SLOW_SHARE = 0.5
+"""The share of a search's deadline its requests must have been in flight
+for a passed deadline to count as the provider's slowness; the rest of the
+deadline can go to waiting for pacing turns."""
 
-    Returns:
-        The candidates, notes, missing keys and the number of providers whose
-        search failed.
+
+class _Overdue(Exception):
+    """A provider search passed its deadline.
+
+    *slow* is True when its requests were in flight for at least
+    :data:`SLOW_SHARE` of the deadline, False when the time went mostly to
+    waiting for pacing turns.
     """
-    found: list[Scored] = []
-    notes: list[str] = []
-    missing: list[str] = []
-    failed = 0
+
+    def __init__(self, error: DeadlineExceeded, *, slow: bool) -> None:
+        super().__init__(str(error))
+        self.slow = slow
+
+
+@dataclass
+class _Searched:
+    """The searches of one work.
+
+    *failed* counts the providers whose search failed, timed out or was
+    left out after repeated timeouts; *timed_out* names those whose deadline
+    passed while their requests were slow, *searched* those whose search
+    returned or failed otherwise. A deadline passed while waiting for pacing
+    turns, and a provider left out, are in neither.
+    """
+
+    found: list[Scored] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    failed: int = 0
+    timed_out: list[str] = field(default_factory=list)
+    searched: list[str] = field(default_factory=list)
+
+
+def _search(services: Services, job: MatchJob, query: SearchQuery) -> _Searched:
+    """Search every provider not in *job*'s skip set.
+
+    A provider in *job*'s paused set counts as a failed search, so that a
+    work that finds nothing elsewhere ends ``failed`` and is retried.
+    """
+    done = _Searched()
+    entry = job.work.entry_id
     for key in job.providers:
         if key in job.skip:
+            continue
+        if key in job.paused:
+            done.notes.append(f"{entry}: {key} search left out after repeated timeouts")
+            done.failed += 1
             continue
         try:
             records = _provider_search(services, job, key, query)
         except MissingApiKey:
-            missing.append(key)
+            done.missing.append(key)
             continue
-        except DeadlineExceeded as exc:
-            notes.append(f"{job.work.entry_id}: {key} search timed out ({exc})")
-            failed += 1
+        except _Overdue as exc:
+            done.notes.append(f"{entry}: {key} search timed out ({exc})")
+            done.failed += 1
+            if exc.slow:
+                done.timed_out.append(key)
             continue
         except (ProviderError, NetworkError, CoordinationError, OSError) as exc:
-            notes.append(f"{job.work.entry_id}: {key} search failed: {exc}")
-            failed += 1
+            done.notes.append(f"{entry}: {key} search failed: {exc}")
+            done.failed += 1
+            done.searched.append(key)
             continue
+        done.searched.append(key)
         for rank, record in enumerate(records[: job.max_candidates], start=1):
-            found.append(_scored(services, query, record, "search", rank, found=True))
-    return found, notes, missing, failed
+            done.found.append(
+                _scored(services, query, record, "search", rank, found=True)
+            )
+    return done
 
 
 def _first(metadata: Mapping[str, str], keys: Sequence[str]) -> str | None:
@@ -520,8 +590,7 @@ def match_work(services: Services, job: MatchJob) -> Match:
     """
     query = query_of(job.work)
     model = services.settings.judge.model
-    notes: list[str] = []
-    missing: list[str] = []
+    searches = _Searched()
     if job.stored:
         scored = _reused(services, job, query, model)
     elif job.work.link:
@@ -530,23 +599,28 @@ def match_work(services: Services, job: MatchJob) -> Match:
             return Match(review=linked)
         scored = [_scored(services, query, linked, "link", None, found=True)]
     else:
-        scored, notes, missing, failed = _search(services, job, query)
-        if not scored and failed:
-            return Match(
-                notes=tuple(notes),
-                missing_keys=tuple(missing),
-                failure=f"search failed on {failed} provider(s); nothing found",
-            )
+        searches = _search(services, job, query)
+        scored = searches.found
+    reported = Match(
+        notes=tuple(searches.notes),
+        missing_keys=tuple(searches.missing),
+        timed_out=tuple(searches.timed_out),
+        searched=tuple(searches.searched),
+    )
+    if not scored and searches.failed:
+        return replace(
+            reported,
+            failure=f"search failed on {searches.failed} provider(s); nothing found",
+        )
     judged, stop = _judge(services, job, query, scored)
     if stop is not None:
-        return Match(
+        return replace(
+            reported,
             candidates=tuple(judged),
-            notes=tuple(notes),
-            missing_keys=tuple(missing),
             failure=stop.failure,
             deferral=stop.deferral,
         )
-    return Match(tuple(judged), tuple(notes), tuple(missing))
+    return replace(reported, candidates=tuple(judged))
 
 
 # -- downloads -------------------------------------------------------------------

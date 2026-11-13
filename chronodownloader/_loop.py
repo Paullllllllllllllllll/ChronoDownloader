@@ -27,6 +27,22 @@ works in flight; for each it
    every attempt's reason;
 4. releases the lease.
 
+Search skip. The loop counts, per provider, the searches in a row whose
+deadline passed while the provider's requests were slow (the worker's
+``timed_out``; a deadline passed while waiting for pacing turns neither
+counts nor resets). The count follows the order in which works report, not
+the order in which their searches ran. After :data:`SEARCH_TIMEOUTS_TO_SKIP`
+the loop leaves the provider out of the searches of works it starts for the
+provider's ``circuit_breaker_cooldown_s``, with one warning naming the
+provider and the end of the pause, and then searches it again. A left-out
+provider counts as a failed search, so that a work found nowhere else ends
+``failed`` and a rerun retries it. A search that returns or fails otherwise
+resets the count. Providers with a ``min_search_timeout_s`` (Gallica) are
+never left out, since queueing for their pacing alone can pass a deadline.
+The skip lives in the run alone: works in flight keep the providers they
+started with, and the shared breaker, downloads and other runs are
+unaffected.
+
 Every store write and every run event happens here, between network calls
 and never inside one (single-writer rule). A write refused because the
 lease passed to another run counts the work as blocked. Without a store
@@ -48,6 +64,7 @@ import shutil
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, wait
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -105,6 +122,10 @@ logger = logging.getLogger(__name__)
 
 POLL_S = 0.25
 """Seconds the loop waits for a worker before it looks again (Ctrl+C)."""
+
+SEARCH_TIMEOUTS_TO_SKIP = 3
+"""Consecutive search timeouts of a provider after which a run leaves it out
+of its searches for the provider's ``circuit_breaker_cooldown_s``."""
 
 UNIT_LABEL = "work"
 """The heartbeat's unit."""
@@ -331,6 +352,8 @@ class WorkLoop:
         self.tally = Tally()
         self._eta = RateEta()
         self._skip_keys: set[str] = set()
+        self._timeouts: dict[str, int] = {}
+        self._paused: dict[str, float] = {}
         self._total = 0
         self._pending: dict[Future[Any], _Active] = {}
 
@@ -472,6 +495,7 @@ class WorkLoop:
             max_candidates=self.matching.max_candidates,
             search_timeout=self.matching.search_timeout,
             skip=frozenset(self._skip_keys),
+            paused=frozenset(self._paused_now()),
         )
         future = self.services.pool.submit(
             functools.partial(match_work, self.services, job)
@@ -554,6 +578,48 @@ class WorkLoop:
                     f"{key} skipped: its API key is not set "
                     f"({self.services.settings.api_key_env(key)})"
                 )
+        self._count_timeouts(match)
+
+    def _paused_now(self) -> set[str]:
+        """Return the providers left out of searches now; drop ended pauses."""
+        now = self.services.wiring.clock()
+        for key in [key for key, until in self._paused.items() if until <= now]:
+            del self._paused[key]
+        return set(self._paused)
+
+    def _count_timeouts(self, match: Match) -> None:
+        """Count consecutive search timeouts; pause a provider at the limit.
+
+        A search that returned or failed otherwise resets its provider's
+        count. Providers with a ``min_search_timeout_s`` are never paused,
+        since queueing for their pacing alone can pass a deadline; timeouts
+        reported while a provider is paused are not counted. The pause lasts
+        the provider's ``circuit_breaker_cooldown_s`` and touches no shared
+        breaker, so downloads and other runs are unaffected.
+        """
+        providers = self.services.settings.providers
+        for key in match.searched:
+            self._timeouts.pop(key, None)
+        paused = self._paused_now()
+        for key in match.timed_out:
+            if providers[key].min_search_timeout_s > 0 or key in paused:
+                continue
+            count = self._timeouts.get(key, 0) + 1
+            if count < SEARCH_TIMEOUTS_TO_SKIP:
+                self._timeouts[key] = count
+                continue
+            self._timeouts.pop(key, None)
+            until = (
+                self.services.wiring.clock()
+                + providers[key].network.circuit_breaker_cooldown_s
+            )
+            self._paused[key] = until
+            paused.add(key)
+            stamp = datetime.fromtimestamp(until, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            self.events.warning(
+                f"{key} left out of this run's searches until {stamp}: "
+                f"{count} searches in a row passed their deadline"
+            )
 
     def _on_match(self, active: _Active, match: Match) -> None:
         assert self.matching is not None

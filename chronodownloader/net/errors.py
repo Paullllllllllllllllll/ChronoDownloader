@@ -14,7 +14,9 @@ circuit breaker counts it:
   ``retry_insecure_once`` when the request carries no credential, then a
   breaker failure.
 - ``not_found``: 404 or 410; the provider answered, so a breaker success.
-- ``rejected``: any other 4xx (400, 422, ...); a breaker success.
+- ``rejected``: any other 4xx (400, 422, ...); a breaker success, except a
+  402 on the ``judge`` key (spent credit refuses every later request too),
+  which the judge's breaker counts as a failure; not retried.
 - ``invalid_url``: the URL cannot be sent at all; the breaker is untouched.
 - ``incomplete``: a download delivered no bytes or fewer than its declared
   Content-Length; not retried.
@@ -29,7 +31,14 @@ from enum import StrEnum
 
 from chronodownloader.coord import QuotaStatus
 
-__all__ = ["BreakerOpen", "Cause", "NetworkError", "QuotaSpent", "RequestFailed"]
+__all__ = [
+    "BreakerOpen",
+    "Cancelled",
+    "Cause",
+    "NetworkError",
+    "QuotaSpent",
+    "RequestFailed",
+]
 
 
 class Cause(StrEnum):
@@ -105,6 +114,22 @@ class BreakerOpen(NetworkError):
             stamp = datetime.fromtimestamp(until, tz=UTC)
             when = f" until {stamp.strftime('%Y-%m-%dT%H:%M:%SZ')}"
         super().__init__(f"circuit breaker open for {provider}{reason}{when}")
+
+
+class Cancelled(NetworkError):
+    """The calling thread's call was cancelled; this attempt sent nothing.
+
+    Raised by a call made under :meth:`~chronodownloader.net.Network.scoped`
+    once its scope is cancelled: before the breaker admits the call, before
+    an attempt, during a pacing wait, before a send, a redirect hop or a
+    backoff. A request already sent completed as usual, and an attempt that
+    holds the half-open probe is sent and recorded before cancellation
+    applies again, so that the probe is never stranded.
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        super().__init__(f"call cancelled before sending: {url}")
 
 
 class QuotaSpent(NetworkError):

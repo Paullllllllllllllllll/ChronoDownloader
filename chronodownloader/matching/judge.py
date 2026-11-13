@@ -745,9 +745,9 @@ def post_decision(
                 timeout_s=timeout_s,
             )
     except BreakerOpen as exc:
-        # Refusals (401, 403) count as breaker failures too: an open
-        # breaker they opened stays a refusal, not an outage.
-        if exc.cause == Cause.BLOCKED:
+        # Refusals (401, 403, and 402 on the judge key) count as breaker
+        # failures too: an open breaker they opened stays a refusal.
+        if exc.cause in (Cause.BLOCKED, Cause.REJECTED):
             raise JudgeRefused(exc) from exc
         raise unavailable(str(exc), exc.until) from exc
     except SlotLost as exc:
