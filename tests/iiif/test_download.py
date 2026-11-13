@@ -32,6 +32,7 @@ from chronodownloader.providers.base import (
     ProviderBlocked,
 )
 from chronodownloader.providers.iiif_download import (
+    SizeMemory,
     download_manifest,
     fetch_info,
     fetch_json,
@@ -248,6 +249,143 @@ class TestStageServiceImage:
             "/iiif/img1/info.json",
             "/iiif/img1/full/768,/0/default.jpg",
         ]
+
+
+MAX = "/full/max/0/default.jpg"
+PCT = "/full/pct:100/0/default.jpg"
+
+
+def _paths(server: ScriptedServer) -> list[str]:
+    return [arrival.path for arrival in server.arrivals]
+
+
+def _refuse_full(server: ScriptedServer, *names: str) -> list[str]:
+    """Serve each *name* at ``full/max`` only, refusing ``full/full`` with 400."""
+    for name in names:
+        server.script(f"/iiif/{name}{FULL}", Reply(400))
+        server.script(f"/iiif/{name}{MAX}", jpeg())
+    return service_urls(server, *names)
+
+
+class TestSizeMemory:
+    def test_the_form_that_worked_goes_first_for_later_pages(
+        self, server: ScriptedServer, network: Network, staging: Path
+    ) -> None:
+        bases = _refuse_full(server, "1", "2", "3")
+        manifest = v2_manifest(*(service_canvas(base) for base in bases))
+        result = _download(network, manifest, staging, include_metadata=False)
+        assert result.complete
+        assert _paths(server) == [
+            f"/iiif/1{FULL}",
+            f"/iiif/1{MAX}",
+            f"/iiif/2{MAX}",
+            f"/iiif/3{MAX}",
+        ]
+
+    def test_a_miss_falls_back_in_order_and_the_memory_moves(
+        self, server: ScriptedServer, network: Network, staging: Path
+    ) -> None:
+        bases = _refuse_full(server, "1", "3")
+        bases.insert(1, server.url("/iiif/2"))
+        server.script(f"/iiif/2{FULL}", Reply(400))
+        server.script(f"/iiif/2{PCT}", jpeg())
+        server.script(f"/iiif/3{PCT}", jpeg())
+        manifest = v2_manifest(*(service_canvas(base) for base in bases))
+        result = _download(network, manifest, staging, include_metadata=False)
+        assert result.complete
+        assert _paths(server) == [
+            f"/iiif/1{FULL}",
+            f"/iiif/1{MAX}",
+            f"/iiif/2{MAX}",
+            f"/iiif/2{FULL}",
+            f"/iiif/2{PCT}",
+            f"/iiif/3{PCT}",
+        ]
+
+    def test_an_info_json_size_is_not_remembered(
+        self, server: ScriptedServer, network: Network, staging: Path
+    ) -> None:
+        server.script("/iiif/1/info.json", json_reply({"sizes": [{"width": 2000}]}))
+        server.script("/iiif/1/full/2000,/0/default.jpg", jpeg())
+        server.script("/iiif/2/full/2000,/0/default.jpg", jpeg())
+        (second,) = serve_pages(server, "2")
+        memory = SizeMemory()
+        first = server.url("/iiif/1")
+        assert stage_service_image(
+            network,
+            PROVIDER,
+            first,
+            staging,
+            "p00001",
+            slot=SLOT,
+            max_px=None,
+            memory=memory,
+        )
+        assert memory.form == ""
+        assert stage_service_image(
+            network,
+            PROVIDER,
+            second,
+            staging,
+            "p00002",
+            slot=SLOT,
+            max_px=None,
+            memory=memory,
+        )
+        assert _paths(server)[-1] == f"/iiif/2{FULL}"
+        assert server.hits("/iiif/2/full/2000,/0/default.jpg") == 0
+
+    def test_the_capped_order_is_unchanged(
+        self, server: ScriptedServer, network: Network, staging: Path
+    ) -> None:
+        for name in ("1", "2"):
+            server.script(
+                f"/iiif/{name}/info.json", json_reply({"width": 3000, "height": 4000})
+            )
+            server.script(f"/iiif/{name}/full/768,/0/default.jpg", jpeg())
+        server.script("/iiif/3/full/!1024,1024/0/default.jpg", jpeg())
+        bases = service_urls(server, "1", "2", "3")
+        manifest = v2_manifest(*(service_canvas(base) for base in bases))
+        result = _download(
+            network, manifest, staging, include_metadata=False, image_max_px=1024
+        )
+        assert result.complete
+        assert _paths(server) == [
+            "/iiif/1/full/!1024,1024/0/default.jpg",
+            "/iiif/1/info.json",
+            "/iiif/1/full/768,/0/default.jpg",
+            "/iiif/2/full/!1024,1024/0/default.jpg",
+            "/iiif/2/info.json",
+            "/iiif/2/full/768,/0/default.jpg",
+            "/iiif/3/full/!1024,1024/0/default.jpg",
+        ]
+
+    def test_a_second_item_starts_without_memory(
+        self, server: ScriptedServer, network: Network, staging: Path
+    ) -> None:
+        (first,) = _refuse_full(server, "a1")
+        (second,) = serve_pages(server, "b1")
+        server.script(f"/iiif/b1{MAX}", jpeg())
+        _download(network, v2_manifest(service_canvas(first)), staging)
+        result = _download(
+            network, v2_manifest(service_canvas(second)), staging.parent / "2"
+        )
+        assert result.complete
+        assert _paths(server)[-1] == f"/iiif/b1{FULL}"
+        assert server.hits(f"/iiif/b1{MAX}") == 0
+
+    def test_another_service_family_keeps_the_usual_order(self) -> None:
+        memory = SizeMemory()
+        memory.learn("https://a.org/iiif/1", f"https://a.org/iiif/1{MAX}")
+        usual = [f"https://b.org/iiif/2{FULL}", f"https://b.org/iiif/2{MAX}"]
+        assert memory.order("https://b.org/iiif/2", usual) == usual
+        assert (
+            memory.order(
+                "https://a.org/iiif/2",
+                [f"https://a.org/iiif/2{FULL}", f"https://a.org/iiif/2{MAX}"],
+            )[0]
+            == f"https://a.org/iiif/2{MAX}"
+        )
 
 
 class TestFetchInfo:

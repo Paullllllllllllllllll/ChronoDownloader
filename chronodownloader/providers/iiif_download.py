@@ -14,9 +14,12 @@ the size budget does.
 A page with an Image API service is tried at up to
 :data:`~chronodownloader.iiif.SPECULATIVE_CANDIDATES` speculative sizes,
 then at the sizes its ``info.json`` advertises; every size respects the
-provider's image size cap. A missing page or rendering whose requests
-failed carries the last failure's cause in its part's ``causes``. The
-module keeps no state between calls.
+provider's image size cap. Within one item, a :class:`SizeMemory` the
+caller creates for that item puts the speculative form that staged the
+last page first for the next page of the same service family; sizes from
+``info.json`` are never carried over. A missing page or rendering whose
+requests failed carries the last failure's cause in its part's
+``causes``. The module keeps no state between calls.
 
 Foreign hosts. An aggregator (Europeana, DPLA, DDB) often downloads from the
 holding library. Every request here, and in the staging and support
@@ -36,7 +39,7 @@ from __future__ import annotations
 import logging
 import shutil
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -69,6 +72,7 @@ from .staging import serving, stage_first
 __all__ = [
     "MANIFEST_NAME",
     "NO_SOURCE",
+    "SizeMemory",
     "download_manifest",
     "fetch_info",
     "fetch_json",
@@ -140,7 +144,39 @@ def fetch_info(
     return document if isinstance(document, Mapping) and document else None
 
 
-def stage_service_image(
+def _family(base: str) -> str:
+    """Return the URL a service base shares with its siblings: all but its id."""
+    return base.rpartition("/")[0]
+
+
+@dataclass
+class SizeMemory:
+    """The speculative size form that staged the last page of one item.
+
+    ``form`` is the part of the URL after the service base (for example
+    ``/full/max/0/default.jpg``), learned under services of ``family``. A
+    caller creates one per item and passes it to every page of that item;
+    sharing it across items, threads or providers is not supported.
+    """
+
+    family: str = ""
+    form: str = ""
+
+    def order(self, base: str, speculative: list[str]) -> list[str]:
+        """Return *speculative* with the remembered form first, if it is one."""
+        if not self.form or self.family != _family(base):
+            return speculative
+        preferred = base + self.form
+        if preferred not in speculative:
+            return speculative
+        return [preferred, *(url for url in speculative if url != preferred)]
+
+    def learn(self, base: str, url: str) -> None:
+        """Remember the form of *url*, a speculative candidate of *base*."""
+        self.family, self.form = _family(base), url[len(base) :]
+
+
+def stage_service_image(  # noqa: PLR0913 - two optional records (failures, memory)
     network: Network,
     provider: str,
     service_base: str,
@@ -150,31 +186,42 @@ def stage_service_image(
     slot: SlotToken,
     max_px: int | None,
     failures: list[RequestFailed] | None = None,
+    memory: SizeMemory | None = None,
 ) -> StagedFile | None:
     """Stage one page from an Image API service; None when no size works.
 
     The ``info.json`` sizes are tried only when every speculative size
     failed for a size cause (a server refusal ends the attempts). Every
-    failed image request is appended to *failures*.
+    failed image request is appended to *failures*. With *memory*, the
+    item's remembered speculative form goes first, and a speculative
+    success becomes the remembered form; an ``info.json`` size never does.
 
     Raises:
         BreakerOpen, QuotaSpent, SlotLost, OSError: The download must stop.
     """
     tried: set[str] = set()
-    speculative = image_url_candidates(service_base, max_px=max_px)
-    staged = stage_first(
-        network,
-        provider,
-        speculative[:SPECULATIVE_CANDIDATES],
-        staging_dir,
-        item,
-        slot=slot,
-        kind="image",
-        tried=tried,
-        failures=failures,
-    )
-    if staged is not None:
-        return staged if isinstance(staged, StagedFile) else None
+    base = service_base.rstrip("/")
+    speculative = image_url_candidates(base, max_px=max_px)[:SPECULATIVE_CANDIDATES]
+    if memory is not None:
+        speculative = memory.order(base, speculative)
+    for url in speculative:
+        staged = stage_first(
+            network,
+            provider,
+            [url],
+            staging_dir,
+            item,
+            slot=slot,
+            kind="image",
+            tried=tried,
+            failures=failures,
+        )
+        if isinstance(staged, StagedFile):
+            if memory is not None:
+                memory.learn(base, url)
+            return staged
+        if staged is not None:
+            return None
     info = fetch_info(network, provider, service_base, slot=slot)
     if info is None:
         return None
@@ -192,7 +239,7 @@ def stage_service_image(
     return staged if isinstance(staged, StagedFile) else None
 
 
-def stage_canvas(
+def stage_canvas(  # noqa: PLR0913 - two optional records (failures, memory)
     network: Network,
     provider: str,
     source: PageSource,
@@ -202,10 +249,12 @@ def stage_canvas(
     slot: SlotToken,
     max_px: int | None,
     failures: list[RequestFailed] | None = None,
+    memory: SizeMemory | None = None,
 ) -> StagedFile | None:
     """Stage one canvas from its service or its whole-image URL.
 
-    Every failed image request is appended to *failures*.
+    Every failed image request is appended to *failures*; *memory* passes
+    to :func:`stage_service_image`.
 
     Raises:
         BreakerOpen, QuotaSpent, SlotLost, OSError: The download must stop.
@@ -220,6 +269,7 @@ def stage_canvas(
             slot=slot,
             max_px=max_px,
             failures=failures,
+            memory=memory,
         )
     staged = stage_first(
         network,
@@ -256,6 +306,7 @@ def _stage_pages(
     without a source is missing with cause ``no_source``; a failed page is
     missing with the cause of its last failed request; a canvas repeating
     an earlier canvas's source gets a copy of that page, not a transfer.
+    The pages share one :class:`SizeMemory`.
     """
     limit = run.request.page_limit
     selected = canvases[:limit] if limit else canvases
@@ -263,6 +314,7 @@ def _stage_pages(
     present = set(expected) & run.request.present
     causes: dict[str, str] = {}
     fetched: dict[PageSource, StagedFile] = {}
+    memory = SizeMemory()
     for canvas in selected:
         item = page_item(canvas.index)
         if item in present:
@@ -288,6 +340,7 @@ def _stage_pages(
                 slot=run.slot,
                 max_px=max_px,
                 failures=failures,
+                memory=memory,
             )
         except (BreakerOpen, QuotaSpent, SlotLost) as exc:
             run.stop(exc)

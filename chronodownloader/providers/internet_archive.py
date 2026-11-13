@@ -51,7 +51,7 @@ from .base import (
     provider_error,
     source_id_of,
 )
-from .iiif_download import manifest_page_refs, stage_canvas
+from .iiif_download import SizeMemory, manifest_page_refs, stage_canvas
 from .staging import stage_first
 
 __all__ = [
@@ -393,7 +393,8 @@ class InternetArchive:
 
         Each page comes from the page service, else from its IIIF canvas;
         with no page count in the metadata the manifest's canvases are the
-        pages. A page that cannot be had stays missing.
+        pages. A page that cannot be had stays missing. The canvases share
+        one :class:`~.iiif_download.SizeMemory`.
         """
         candidates = self._manifest_candidates(identifier, metadata)
         manifest = _Manifest(
@@ -410,6 +411,7 @@ class InternetArchive:
         selected = range(1, (min(available, limit) if limit else available) + 1)
         expected = tuple(page_item(index) for index in selected)
         present = set(expected) & run.request.present
+        memory = SizeMemory()
         for index in selected:
             item = page_item(index)
             if item in present:
@@ -417,7 +419,9 @@ class InternetArchive:
             if run.halt is not None or not run.admits("image"):
                 break
             try:
-                staged = self._stage_page(run, identifier, index, manifest, direct)
+                staged = self._stage_page(
+                    run, identifier, index, manifest, direct, memory
+                )
             except (BreakerOpen, QuotaSpent, SlotLost) as exc:
                 run.stop(exc)
                 break
@@ -441,6 +445,7 @@ class InternetArchive:
         index: int,
         manifest: _Manifest,
         direct: bool,
+        memory: SizeMemory,
     ) -> StagedFile | None:
         """Stage one page: the page service first, then the IIIF canvas.
 
@@ -472,6 +477,7 @@ class InternetArchive:
             item,
             slot=run.slot,
             max_px=None,
+            memory=memory,
         )
 
     def pages(

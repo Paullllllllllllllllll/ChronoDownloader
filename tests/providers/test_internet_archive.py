@@ -478,6 +478,33 @@ def test_a_page_the_service_lacks_falls_back_to_iiif(
     assert f"/image/one{FULL}" not in _paths(server)
 
 
+def test_the_canvases_of_an_item_share_the_size_that_worked(
+    server: ScriptedServer, network: Network, slot: SlotToken, tmp_path: Path
+) -> None:
+    server.script("/metadata/id1", json_reply({"files": []}))
+    names = ("one", "two", "three")
+    manifest = v2_manifest(*(service_canvas(server.url(f"/image/{n}")) for n in names))
+    server.script("/iiif/id1/manifest.json", json_reply(manifest))
+    for name in names:
+        server.script(f"/image/{name}{FULL}", Reply(400))
+        server.script(f"/image/{name}/full/max/0/default.jpg", jpeg())
+
+    result = _adapter(server).download(
+        "id1",
+        network=network,
+        staging_dir=_staging(tmp_path),
+        request=DownloadRequest(slot, format="images"),
+    )
+
+    assert result.complete
+    assert [path for path in _paths(server) if path.startswith("/image/")] == [
+        f"/image/one{FULL}",
+        "/image/one/full/max/0/default.jpg",
+        "/image/two/full/max/0/default.jpg",
+        "/image/three/full/max/0/default.jpg",
+    ]
+
+
 def test_without_a_page_count_the_manifest_lists_the_pages(
     server: ScriptedServer, network: Network, slot: SlotToken, tmp_path: Path
 ) -> None:
