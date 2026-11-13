@@ -158,10 +158,24 @@ def _staging_root(root: Path, entry_id: str) -> Path:
     return root / folder_of(entry_id) / "objects" / ".staging"
 
 
+def _indexes(path: Path) -> set[str]:
+    return set(
+        sqlite_module.read(
+            path,
+            lambda c: [
+                row[0]
+                for row in c.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index'"
+                )
+            ],
+        )
+    )
+
+
 # Opening and schema
 
 
-def test_opening_creates_schema_version_four_with_the_read_views(
+def test_opening_creates_schema_version_five_with_the_read_views(
     opened: Callable[..., Store], root: Path
 ) -> None:
     store = opened()
@@ -196,6 +210,7 @@ def test_opening_creates_schema_version_four_with_the_read_views(
     assert sqlite_module.read_rows(store.path, "meta") == [
         {"key": "schema_version", "value": str(SCHEMA_VERSION)}
     ]
+    assert {"works_by_selected", "attempts_by_candidate"} <= _indexes(store.path)
     mode = store._connection().execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "delete"
     assert store.reconciliation is not None
@@ -207,11 +222,11 @@ def test_a_newer_database_is_refused_and_left_as_it_is(
 ) -> None:
     opened().close()
     with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
-        connection.execute("UPDATE meta SET value = '5'")
+        connection.execute("UPDATE meta SET value = '6'")
         connection.commit()
     before = (root / DATABASE_NAME).read_bytes()
 
-    with pytest.raises(NewerSchemaError, match="version 5") as raised:
+    with pytest.raises(NewerSchemaError, match="version 6") as raised:
         Store(root, clock=clock)
     assert raised.value.exit_code == ExitCode.USAGE == 2
     assert (root / DATABASE_NAME).read_bytes() == before
@@ -1353,7 +1368,7 @@ def _older_store(root: Path, version: int, lease_until: float | None = None) -> 
         connection.commit()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_an_older_store_is_migrated_in_place(
     root: Path, clock: FakeClock, version: int
 ) -> None:
@@ -1367,16 +1382,17 @@ def test_an_older_store_is_migrated_in_place(
     with Store(root, clock=clock, reconcile=False, migrate=False):
         assert store_module.check_schema(root / DATABASE_NAME) == version
     with Store(root, clock=clock) as store:
-        assert store_module.check_schema(store.path) == SCHEMA_VERSION == 4
+        assert store_module.check_schema(store.path) == SCHEMA_VERSION == 5
         tables = sqlite_module.table_names(store.path)
         assert {"page_labels", "title_pages", "page_checks"} <= set(tables)
+        assert {"works_by_selected", "attempts_by_candidate"} <= _indexes(store.path)
         assert [row["entry_id"] for row in read_work_status(root)] == ["e1"]
         assert (store.page_labels("e1"), store.title_page("e1")) == ([], None)
         assert store.page_checks("e1") == []
     assert read_gate_checks(root) == []
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_an_older_store_under_an_older_runs_lease_is_not_migrated(
     root: Path, clock: FakeClock, version: int
 ) -> None:
@@ -1389,7 +1405,140 @@ def test_an_older_store_under_an_older_runs_lease_is_not_migrated(
 
     clock.advance(61)
     with Store(root, clock=clock) as store:
-        assert store_module.check_schema(store.path) == 4
+        assert store_module.check_schema(store.path) == 5
+
+
+@pytest.mark.parametrize(
+    ("holder", "migrates"), [("dead", True), ("live", False), ("foreign", False)]
+)
+def test_a_version_four_lease_refuses_the_migration_only_while_its_holder_lives(
+    root: Path, holder: str, migrates: bool
+) -> None:
+    _older_store(root, 4, lease_until=time.time() + 600)
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+        if holder == "live"
+        else [sys.executable, "-c", "pass"]
+    )
+    try:
+        if holder != "live":
+            process.wait(CHILD_TIMEOUT)
+        host = "another-machine" if holder == "foreign" else socket.gethostname()
+        with contextlib.closing(sqlite3.connect(root / DATABASE_NAME)) as connection:
+            connection.execute(
+                "INSERT INTO runs (run_id, command, pid, host, started_at) "
+                "VALUES ('old-run', 'download', ?, ?, 't')",
+                (process.pid, host),
+            )
+            connection.commit()
+        if migrates:
+            with Store(root) as store:
+                assert store_module.check_schema(store.path) == 5
+                assert store.reconciliation is not None
+                assert store.reconciliation.live == ()
+        else:
+            with pytest.raises(StoreBusyError, match="older chronodownloader"):
+                Store(root)
+            assert store_module.check_schema(root / DATABASE_NAME) == 4
+    finally:
+        process.kill()
+        process.wait(CHILD_TIMEOUT)
+
+
+def _populate(path: Path, count: int) -> None:
+    """Add *count* works ``w<n>``, each with a selected candidate and an attempt."""
+    rows = range(count)
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO runs (run_id, command, started_at) "
+            "VALUES ('old', 'download', 't')"
+        )
+        connection.executemany(
+            "INSERT INTO works (entry_id, title, folder, created_at, updated_at) "
+            "VALUES (?, 'Kochbuch', ?, 't', 't')",
+            [(f"w{n}", f"w{n}_kochbuch") for n in rows],
+        )
+        connection.executemany(
+            "INSERT INTO candidates (candidate_id, entry_id, run_id, origin, provider, "
+            "source_id, title, created_at, updated_at) "
+            "VALUES (?, ?, 'old', 'search', 'mdz', ?, 'Kochbuch', 't', 't')",
+            [(n + 1, f"w{n}", f"bsb{n}") for n in rows],
+        )
+        connection.executemany(
+            "UPDATE works SET selected_candidate = ?, status = 'failed' "
+            "WHERE entry_id = ?",
+            [(n + 1, f"w{n}") for n in rows],
+        )
+        connection.executemany(
+            "INSERT INTO attempts (entry_id, run_id, lease_generation, candidate_id, "
+            "provider, source_id, format, outcome, finished_at) "
+            "VALUES (?, 'old', 1, ?, 'mdz', ?, 'images', 'failed', 't')",
+            [(f"w{n}", n + 1, f"bsb{n}") for n in rows],
+        )
+        connection.commit()
+
+
+def test_a_version_four_store_with_rows_gains_the_indexes_and_keeps_its_rows(
+    root: Path, clock: FakeClock
+) -> None:
+    _older_store(root, 4)
+    path = root / DATABASE_NAME
+    _populate(path, 3)
+    tables = ("works", "candidates", "attempts", "runs")
+    before = {table: sqlite_module.read_rows(path, table) for table in tables}
+    assert not {"works_by_selected", "attempts_by_candidate"} & _indexes(path)
+
+    with Store(root, clock=clock) as store:
+        assert store_module.check_schema(path) == 5
+        assert {"works_by_selected", "attempts_by_candidate"} <= _indexes(path)
+        assert {table: sqlite_module.read_rows(path, table) for table in tables} == (
+            before
+        )
+        rows = {row["entry_id"]: row for row in read_work_status(root)}
+        assert rows["w1"]["selected_source_id"] == "bsb1"
+        assert store.drop(["w1"]).dropped == ("w1",)
+    assert {row["entry_id"] for row in read_work_status(root)} == {"e1", "w0", "w2"}
+
+
+@pytest.mark.parametrize(
+    ("table", "column", "index"),
+    [
+        ("works", "selected_candidate", "works_by_selected"),
+        ("attempts", "candidate_id", "attempts_by_candidate"),
+    ],
+)
+def test_the_candidate_foreign_keys_are_looked_up_by_index(
+    opened: Callable[..., Store], table: str, column: str, index: str
+) -> None:
+    store = opened()
+    plan = store._connection().execute(
+        f"EXPLAIN QUERY PLAN SELECT 1 FROM {table} WHERE {column} = ?",  # noqa: S608
+        (1,),
+    )
+    assert any(index in str(row[-1]) for row in plan)
+
+
+def test_dropping_a_work_costs_the_same_however_many_works_the_store_holds(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    def steps(count: int) -> int:
+        root = tmp_path / str(count)
+        Store(root, clock=clock, reconcile=False).close()
+        _populate(root / DATABASE_NAME, count)
+        counted = [0]
+
+        def tick() -> int:
+            counted[0] += 1
+            return 0
+
+        with Store(root, clock=clock, reconcile=False) as store:
+            connection = store._connection()
+            connection.set_progress_handler(tick, 10)
+            assert store.drop(["w0"]).dropped == ("w0",)
+            connection.set_progress_handler(None, 0)
+        return counted[0]
+
+    assert steps(2000) < 1.2 * steps(20)
 
 
 def test_a_label_lands_only_while_its_file_keeps_the_attempt(

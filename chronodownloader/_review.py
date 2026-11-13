@@ -73,6 +73,7 @@ from chronodownloader.matching.judge import (
 from chronodownloader.net import NetworkError
 from chronodownloader.net.credentials import redact_text
 from chronodownloader.options.options import Source
+from chronodownloader.output._disk import FolderListing
 from chronodownloader.output.index import write_index
 from chronodownloader.output.paths import inspect_dir, sanitize_filename
 from chronodownloader.output.store import (
@@ -83,8 +84,8 @@ from chronodownloader.output.store import (
     StoreError,
     WorkInput,
     read_candidates,
-    read_files,
-    read_work_candidates,
+    read_files_by_work,
+    read_item_works,
 )
 from chronodownloader.pages import sample_pages
 from chronodownloader.providers.base import ProviderError, UnsupportedCapability
@@ -327,15 +328,9 @@ def _item_targets(spec: InspectSpec, root: Path | None) -> list[InspectTarget]:
     targets: list[InspectTarget] = []
     if root is not None:
         try:
-            rows = read_work_candidates(root)
+            entry_ids = read_item_works(root, provider, item_id)
         except StoreError as exc:
             raise PlanError(str(exc)) from exc
-        entry_ids = dict.fromkeys(
-            str(row["entry_id"])
-            for row in rows
-            if row["current"]
-            and (row["provider"], row["source_id"]) == (provider, item_id)
-        )
         statuses = read_statuses(root, list(entry_ids)) if entry_ids else {}
         for entry_id in entry_ids:
             candidate = next(
@@ -480,9 +475,10 @@ def _crashed(target: InspectTarget, exc: Exception) -> PageCheck:
 # -- verify -------------------------------------------------------------------
 
 
-def _read_files(root: Path, entry_id: str) -> list[FileRow]:
+def _read_files(root: Path, entry_ids: Sequence[str]) -> dict[str, list[FileRow]]:
+    """Return the recorded files of *entry_ids* by work, from one read."""
     try:
-        return read_files(root, entry_id)
+        return read_files_by_work(root, entry_ids)
     except StoreError as exc:
         raise PlanError(str(exc)) from exc
 
@@ -490,22 +486,30 @@ def _read_files(root: Path, entry_id: str) -> list[FileRow]:
 def _compare(
     work_dir: Path, files: Sequence[FileRow]
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Return the recorded files missing on disk and those of another size."""
+    """Return the recorded files missing on disk and those of another size.
+
+    A size that differs in the folder listing is read again from the file.
+    """
+    listing = FolderListing(work_dir)
     missing: list[str] = []
     mismatched: list[str] = []
     for row in files:
-        path = work_dir / row.path
-        if not path.is_file():
+        size = listing.size(row.path)
+        if size is not None and size != row.size:
+            size = listing.size(row.path, fresh=True)
+        if size is None:
             missing.append(row.path)
-        elif path.stat().st_size != row.size:
+        elif size != row.size:
             mismatched.append(row.path)
     return tuple(missing), tuple(mismatched)
 
 
-def _verified(root: Path, row: dict[str, Any]) -> VerifiedWork:
+def _verified(
+    root: Path, row: dict[str, Any], recorded: Mapping[str, list[FileRow]]
+) -> VerifiedWork:
     """Return the read-only comparison of a work's files with its record."""
     entry_id, folder = str(row["entry_id"]), str(row["folder"])
-    files = _read_files(root, entry_id)
+    files = recorded.get(entry_id, [])
     missing, mismatched = _compare(root / folder, files)
     status = str(row["status"])
     return VerifiedWork(
@@ -557,7 +561,8 @@ def plan_verify(
     absent = _absent(spec.entry_ids, set(rows))
     if absent:
         warnings.append(f"entry ids not in the store: {', '.join(absent)}")
-    works = tuple(_verified(root, row) for row in rows.values())
+    recorded = _read_files(root, list(rows))
+    works = tuple(_verified(root, row, recorded) for row in rows.values())
     return RunPlan(
         spec,
         settings,
@@ -582,11 +587,12 @@ def _reconcile(root: Path, wiring: Wiring) -> Reconciliation:
     return store.reconciliation or Reconciliation()
 
 
-def _page_paths(root: Path, work: VerifiedWork, first: int) -> tuple[Path, ...]:
+def _page_paths(
+    root: Path, work: VerifiedWork, files: Sequence[FileRow], first: int
+) -> tuple[Path, ...]:
     """Return the work's first *first* recorded page images, by item."""
     images = sorted(
-        (row for row in _read_files(root, work.entry_id) if row.kind == "image"),
-        key=lambda row: row.item,
+        (row for row in files if row.kind == "image"), key=lambda row: row.item
     )
     return tuple(root / work.folder / row.path for row in images[:first])
 
@@ -624,10 +630,17 @@ def _with_pages(
     rows: dict[str, dict[str, Any]],
     wiring: Wiring,
 ) -> list[VerifiedWork]:
-    """Return *works* with the page check of each that has page images."""
+    """Return *works* with the page check of each that has page images.
+
+    The files of the works to check are read when the page phase starts.
+    """
     spec = run_plan.spec
     assert isinstance(spec, VerifySpec)
     root = spec.output
+    checked = [
+        work.entry_id for work in works if work.status != "blocked" and work.files != 0
+    ]
+    recorded = _read_files(root, checked) if checked else {}
     jobs: list[_PageJob] = []
     for index, work in enumerate(works):
         if work.status == "blocked" or work.files == 0:
@@ -638,7 +651,8 @@ def _with_pages(
             str(row["selected_source_id"] or row["last_source_id"] or ""),
         )
         folder = root / work.folder
-        paths = _page_paths(root, work, spec.first)
+        files = recorded.get(work.entry_id, [])
+        paths = _page_paths(root, work, files, spec.first)
         if paths:
             jobs.append(_PageJob(index, _work_of(row), selected, folder, paths))
             continue
@@ -697,12 +711,13 @@ def run_verify(run_plan: RunPlan, wiring: Wiring) -> RunResult:
     files = {work.entry_id: work.files for work in planned.works}
     repaired = _reconcile(root, wiring)
     rows = read_statuses(root, list(files))
+    recorded = _read_files(root, list(rows))
     works: list[VerifiedWork] = []
     for entry_id, count in files.items():
         row = rows.get(entry_id)
         if row is None:
             continue
-        after = _verified(root, row)
+        after = _verified(root, row, recorded)
         if after.status != "blocked":
             missing = tuple(path for key, path in repaired.missing if key == entry_id)
             after = replace(

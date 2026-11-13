@@ -10,7 +10,7 @@ leading pages. External readers use the views ``work_status``,
 ``gate_checks`` (the read contract); the tables behind them may change in a
 later schema version.
 
-Schema (version 4, ``meta.schema_version``)::
+Schema (version 5, ``meta.schema_version``)::
 
     meta       (key TEXT PRIMARY KEY, value TEXT)  -- schema_version,
                                                    -- generation_floor
@@ -21,7 +21,7 @@ Schema (version 4, ``meta.schema_version``)::
                 publisher, language, edition, link,     -- input fields, text
                 folder UNIQUE NOCASE,                  -- relative to the root
                 status, status_reason, retry_after REAL,
-                selected_candidate -> candidates,
+                selected_candidate -> candidates,      -- indexed (version 5)
                 lease_holder, lease_generation, lease_expires_at REAL,
                 first_run_id, last_run_id, created_at, updated_at)
     candidates (candidate_id INTEGER PRIMARY KEY, entry_id -> works,
@@ -34,7 +34,8 @@ Schema (version 4, ``meta.schema_version``)::
                 created_at, updated_at)
     attempts   (attempt_id INTEGER PRIMARY KEY, entry_id -> works,
                 run_id -> runs, lease_generation, commit_id UNIQUE,
-                candidate_id -> candidates, provider, source_id,
+                candidate_id -> candidates,            -- indexed (version 5)
+                provider, source_id,
                 format (images|pdf|both), outcome (complete|partial|failed),
                 parts JSON, stopped, quota_charged, error,
                 started_at, finished_at)
@@ -143,11 +144,12 @@ masked; error texts are cut to :data:`ERROR_TEXT_LIMIT` characters.
 Opening. A database with tables but no schema version, one with a newer
 version and one SQLite cannot read raise a :class:`StoreError` (exit code
 2) and are left as they are; only a missing or empty database is created. A
-store of version 1 to 3 is migrated in place, in the opening's write
-transaction: the tables and views of the later versions are created and
-``meta.schema_version`` becomes 4. While a work of it is under an unexpired
-lease, which only a process of the older version can hold, the opening
-refuses with :class:`StoreBusyError` and migrates nothing. The read-only
+store of version 1 to 4 is migrated in place, in the opening's write
+transaction: the tables, views and indexes of the later versions are
+created and ``meta.schema_version`` becomes 5. While a work of it is under
+a live lease (see Writers and leases), which only a process of the older
+version can hold, the opening refuses with :class:`StoreBusyError` and
+migrates nothing; a dead holder's lease does not refuse it. The read-only
 functions read an older store as one without the later tables' rows.
 
 Writers and leases. Every write is one short ``BEGIN IMMEDIATE`` transaction
@@ -248,6 +250,7 @@ from chronodownloader.sqlite import (
 )
 
 from . import _promotion
+from ._disk import FolderListing
 from ._liveness import own_creation, process_alive
 from ._promotion import Move
 from .paths import STAGING_DIR, inspect_dir
@@ -293,8 +296,11 @@ __all__ = [
     "check_schema",
     "read_candidates",
     "read_files",
+    "read_files_by_work",
     "read_gate_checks",
+    "read_item_works",
     "read_page_labels",
+    "read_page_labels_by_work",
     "read_title_page_picks",
     "read_title_page_readings",
     "read_work_candidates",
@@ -307,7 +313,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 DATABASE_NAME: Final = "chronodownloader.sqlite"
-SCHEMA_VERSION: Final = 4
+SCHEMA_VERSION: Final = 5
 PICK_THRESHOLD: Final = 0.5
 PICK_SEARCH: Final = 10
 """The ``title_page_picks`` rule; equal to ``page_types.TITLE_PAGE_THRESHOLD``
@@ -642,7 +648,14 @@ WHERE c.check_id = (
 )
 """The table and view version 4 adds."""
 
-_MIGRATIONS: Final = {2: _SCHEMA_V2, 3: _SCHEMA_V3, 4: _SCHEMA_V4}
+_SCHEMA_V5: Final = (
+    "CREATE INDEX works_by_selected ON works (selected_candidate)",
+    "CREATE INDEX attempts_by_candidate ON attempts (candidate_id)",
+)
+"""The indexes version 5 adds: without them the foreign-key check of every
+deleted candidate scans ``works`` and ``attempts``."""
+
+_MIGRATIONS: Final = {2: _SCHEMA_V2, 3: _SCHEMA_V3, 4: _SCHEMA_V4, 5: _SCHEMA_V5}
 """The statements that bring a store to each version from the one before."""
 
 _PATH_TABLES: Final = ("page_labels", "title_pages")
@@ -1226,22 +1239,28 @@ def _initialize(
     """Create a missing schema or migrate an older store, in one transaction.
 
     Without *migrate* an existing store stays at its version. An older store
-    is not migrated while a work's lease is unexpired at *now*: only a
+    is not migrated while a work's lease is live at *now* (unexpired, its
+    holder not a dead process on this host, :func:`_dead_holder`): only a
     process of that older version can hold it, and it keeps writing as such.
 
     Raises:
-        StoreBusyError: An older store has a work under an unexpired lease.
+        StoreBusyError: An older store has a work under a live lease.
     """
     version = _schema_version(connection, path)
     if version == SCHEMA_VERSION or (version is not None and not migrate):
         return
     if version is not None:
-        leased = connection.execute(
-            "SELECT count(*) FROM works WHERE lease_holder IS NOT NULL "
-            "AND lease_expires_at > ?",
-            (now,),
-        ).fetchone()[0]
-        if leased:
+        leased = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT entry_id FROM works WHERE lease_holder IS NOT NULL "
+                "AND lease_expires_at > ?",
+                (now,),
+            )
+        ]
+        if any(
+            _dead_holder(connection, entry_id, None, now) is None for entry_id in leased
+        ):
             raise StoreBusyError(
                 f"{path}: a run of an older chronodownloader holds works in this "
                 "store; let it finish, then rerun."
@@ -2227,13 +2246,19 @@ class Store:
     def reconcile(self) -> Reconciliation:
         """Repair the store against the disk (module docstring, Reconciliation).
 
-        Each work needing repair is settled in its own transaction, which
-        re-reads its lease and skips it while a live run holds it.
+        A work needs repair when a recorded file is missing or a staging
+        folder is left, judged from one listing of each of its folders
+        (:class:`~chronodownloader.output._disk.FolderListing`). Each such
+        work is settled in its own transaction, which re-reads its lease,
+        skips it while a live run holds it and checks each file again.
         """
-        works = self._query("SELECT entry_id, folder FROM works ORDER BY entry_id")
+        connection = self._connection()
+        works = connection.execute(
+            "SELECT entry_id, folder FROM works ORDER BY entry_id"
+        ).fetchall()
         recorded: dict[str, list[str]] = {}
-        for row in self._query("SELECT entry_id, path FROM files"):
-            recorded.setdefault(row["entry_id"], []).append(row["path"])
+        for entry_id, path in connection.execute("SELECT entry_id, path FROM files"):
+            recorded.setdefault(entry_id, []).append(path)
         report: dict[str, list[Any]] = {
             "missing": [],
             "rolled_back": [],
@@ -2241,19 +2266,17 @@ class Store:
             "downgraded": [],
             "live": [],
         }
-        for work in works:
-            entry_id, folder = str(work["entry_id"]), str(work["folder"])
-            work_dir = self._work_dir(folder)
-            gaps = [
-                path
-                for path in recorded.get(entry_id, [])
-                if not (work_dir / path).is_file()
-            ]
-            if not gaps and not _promotion.generation_dirs(work_dir):
+        for entry_id, folder in works:
+            work_dir = self._work_dir(str(folder))
+            listing = FolderListing(work_dir)
+            gaps = not all(map(listing.is_file, recorded.get(entry_id, ())))
+            if not gaps and not (
+                listing.may_hold(STAGING_DIR) and _promotion.generation_dirs(work_dir)
+            ):
                 continue
             found = self._transact(
                 functools.partial(
-                    self._reconcile_work, entry_id=entry_id, work_dir=work_dir
+                    self._reconcile_work, entry_id=str(entry_id), work_dir=work_dir
                 )
             )
             for key, values in found.items():
@@ -2625,10 +2648,13 @@ def _attempt_row(row: Mapping[str, Any]) -> AttemptRow:
     )
 
 
+_LABEL_COLUMNS = (
+    "path, attempt_id, page_index, page_type, probabilities, "
+    "taxonomy_version, profile, model, dialect, fingerprint, run_id, created_at"
+)
 _LABELS = (
-    "SELECT path, attempt_id, page_index, page_type, probabilities, "
-    "taxonomy_version, profile, model, dialect, fingerprint, run_id, created_at "
-    "FROM page_labels WHERE entry_id = ? ORDER BY page_index, path"
+    f"SELECT {_LABEL_COLUMNS} FROM page_labels WHERE entry_id = ? "  # noqa: S608
+    "ORDER BY page_index, path"
 )
 
 
@@ -2745,6 +2771,32 @@ def read_work_candidates(
     )
 
 
+def read_item_works(
+    root: Path,
+    provider: str,
+    source_id: str,
+    *,
+    busy_timeout: float = DEFAULT_BUSY_TIMEOUT,
+) -> list[str]:
+    """Return the works of *root* whose current candidates include the item.
+
+    The entry ids come in the order of their candidates' ids, never writing.
+
+    Raises:
+        StoreError: The database is versionless, newer or unreadable.
+    """
+    # Without ORDER BY the scan stays on the partial index candidates_current.
+    rows = _read_view(
+        root,
+        "SELECT entry_id, candidate_id FROM work_candidates WHERE provider = ? "
+        "AND source_id = ? AND current",
+        (provider, source_id),
+        busy_timeout,
+    )
+    rows.sort(key=lambda row: int(row["candidate_id"]))
+    return list(dict.fromkeys(str(row["entry_id"]) for row in rows))
+
+
 def read_candidates(
     root: Path, entry_id: str, *, busy_timeout: float = DEFAULT_BUSY_TIMEOUT
 ) -> list[CandidateRow]:
@@ -2798,6 +2850,113 @@ def read_page_labels(
     return [_page_label(row) for row in rows]
 
 
+def _selection(entry_ids: Sequence[str] | None) -> tuple[str, tuple[str, ...]]:
+    """Return the WHERE clause and parameters that limit rows to *entry_ids*."""
+    if entry_ids is None:
+        return "", ()
+    return (
+        " WHERE entry_id IN (SELECT value FROM json_each(?))",
+        (json.dumps(list(entry_ids)),),
+    )
+
+
+def read_files_by_work(
+    root: Path,
+    entry_ids: Sequence[str] | None = None,
+    *,
+    busy_timeout: float = DEFAULT_BUSY_TIMEOUT,
+) -> dict[str, list[FileRow]]:
+    """Return the recorded files of *root* by work, by path, in one read.
+
+    Each work's list is the one :func:`read_files` returns; *entry_ids*
+    limits the works, and a work without files is absent.
+
+    Raises:
+        StoreError: The database is versionless, newer or unreadable.
+    """
+    where, params = _selection(entry_ids)
+    rows = _read_view(
+        root,
+        f"SELECT * FROM files{where} ORDER BY entry_id, path",  # noqa: S608
+        params,
+        busy_timeout,
+    )
+    grouped: dict[str, list[FileRow]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["entry_id"]), []).append(FileRow(**row))
+    return grouped
+
+
+def read_page_labels_by_work(
+    root: Path,
+    entry_ids: Sequence[str] | None = None,
+    *,
+    busy_timeout: float = DEFAULT_BUSY_TIMEOUT,
+) -> dict[str, list[PageLabel]]:
+    """Return the page labels of *root* by work, in one read.
+
+    Each work's list is the one :func:`read_page_labels` returns; *entry_ids*
+    limits the works, and a work without labels is absent.
+
+    Raises:
+        StoreError: The database is versionless, newer or unreadable.
+    """
+    where, params = _selection(entry_ids)
+    rows = _read_view(
+        root,
+        f"SELECT entry_id, {_LABEL_COLUMNS} FROM page_labels{where} "  # noqa: S608
+        "ORDER BY entry_id, page_index, path",
+        params,
+        busy_timeout,
+        since=2,
+    )
+    grouped: dict[str, list[PageLabel]] = {}
+    for row in rows:
+        entry_id = str(row.pop("entry_id"))
+        grouped.setdefault(entry_id, []).append(_page_label(row))
+    return grouped
+
+
+_PER_ID_LIMIT: Final = 1000
+"""Selections below this many works read a title-page view once per id.
+
+SQLite does not push ``IN (SELECT value FROM json_each(?))`` into the views'
+window functions, so that form computes the view for every work; ``entry_id
+= ?`` reaches one work's rows only."""
+
+
+def _read_selected(
+    root: Path,
+    view: str,
+    entry_ids: Sequence[str] | None,
+    busy_timeout: float,
+    since: int,
+) -> list[dict[str, Any]]:
+    """Return the rows of *view* for *entry_ids* (all when None) by entry id."""
+    wanted = None if entry_ids is None else sorted(set(entry_ids))
+    if wanted is None or len(wanted) >= _PER_ID_LIMIT:
+        where, params = _selection(wanted)
+        sql = f"SELECT * FROM {view}{where} ORDER BY entry_id"  # noqa: S608
+        return _read_view(root, sql, params, busy_timeout, since=since)
+    path = Path(root) / DATABASE_NAME
+    version = check_schema(path, busy_timeout=busy_timeout)
+    if version is None or version < since or not wanted:
+        return []
+
+    def query(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for entry_id in wanted:
+            cursor = connection.execute(
+                f"SELECT * FROM {view} WHERE entry_id = ?",  # noqa: S608
+                (entry_id,),
+            )
+            names = [description[0] for description in cursor.description]
+            rows += [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+        return rows
+
+    return read(path, query, busy_timeout=busy_timeout)
+
+
 def read_title_page_picks(
     root: Path,
     entry_ids: Sequence[str] | None = None,
@@ -2811,12 +2970,7 @@ def read_title_page_picks(
     Raises:
         StoreError: The database is versionless, newer or unreadable.
     """
-    sql = "SELECT * FROM title_page_picks"
-    params: tuple[str, ...] = ()
-    if entry_ids is not None:
-        sql += " WHERE entry_id IN (SELECT value FROM json_each(?))"
-        params = (json.dumps(list(entry_ids)),)
-    return _read_view(root, sql + " ORDER BY entry_id", params, busy_timeout, since=2)
+    return _read_selected(root, "title_page_picks", entry_ids, busy_timeout, 2)
 
 
 def read_gate_checks(
@@ -2855,12 +3009,7 @@ def read_title_page_readings(
     Raises:
         StoreError: The database is versionless, newer or unreadable.
     """
-    sql = "SELECT * FROM title_page_readings"
-    params: tuple[str, ...] = ()
-    if entry_ids is not None:
-        sql += " WHERE entry_id IN (SELECT value FROM json_each(?))"
-        params = (json.dumps(list(entry_ids)),)
-    return _read_view(root, sql + " ORDER BY entry_id", params, busy_timeout, since=3)
+    return _read_selected(root, "title_page_readings", entry_ids, busy_timeout, 3)
 
 
 def unstored_folders(

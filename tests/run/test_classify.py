@@ -22,6 +22,7 @@ import pytest
 import requests
 from PIL import Image
 
+from chronodownloader import _classify
 from chronodownloader import run as core
 from chronodownloader._classify import source_pages
 from chronodownloader.cli.summary import report_fields
@@ -329,6 +330,78 @@ def test_a_rerun_skips_current_labels_and_force_asks_again(
     resized = DecisionSession()
     classify(other, resized, output=out)
     assert max(resized.images()[0].size) == 512
+
+
+def _generation(out: Path, entry_id: str = "E1") -> int:
+    with contextlib.closing(sqlite3.connect(out / DATABASE_NAME)) as connection:
+        (generation,) = connection.execute(
+            "SELECT lease_generation FROM works WHERE entry_id = ?", (entry_id,)
+        ).fetchone()
+    return int(generation)
+
+
+def test_a_rerun_with_nothing_to_ask_takes_no_lease_but_sees_the_disk(
+    tmp_path: Path, settings: Settings, out: Path
+) -> None:
+    downloaded(tmp_path, settings, out)
+    first = classify(settings, DecisionSession(), output=out)
+    assert isinstance(first.report, core.ClassifyReport)
+    generation = _generation(out)
+
+    again = DecisionSession()
+    result = classify(settings, again, output=out)
+
+    assert (again.calls, again.chats, _generation(out)) == ([], [], generation)
+    assert result.counts == core.WorkCounts(total=2, complete=1, skipped=1)
+    assert isinstance(result.report, core.ClassifyReport)
+    expected = replace(first.report.works[0], asked=0, current=4, labelled=0)
+    assert result.report.works == (
+        replace(expected, transcribed=False),
+        first.report.works[1],
+    )
+
+    (_folder(out, "E1") / path_of(out, "p00004")).unlink()
+    gone = classify(settings, DecisionSession(), output=out, entry_ids=("E1",))
+    assert isinstance(gone.report, core.ClassifyReport)
+    (work,) = gone.report.works
+    assert (work.outcome, work.pages, work.current, work.asked) == ("complete", 3, 3, 0)
+    assert work.labelled_leading == 3 and work.title == "Le cuisinier françois"
+    assert _generation(out) == generation
+
+    other = Store(out)
+    other.begin_run("download", run_id="other")
+    assert other.acquire(WorkInput("E1", "x"), work.folder) is not None
+    try:
+        held = classify(settings, DecisionSession(), output=out, entry_ids=("E1",))
+    finally:
+        other.close()
+    assert held.counts == core.WorkCounts(total=1, blocked=1)
+
+
+def test_the_report_reads_the_picks_after_the_work_is_settled(
+    tmp_path: Path, settings: Settings, out: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    downloaded(tmp_path, settings, out)
+    classify(settings, DecisionSession(), output=out)
+    original = _classify._Classifier.run
+
+    def run_then_change(self: Any, works: Any) -> Any:
+        done = original(self, works)
+        other = Store(out)
+        other.begin_run("fetch", run_id="other")
+        lease = other.acquire(WorkInput("E1", "x"), done[0].folder, update=False)
+        assert lease is not None
+        assert other.remove_files(lease, [path_of(out, "p00002")])
+        other.close()
+        return done
+
+    monkeypatch.setattr(_classify._Classifier, "run", run_then_change)
+    result = classify(settings, DecisionSession(), output=out, entry_ids=("E1",))
+
+    assert isinstance(result.report, core.ClassifyReport)
+    (work,) = result.report.works
+    assert (work.outcome, work.current, work.asked) == ("complete", 4, 0)
+    assert (work.title_page, work.title) == (None, None)
 
 
 def test_pages_go_in_groups_of_pages_per_request(

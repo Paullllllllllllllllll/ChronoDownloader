@@ -13,9 +13,14 @@ would ask.
 
 Run. A work is classified under its lease, taken without writing input
 fields, which the run's lease keeper renews while the work's requests are
-out; a work another run holds is counted ``blocked``. The request context is
-the works row read under the lease. Before a work's pages are asked, its
-labels of another request fingerprint are deleted, so an interrupted
+out; a work another run holds is counted ``blocked``. Without ``--force``, a
+work whose lease is free and that has nothing to ask (every page labelled
+current, no title page to read, no stored reading to drop), judged by reads
+after the opening's reconciliation, is counted as it would be under its
+lease, without taking it; a run that changes the work meanwhile leaves it
+to the next ``classify``. The request context is the works row read under
+the lease. Before a work's pages are asked, its labels of another request
+fingerprint are deleted, so an interrupted
 reclassification with other settings shows as incomplete rather than as a
 mix of two requests. At most ``judge.network.slots`` works are in flight.
 Each work's pages to ask are split into consecutive groups of up to
@@ -88,8 +93,8 @@ from chronodownloader.output.store import (
     StoreError,
     TitlePageReading,
     WorkInput,
-    read_files,
-    read_page_labels,
+    read_files_by_work,
+    read_page_labels_by_work,
     read_title_page_picks,
     read_title_page_readings,
 )
@@ -259,15 +264,19 @@ def plan_classify(
     if absent:
         warnings.append(f"entry ids not in the store: {', '.join(absent)}")
     key = fingerprint(target, settings.decisions)
+    files = _read(functools.partial(read_files_by_work, root, list(rows)))
+    pages_of = {entry_id: source_pages(files.get(entry_id, [])) for entry_id in rows}
+    with_pages = [entry_id for entry_id, pages in pages_of.items() if pages]
+    labels_of = _read(functools.partial(read_page_labels_by_work, root, with_pages))
     works: list[ClassifiedWork] = []
     planned: list[PlannedWork] = []
     for entry_id, row in rows.items():
         folder = str(row["folder"])
-        pages = source_pages(_read(functools.partial(read_files, root, entry_id)))
+        pages = pages_of[entry_id]
         if not pages:
             works.append(ClassifiedWork(entry_id, folder, "skipped", note=NO_IMAGES))
             continue
-        labels = _read(functools.partial(read_page_labels, root, entry_id))
+        labels = labels_of.get(entry_id, [])
         asked = len(_to_ask(pages, labels, key, spec.force))
         works.append(
             ClassifiedWork(
@@ -281,7 +290,8 @@ def plan_classify(
         )
         planned.append(PlannedWork(_work_input(row), folder, str(row["status"])))
     report = ClassifyReport(
-        _with_picks(root, works),
+        # A run reports the picks it reads after its work; only a dry run shows these.
+        _with_picks(root, works) if spec.run.dry_run else tuple(works),
         model=target.model,
         dialect=target.dialect,
         endpoint=target.endpoint,
@@ -384,6 +394,40 @@ class _Pick:
     path: str
     attempt_id: int
     page_index: int
+
+
+def _title_choice(
+    row: Mapping[str, Any] | None,
+    files: Sequence[FileRow],
+    stored: TitlePageReading | None,
+    model: str,
+    force: bool,
+) -> tuple[_Pick | None, bool]:
+    """Return the page whose title-page reading to ask and whether none is picked.
+
+    *row* is the work's ``title_page_picks`` row, *files* its files and
+    *stored* its stored reading. The page is None when there is nothing to
+    read: the view picks no page, a leading page lacks a current label, or
+    the stored reading is current (unless *force*). Only the second value
+    says the view picks no page, so that a stored reading goes.
+    """
+    if row is None or row["path"] is None:
+        return None, True
+    if row["pages_labelled"] != row["pages_leading"]:
+        return None, False
+    path = str(row["path"])
+    attempt = next((file.attempt_id for file in files if file.path == path), None)
+    if attempt is None:
+        return None, False
+    current = stored is not None and (
+        stored.path,
+        stored.attempt_id,
+        stored.model,
+        stored.prompt_version,
+    ) == (path, attempt, model, PROMPT_VERSION)
+    if current and not force:
+        return None, False
+    return _Pick(path, attempt, int(row["page_index"])), False
 
 
 @dataclass(frozen=True)
@@ -510,7 +554,11 @@ class _Usage:
 
 
 class _Classifier:
-    """The main-thread loop of a ``classify`` run over one store."""
+    """The main-thread loop of a ``classify`` run over one store.
+
+    With *settled_unleased*, a work whose lease is free and that has nothing
+    to ask (:meth:`_settled`) is counted without taking its lease.
+    """
 
     def __init__(
         self,
@@ -521,6 +569,7 @@ class _Classifier:
         *,
         force: bool,
         window: int,
+        settled_unleased: bool = False,
     ) -> None:
         self.store = store
         self.services = services
@@ -528,6 +577,7 @@ class _Classifier:
         self.reader = reader
         self.force = force
         self.window = window
+        self.settled_unleased = settled_unleased
         self.usage = _Usage()
         self.title_usage = _Usage()
         # A group of labels carries its page count; a title-page reading None.
@@ -584,33 +634,17 @@ class _Classifier:
         """
         assert self.reader is not None
         entry_id = job.planned.work.entry_id
-        row = self.store.title_page_pick(entry_id)
-        if row is None or row["path"] is None:
-            self.store.drop_title_page(job.lease)
-            return None
-        if row["pages_labelled"] != row["pages_leading"]:
-            return None
-        path = str(row["path"])
-        attempt = next(
-            (
-                file.attempt_id
-                for file in self.store.files(entry_id)
-                if file.path == path
-            ),
-            None,
+        store = self.store
+        pick, unpicked = _title_choice(
+            store.title_page_pick(entry_id),
+            store.files(entry_id),
+            store.title_page(entry_id),
+            self.reader.model,
+            self.force,
         )
-        if attempt is None:
-            return None
-        stored = self.store.title_page(entry_id)
-        current = stored is not None and (
-            stored.path,
-            stored.attempt_id,
-            stored.model,
-            stored.prompt_version,
-        ) == (path, attempt, self.reader.model, PROMPT_VERSION)
-        if current and not self.force:
-            return None
-        return _Pick(path, attempt, int(row["page_index"]))
+        if unpicked:
+            store.drop_title_page(job.lease)
+        return pick
 
     def _settle_title(self, job: _InFlight, future: Future[_Read]) -> None:
         try:
@@ -641,8 +675,56 @@ class _Classifier:
             job.title_failed = True
             job.notes.append("title page reading stale: its file changed")
 
+    def _settled(self, planned: PlannedWork) -> ClassifiedWork | None:
+        """Return the outcome of a work with nothing to ask, read without its lease.
+
+        The outcome is the one the work would get under its lease. None
+        sends the work to its lease: it is not in the store, another run's
+        lease on it is unexpired, or it has a page without a current label,
+        a title page to read or a stored reading to drop. A run that changes the work
+        meanwhile leaves it to the next ``classify``.
+        """
+        store = self.store
+        entry_id = planned.work.entry_id
+        work = store.work(entry_id)
+        if work is None:
+            return None
+        expires = work.lease_expires_at
+        if (
+            work.lease_holder is not None
+            and expires is not None
+            and expires > store.clock()
+        ):
+            return None
+        files = store.files(entry_id)
+        pages = source_pages(files)
+        if not pages:
+            return ClassifiedWork(entry_id, work.folder, "skipped", note=NO_IMAGES)
+        labels = store.page_labels(entry_id)
+        if _to_ask(pages, labels, self.classifier.fingerprint, self.force):
+            return None
+        if self.reader is not None:
+            stored = store.title_page(entry_id)
+            pick, unpicked = _title_choice(
+                store.title_page_pick(entry_id),
+                files,
+                stored,
+                self.reader.model,
+                self.force,
+            )
+            if pick is not None or (unpicked and stored is not None):
+                return None
+        return ClassifiedWork(
+            entry_id, work.folder, "complete", pages=len(pages), current=len(pages)
+        )
+
     def _start(self, planned: PlannedWork) -> None:
         entry_id = planned.work.entry_id
+        if self.settled_unleased:
+            settled = self._settled(planned)
+            if settled is not None:
+                self._done[entry_id] = settled
+                return
         try:
             lease = self.store.acquire(
                 planned.work,
@@ -781,7 +863,13 @@ def run_classify(run_plan: RunPlan, wiring: Wiring) -> RunResult:
                 tool_version=tool_version(),
             )
             loop = _Classifier(
-                store, services, classifier, reader, force=spec.force, window=window
+                store,
+                services,
+                classifier,
+                reader,
+                force=spec.force,
+                window=window,
+                settled_unleased=not spec.force,
             )
             with store.keeper(on_lost=_lost):
                 classified = {work.entry_id: work for work in loop.run(run_plan.works)}

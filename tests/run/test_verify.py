@@ -134,6 +134,35 @@ def test_a_file_of_another_size_is_reported_and_kept(
     assert status(out, "E2") == "complete"
 
 
+def test_a_folder_in_a_files_place_is_missing_and_a_case_rename_as_the_disk_says(
+    tmp_path: Path, settings: Settings, out: Path
+) -> None:
+    downloaded(tmp_path, settings, out)
+    folder = page_path(out, "E1", "p00002")
+    folder.unlink()
+    folder.mkdir()
+    renamed = page_path(out, "E2", "p00001")
+    renamed.rename(renamed.with_name(renamed.name.upper()))
+    # On a case-insensitive file system the recorded name still finds the file.
+    found = renamed.is_file()
+    gone = {
+        "E1": (folder.relative_to(folder.parents[1]).as_posix(),),
+        "E2": () if found else (renamed.relative_to(renamed.parents[1]).as_posix(),),
+    }
+
+    planned = core.plan(resolve_verify({"output": out, "dry_run": True}).spec, settings)
+    result = verify(settings, output=out)
+
+    for report in (planned.report, result.report):
+        assert isinstance(report, core.VerifyReport)
+        assert {work.entry_id: work.missing for work in report.works} == gone
+        assert all(work.mismatched == () for work in report.works)
+    assert result.counts == core.WorkCounts(
+        total=2, complete=1 if found else 0, failed=1 if found else 2
+    )
+    assert status(out, "E2") == ("complete" if found else "partial")
+
+
 def test_pages_asks_the_page_check_over_the_first_page_files(
     tmp_path: Path, settings: Settings, out: Path
 ) -> None:
