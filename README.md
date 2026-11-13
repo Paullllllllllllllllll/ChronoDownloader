@@ -1,4 +1,4 @@
-# ChronoDownloader v1.6.0
+# ChronoDownloader v1.7.0
 
 <img src="assets/logo.svg" alt="ChronoDownloader logo" width="64" align="right">
 
@@ -145,7 +145,16 @@ a work already matched. The CSV is never rewritten.
 A work is processed in three steps: matching (search, text score, judgment), the
 decision (see Matching), and for an accepted work the download. `--concurrency`
 works run at once; the providers of one work are searched one after another,
-each under `--search-timeout`. A download fetches what `--format` names and
+each under `--search-timeout`. A search that passes its timeout sends no further
+request. A timeout counts against the provider when its requests were in flight
+for at least half the timeout, not when the search only waited for its pacing
+turn. After three such timeouts of one provider in a row, the run leaves that
+provider out of its searches for the provider's `circuit_breaker_cooldown_s`,
+with a warning, and then searches it again. A provider left out counts as a
+failed search: a work found nowhere else ends `failed`, and a later run searches
+it again. A provider with a `min_search_timeout_s` (Gallica) is never left out,
+and downloads and other runs are unaffected. A download fetches what `--format`
+names and
 counts every expected page or file: a work whose expected items are all present,
 within the page limit, is `complete`; one with some of them is `partial`; one with
 none is `failed`, with the cause recorded. When the preferred candidate yields no
@@ -1068,7 +1077,7 @@ the staging folder. On opening, the store also removes stale staging folders,
 deletes the records of files missing on disk and turns a `complete` work that
 lost a file into `partial`. A database that holds tables but no schema version,
 a newer schema or an unreadable file is refused with exit 2 and left unchanged; a
-store of schema version 1 to 3 is migrated to version 4 in place when a command
+store of schema version 1 to 4 is migrated to version 5 in place when a command
 that writes opens it, unless a run of an older version still holds a work's
 lease, which is refused with exit 2 until that run ends.
 
@@ -1109,7 +1118,9 @@ machine:
 
 The decision model's endpoint is paced, slotted and breaker-checked as provider
 `judge`, and the requests of `classify` and the gate as provider `classify`, with
-the same `judge.network` policy and slot limit but a breaker of their own. A
+the same `judge.network` policy and slot limit but a breaker of their own. On
+`judge`, an HTTP 402 (credit spent) counts as a failure like a 401 or 403, so
+the breaker opens and the remaining works fail without a further request. A
 request to the host of another provider (a Europeana record's images on
 `gallica.bnf.fr`) is paced and counted under that provider. A database that stays
 locked longer than `busy_timeout_s` ends the operation with an error.
@@ -1197,7 +1208,8 @@ The core never prints, prompts or exits; it reports through run events, and only
 never import `output/` or `matching/`, and `coord.py` and `net/` never import
 `providers/`; `tests/core/test_architecture.py` enforces these rules. The core is
 synchronous: a run owns one thread pool for its works and daemon threads for
-searches, so a stalled search never delays the process's exit.
+searches, so a stalled search never delays the process's exit; a search abandoned
+at its timeout is cancelled and starts no further request.
 
 ## Development
 

@@ -1,5 +1,26 @@
 # Changelog
 
+- **v1.7.0** (14 November 2026) -- Performance release after an audit; pacing,
+  slots, breakers, quota and leases are unchanged. The store is schema version 5:
+  two indexes on the candidate foreign keys, added by an in-place migration from
+  versions 1 to 4, cut a `drop` of 600 works in a store of 10,000 from 94.5 s
+  under the write lock to 0.14 s. An older install refuses a version 5 root, so
+  let its runs finish before opening their root with this version. `verify`,
+  `classify` and `inspect` read the store once per root instead of once per work,
+  and every store open reconciles from one directory listing per work folder: at
+  10,000 works `verify` takes 8.2 s instead of 41.5 s, a `classify` re-run with
+  nothing to ask 17.4 s instead of 45.2 s (it takes no lease for such a work),
+  and a store open 1.5 s instead of 4.4 s. The coordinator pools its connections
+  in place of keeping one per search thread, which held 1,278 MB after 8,000
+  searches. Within an item, a IIIF page is asked first for the size form that
+  worked for the previous page, which halves the requests for Internet Archive
+  page images, and the connection survives a refused size. A search that passes
+  its timeout is cancelled and sends nothing further. After three timeouts in a
+  row in which a provider's requests were in flight for at least half the
+  timeout, the run leaves that provider out of its searches for the provider's
+  breaker cooldown; a provider with a `min_search_timeout_s` (Gallica) is exempt,
+  and a work found nowhere else stays `failed` for a later run. An HTTP 402 from
+  the judge endpoint opens the judge breaker like a 401 or 403.
 - **v1.6.0** (7 November 2026) -- Refreshed dependencies within their current
   majors: upgraded the dev-group stub package `types-pyyaml` from 6.0.12.20261030
   to 6.0.12.20261103 and raised its floor to match. No dependencies were removed
