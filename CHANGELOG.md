@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.8.0** (14 November 2026) -- The repository ships a skill for coding agents
+  in `skills/chronodownloader/`. `SKILL.md` gives the steps of a job (provider
+  check, dry run, search, run, verify), the conventions for settings, output roots
+  and the store, and a troubleshooting table; `review.md` is the brief for an agent
+  that settles a review queue. The skill defers to the README and `--help` for
+  flags and behavior, and the README's Agent Workflow section says how to install
+  it. The tool's code and behavior are unchanged.
 - **v1.7.1** (14 November 2026) -- A search repeated without the creator no
   longer sends requests the first search already sent. Within one provider
   search, a GET repeated with the same URL, parameters and headers gets its

@@ -1,4 +1,4 @@
-# ChronoDownloader v1.7.1
+# ChronoDownloader v1.8.0
 
 <img src="assets/logo.svg" alt="ChronoDownloader logo" width="64" align="right">
 
@@ -1151,6 +1151,15 @@ candidates' first pages and reports the page model's answers, and `fetch
 --reason` downloads the chosen item and records why. A `deferred` work is taken
 again after its `retry_after`; a `blocked` one by a later run. An agent stops on
 an open breaker or a spent quota (`providers` shows both) and resumes later.
+
+`skills/chronodownloader/` packages this workflow as a skill for coding agents such
+as Claude Code. `SKILL.md` gives the steps of a job (provider check, dry run,
+search, run, verify), the conventions for settings, output roots and the store, and
+a troubleshooting table; `review.md` is the brief for an agent that settles a
+review queue. To install it, copy or link the folder into the agent's skills folder,
+for Claude Code `~/.claude/skills/chronodownloader/`. The skill runs the tool from a
+clone set up as in Installation and defers to this README and `--help` for flags
+and behavior.
 
 ## Logging
 
