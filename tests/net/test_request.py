@@ -1214,3 +1214,88 @@ class TestCancellation:
             other.start()
             other.join(5.0)
         assert statuses == [200]
+
+
+class TestAnswerReuse:
+    """A scope built with reuse_answers sends a repeated GET once."""
+
+    def test_a_repeated_get_is_sent_paced_and_recorded_once(
+        self,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        url = server.script("/search", Reply(200, b"first"), Reply(200, b"second"))
+        client = make_network(settings_with())
+        with client.scoped(CallScope(reuse_answers=True)):
+            first = client.request("mdz", "GET", url, params={"q": "a", "n": 5})
+            again = client.request("mdz", "GET", url, params={"n": 5, "q": "a"})
+        assert again is first
+        assert again.content == b"first"
+        assert len(server.arrivals) == 1
+        assert len(coordinator.reservations) == 1
+        assert coordinator.successes == ["mdz"]
+
+    def test_another_request_is_sent(
+        self, server: ScriptedServer, make_network: NetworkFactory
+    ) -> None:
+        url = server.script("/search", Reply(200))
+        client = make_network(settings_with())
+        with client.scoped(CallScope(reuse_answers=True)):
+            client.request("mdz", "GET", url, params={"q": "a"})
+            client.request("mdz", "GET", url, params={"q": "b"})
+            client.request("mdz", "GET", url, params={"q": "a"}, headers={"X": "1"})
+            client.request("mdz", "POST", url, params={"q": "a"})
+            client.request("mdz", "POST", url, params={"q": "a"})
+        assert len(server.arrivals) == 5
+
+    def test_a_scope_without_reuse_sends_every_request(
+        self, server: ScriptedServer, make_network: NetworkFactory
+    ) -> None:
+        url = server.script("/search", Reply(200))
+        client = make_network(settings_with())
+        with client.scoped(CallScope()):
+            client.request("mdz", "GET", url)
+            client.request("mdz", "GET", url)
+        client.request("mdz", "GET", url)
+        assert server.hits("/search") == 3
+
+    def test_a_failed_request_is_not_kept(
+        self, server: ScriptedServer, make_network: NetworkFactory
+    ) -> None:
+        url = server.script("/search", Reply(404), Reply(200, b"found"))
+        client = make_network(settings_with())
+        with client.scoped(CallScope(reuse_answers=True)):
+            with pytest.raises(RequestFailed):
+                client.request("mdz", "GET", url)
+            assert client.request("mdz", "GET", url).content == b"found"
+        assert server.hits("/search") == 2
+
+    def test_a_cancelled_scope_gets_no_kept_answer(
+        self, server: ScriptedServer, make_network: NetworkFactory
+    ) -> None:
+        url = server.script("/search", Reply(200))
+        client = make_network(settings_with())
+        scope = CallScope(reuse_answers=True)
+        with client.scoped(scope):
+            client.request("mdz", "GET", url)
+            scope.cancel()
+            with pytest.raises(Cancelled):
+                client.request("mdz", "GET", url)
+        assert server.hits("/search") == 1
+
+    def test_a_quota_charged_request_is_sent_again(
+        self,
+        server: ScriptedServer,
+        coordinator: FakeCoordinator,
+        make_network: NetworkFactory,
+    ) -> None:
+        url = server.script("/fast", Reply(200))
+        client = make_network(
+            settings_with("annas_archive", quota=AnnasQuota(daily_limit=5))
+        )
+        with client.scoped(CallScope(reuse_answers=True)):
+            client.request("annas_archive", "GET", url, quota=True)
+            client.request("annas_archive", "GET", url, quota=True)
+        assert server.hits("/fast") == 2
+        assert coordinator.quota_used["annas_archive"] == 2

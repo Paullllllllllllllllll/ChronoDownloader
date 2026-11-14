@@ -1,5 +1,12 @@
 # Changelog
 
+- **v1.7.1** (14 November 2026) -- A search repeated without the creator no
+  longer sends requests the first search already sent. Within one provider
+  search, a GET repeated with the same URL, parameters and headers gets its
+  first answer, and nothing is sent, paced or recorded for it; a failed request
+  is sent again as before. For a work a provider does not hold, SBB receives 3
+  requests instead of 5, BNE 1 instead of 2 and Google Books 18 to 21 instead of
+  24. The other providers repeated none.
 - **v1.7.0** (14 November 2026) -- Performance release after an audit; pacing,
   slots, breakers, quota and leases are unchanged. The store is schema version 5:
   two indexes on the candidate foreign keys, added by an in-place migration from

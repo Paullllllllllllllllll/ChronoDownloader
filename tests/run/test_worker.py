@@ -23,7 +23,7 @@ from chronodownloader.output.store import WorkInput
 from chronodownloader.providers.base import SearchRecord
 from chronodownloader.providers.registry import host_key
 from chronodownloader.settings import Settings
-from tests.providers.routed import RoutedSession
+from tests.providers.routed import RoutedSession, json_route
 from tests.run.support import FakeProvider, wiring
 
 MASKED = "https://api.europeana.eu/record/v2/9200/abc.json?wskey=***"
@@ -122,3 +122,32 @@ def test_an_abandoned_search_sends_nothing_and_tries_no_other_variant(
     assert mdz.searches == ["Kochbuch / Rumpolt"]
     assert len(mdz.cancelled) == 1
     assert session.calls == []
+
+
+@dataclasses.dataclass
+class TitleOnly(FakeProvider):
+    """Sends the title alone, as BNE does, and finds nothing."""
+
+    def search(self, query: Any, *, network: Network, limit: int) -> list[Any]:
+        self.searches.append(f"{query.title} / {query.creator}")
+        network.request(
+            "mdz", "GET", "https://api.fake.test/search", params={"q": query.title}
+        )
+        return []
+
+
+def test_the_search_without_the_creator_repeats_no_request(
+    settings: Settings,
+) -> None:
+    mdz = TitleOnly("mdz")
+    session = RoutedSession({"https://api.fake.test/search": json_route({})})
+    work = WorkInput("E1", "Kochbuch", creator="Rumpolt")
+    job = MatchJob(work, (), "judge", ("mdz",), 5, search_timeout=0)
+    services = Services.open(
+        settings, wiring=wiring([mdz], session_factory=lambda: session)
+    )
+    with services:
+        match_work(services, job)
+
+    assert mdz.searches == ["Kochbuch / Rumpolt", "Kochbuch / None"]
+    assert len(session.calls) == 1

@@ -1,4 +1,4 @@
-# ChronoDownloader v1.7.0
+# ChronoDownloader v1.7.1
 
 <img src="assets/logo.svg" alt="ChronoDownloader logo" width="64" align="right">
 
@@ -854,7 +854,8 @@ Verified reachability from one machine on 23.-24.10.2026:
   the manifest URL of the same item worked.
 - A search with a creator that finds nothing is repeated without the creator,
   since catalogs file names in forms a works CSV rarely gives (Gallica files
-  Guillaume Tirel as "Taillevent").
+  Guillaume Tirel as "Taillevent"). A request the second search would repeat
+  unchanged is answered from the first search and not sent again.
 
 ## Works CSV
 

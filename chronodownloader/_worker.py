@@ -328,11 +328,14 @@ def _provider_search(
     A creator search that finds nothing is repeated without the creator.
     Catalogs file a creator under forms the works CSV rarely gives (Gallica
     has "Taillevent" for Guillaume Tirel), so the creator clause can hide every
-    copy; the judge still sees the creator in the full query. Both searches
-    share one deadline: the run's search timeout, raised to the provider's
-    ``min_search_timeout_s``; a run timeout of 0 sets none. When the deadline
-    passes, the abandoned search is cancelled: it starts no further variant
-    and the network sends none of its further requests.
+    copy; the judge still sees the creator in the full query. A request the
+    second search would send again unchanged gets the first search's answer
+    (Google Books and SBB try creator-free queries themselves, BNE never
+    sends the creator). Both searches share one deadline: the run's search
+    timeout, raised to the provider's ``min_search_timeout_s``; a run timeout
+    of 0 sets none. When the deadline passes, the abandoned search is
+    cancelled: it starts no further variant and the network sends none of its
+    further requests.
 
     Raises:
         _Overdue: The deadline passed; it says whether the provider was slow.
@@ -343,7 +346,7 @@ def _provider_search(
         floor = services.settings.providers[key].min_search_timeout_s
         timeout = max(timeout, floor)
     variants = (query, replace(query, creator=None)) if query.creator else (query,)
-    scope = CallScope()
+    scope = CallScope(reuse_answers=True)
 
     def search() -> list[SearchRecord]:
         records: list[SearchRecord] = []

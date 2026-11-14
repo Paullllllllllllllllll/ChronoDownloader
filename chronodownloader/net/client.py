@@ -39,7 +39,11 @@ reserved for an attempt that is then not sent is given back. An attempt
 that holds the half-open probe is the exception: it is sent and recorded,
 and cancellation applies again after it, so that no probe is stranded. The
 scope also adds up the seconds each request was in flight, from just before
-it is sent until its response is handled.
+it is sent until its response is handled. A scope built with
+``reuse_answers`` keeps the answer of every GET that carries no body, slot
+or quota charge; the same request made again inside the scope gets that
+answer, and nothing is sent, paced or recorded for it. Failed requests are
+not kept.
 
 Hosts of other providers. A client built with a *host_key* resolver (the
 provider registry supplies it) re-resolves the provider key for every hop,
@@ -68,7 +72,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Hashable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType, TracebackType
@@ -377,6 +381,28 @@ class _Call:
         )
 
 
+def _answer_key(call: _Call) -> Hashable | None:
+    """Return the key *call*'s answer is reused under, or None for no reuse.
+
+    Only a GET without a body, a download slot or a quota charge is reused;
+    two calls share a key when they name the same provider, URL, parameters,
+    headers, redirect rule and final statuses.
+    """
+    if call.method != "GET" or call.json is not None or call.data is not None:
+        return None
+    if call.slot is not None or call.quota is not None:
+        return None
+    params = tuple(sorted((str(k), repr(v)) for k, v in (call.params or {}).items()))
+    return (
+        call.origin,
+        call.url,
+        params,
+        tuple(sorted(call.headers.items())),
+        call.follow_redirects,
+        call.final_statuses,
+    )
+
+
 @dataclass
 class _Admission:
     """One call's breaker and quota state.
@@ -615,14 +641,27 @@ class Network:
     ) -> requests.Response:
         """Send one request and return its response, body read.
 
+        Under a scope that reuses answers, a GET the scope already sent
+        (see :func:`_answer_key`) returns the first answer and sends
+        nothing.
+
         Raises:
             BreakerOpen: The provider's breaker is open; nothing was sent.
             QuotaSpent: The call is quota-charged and the quota is spent.
             RequestFailed: The request failed; ``cause`` says why.
+            Cancelled: The thread's scope is cancelled.
             ValueError: *provider* is unknown, or quota is asked of a
                 provider without one.
         """
         call = self._call(provider, method, url, options, stream=False)
+        scope = self._scope()
+        key = _answer_key(call) if scope is not None and scope.reuses_answers else None
+        if scope is not None and key is not None:
+            known = scope.answer(key)
+            if known is not None:
+                if scope.cancelled:
+                    raise Cancelled(call.log_url)
+                return known
 
         def read(response: requests.Response, insecure: bool) -> requests.Response:
             if is_challenge(response.headers, response.content[:CHALLENGE_WINDOW]):
@@ -635,7 +674,10 @@ class Network:
                 )
             return response
 
-        return self._exchange(call, read)
+        answer = self._exchange(call, read)
+        if scope is not None and key is not None:
+            scope.keep(key, answer)
+        return answer
 
     def download(
         self,

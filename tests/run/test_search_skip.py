@@ -71,12 +71,12 @@ class Stalling(FakeProvider):
 
 @dataclasses.dataclass
 class Queued(FakeProvider):
-    """Asks :data:`FAST` twice per search, so the second waits for pacing."""
+    """Asks :data:`FAST` for two pages per search; the second waits for pacing."""
 
     def search(self, query: Any, *, network: Any, limit: int) -> list[Any]:
         self.searches.append(query.title)
-        for _ in range(2):
-            network.request(self.key, "GET", FAST)
+        for page in ("1", "2"):
+            network.request(self.key, "GET", FAST, params={"page": page})
         return []
 
 
