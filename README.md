@@ -1,4 +1,4 @@
-# ChronoDownloader v1.8.0
+# ChronoDownloader v1.8.1
 
 <img src="assets/logo.svg" alt="ChronoDownloader logo" width="64" align="right">
 
@@ -937,9 +937,9 @@ On an evaluation set of 294 pairs of a sought work and a catalog record, labeled
 by a language model and corrected where a review found a label wrong, the default
 judge model `typesafe/jev-1.14` reached .975 accuracy and made
 193 automatic decisions at .9/.1 without an error; `openai/gpt-6-luna-decisions`
-reached .971 but made 4 automatic errors and serves only as the page model. In
-live use the default model placed most other editions between .75 and .88, so
-they go to review.
+reached .971 but made 4 automatic errors and serves only as the page model. The
+default model places most other editions in the review band, so they go to
+review.
 
 ## Output Folders
 

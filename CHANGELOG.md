@@ -1,5 +1,8 @@
 # Changelog
 
+- **v1.8.1** (14 November 2026) -- The README's Matching section no longer gives
+  a score range for other editions observed in use; it states that the default
+  judge places most of them in the review band. Nothing else changed.
 - **v1.8.0** (14 November 2026) -- The repository ships a skill for coding agents
   in `skills/chronodownloader/`. `SKILL.md` gives the steps of a job (provider
   check, dry run, search, run, verify), the conventions for settings, output roots
