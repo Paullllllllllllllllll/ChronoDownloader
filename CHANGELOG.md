@@ -1,5 +1,8 @@
 # Changelog
 
+- **v1.8.2** (15 November 2026) -- The lockfile moves soupsieve, which Beautiful
+  Soup pulls in, from 2.9.2 to 2.10 for GHSA-4j63-6c4x-wfg4 (quadratic-time
+  matching of a general-sibling combinator inside `:has()`). No source change.
 - **v1.8.1** (14 November 2026) -- The README's Matching section no longer gives
   a score range for other editions observed in use; it states that the default
   judge places most of them in the review band. Nothing else changed.
