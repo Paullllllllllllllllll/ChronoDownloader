@@ -1250,8 +1250,8 @@ Every release is described in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contact
 
-ChronoDownloader is written and maintained by Paul Götz, Sociological
-Institute, University of Zurich. Write to
+ChronoDownloader is written and maintained by Paul Götz, Department of
+Sociology, University of Zurich. Write to
 [goetz@soziologie.uzh.ch](mailto:goetz@soziologie.uzh.ch) with questions, bug
 reports or collaboration requests.
 
